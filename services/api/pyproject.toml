@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "API for the synthetic Oncology Journey Command Center demo"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.13,<2",
   "fastapi>=0.115,<1",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.30,<1",
 ]
 
