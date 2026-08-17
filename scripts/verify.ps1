@@ -14,6 +14,8 @@ Push-Location $projectRoot
 try {
     Push-Location "services/api"
     try {
+        Invoke-VerificationCommand { python -m pip install --require-hashes -r requirements.lock }
+        Invoke-VerificationCommand { python -m pip install --no-deps --no-build-isolation -e . }
         Invoke-VerificationCommand { python -m ruff check . }
         Invoke-VerificationCommand { python -m pyright }
         Invoke-VerificationCommand { python -m pytest -q }

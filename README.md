@@ -7,7 +7,7 @@ A public portfolio demonstration of a synthetic-data oncology navigation workflo
 1. Copy `.env.example` to `.env` if local environment variables are needed.
 2. Install web dependencies with `npm install`.
 3. Install the Playwright browser with `npm exec --workspace apps/web playwright install chromium`.
-4. Install API dependencies with `python -m pip install -e '.\\services\\api[dev]'`.
+4. Install API dependencies with `python -m pip install --require-hashes -r .\\services\\api\\requirements.lock`, then install the local API without re-resolving dependencies using `python -m pip install --no-deps --no-build-isolation -e .\\services\\api`.
 5. Start the local database with `docker compose up -d db`.
 6. Run the full verification pipeline with `.\\scripts\\verify.ps1`.
 
