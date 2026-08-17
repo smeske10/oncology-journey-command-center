@@ -102,3 +102,59 @@ npm --workspace apps/web run test:e2e -- patient-check-in.spec.ts
 
 - Web unit, lint/build, and Playwright execution could not start because the sandbox denies Node's `lstat` of `C:\Users\smesk`. The attempted elevated test was aborted before result.
 - The existing PostgreSQL integration checks are still environment-skipped because no reachable Docker/PostgreSQL service is available. No SQLite substitute was used.
+
+## Review fix round: complete safe patient check-in journey
+
+### Corrections delivered
+
+- The browser now calls a same-origin `/api` rewrite, first creates the synthetic supporting-actor session, then loads `/v1/patient/check-ins/current` before rendering. All browser fetches use `credentials: "include"`; cookie `HttpOnly`, `SameSite`, and production `Secure` behavior are unchanged.
+- The Next rewrite target is server-side `OJCC_API_ORIGIN` (default `http://127.0.0.1:8000`), so no browser-origin CORS configuration is needed. A runnable local demo requires the Task 12 synthetic supporting actor and active check-in definition seed; the README explicitly documents that prerequisite and the API presents a safe unavailable state when it is absent.
+- The patient page consumes generated `CheckInDefinitionResponse`; its only hand-written type is a browser presentation model. The one-question flow has real progress, a persistent urgent/demo warning, local browser-draft restore, review, retry, accessible correction feedback, and final success.
+- `ApiError` classifies 422 responses as corrections and configuration/persistence failures separately. A correction returns to the question flow with an `alert`; persistence failures retain the review and retry control.
+- Server-side submission validation now uses the tenant-scoped definition as the source of truth: version must match exactly, link IDs must be known and unique, and every required item must have an answer. The immutable snapshot takes its version, canonical, and labels from that definition. Invalid requests roll back and do not commit.
+- FHIR-shaped exports now mark each Observation with an explicit `patient-supplied` provenance tag and retain optional submitted free text in a QuestionnaireResponse item. These resources remain explicitly synthetic/demo and standards-shaped only, not a production-conformance claim.
+
+### TDD evidence for fix round
+
+The first focused API/FHIR run after adding the mismatch and provenance assertions was intentionally red:
+
+```text
+4 failed, 5 passed
+- version mismatch, unknown link ID, and duplicate link ID all returned 201 rather than 422
+- FHIR Observation provenance tag assertion raised IndexError
+```
+
+After the minimal definition validation, transaction propagation, and FHIR mapper changes:
+
+```text
+tests/test_check_ins.py tests/test_fhir_mapping.py
+10 passed in 0.87s
+```
+
+The initial local Vitest attempt (including the new API bootstrap and full-flow component tests) was blocked before discovery by the managed Windows Node sandbox:
+
+```text
+EPERM: operation not permitted, lstat 'C:\\Users\\smesk'
+```
+
+The first controller-run full suite identified two real test defects, which were fixed rather than suppressed: persistence-copy apostrophe alignment and localStorage isolation between cases. The suite now clears storage in `beforeEach` and retains an explicit draft-restore test. The remaining web generator, unit, lint/build, and Playwright verification is delegated to the same approved elevated runner; no dependency installation is pending.
+
+### Fix-round verification completed locally
+
+```text
+focused API/FHIR: 10 passed in 0.87s
+full API: 28 passed, 2 skipped in 5.67s
+ruff check app tests: All checks passed!
+pyright app --pythonpath C:\\tmp\\ojcc-domain-venv\\Scripts\\python.exe: 0 errors
+scripts/export_openapi.py: exit 0
+git diff --check: exit 0 (only environment Git-daemon/CRLF warnings)
+```
+
+The two API skips remain the existing PostgreSQL/Docker-dependent integration checks. `npx --no-install openapi-typescript ...` encounters the same Node sandbox EPERM; the committed generated `api-types.ts` came from the earlier approved generator run and the refreshed artifact is ready for the final elevated regeneration.
+
+### Fix-round self-review
+
+- No client-provided version, label, canonical, unknown link, duplicate link, or missing required answer can become the immutable record.
+- No invalid submission commits; the route's unit-of-work exits through rollback before the 422 is returned.
+- The scoped FHIR test verifies a same-tenant but different patient receives 404.
+- Test doubles now respect submitted definition/submission IDs and tenant IDs, ensuring scoped repository predicates are exercised rather than silently ignored.

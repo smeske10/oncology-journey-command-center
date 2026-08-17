@@ -45,3 +45,14 @@ def test_submission_maps_to_questionnaire_response_and_observation() -> None:
     assert questionnaire_response["questionnaire"] == "https://demo.example/Questionnaire/breast-active|1"
     assert questionnaire_response["authored"] == "2026-08-17T12:00:00+00:00"
     assert bundle["meta"]["tag"][0]["code"] == "synthetic-demo"
+    observations = [
+        entry["resource"]
+        for entry in bundle["entry"]
+        if entry["resource"]["resourceType"] == "Observation"
+    ]
+    assert observations[0]["meta"]["tag"][1]["code"] == "patient-supplied"
+    assert questionnaire_response["item"][-1]["text"] == "Additional patient context"
+    assert (
+        questionnaire_response["item"][-1]["answer"][0]["valueString"]
+        == "Synthetic check-in context."
+    )

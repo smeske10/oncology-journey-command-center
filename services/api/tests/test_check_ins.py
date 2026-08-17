@@ -21,13 +21,24 @@ class FakeSession:
     definition: CheckInDefinition
     submissions: dict[UUID, CheckInSubmission] = field(default_factory=dict)
     committed: bool = False
+    rolled_back: bool = False
 
     def scalar(self, statement: Any) -> CheckInDefinition | CheckInSubmission | None:
         entity = statement.column_descriptions[0]["entity"]
+        parameters = set(statement.compile().params.values())
         if entity is CheckInDefinition:
-            return self.definition
+            if self.definition.id in parameters and self.definition.organization_id in parameters:
+                return self.definition
+            return None
         if entity is CheckInSubmission:
-            return next(iter(self.submissions.values()), None)
+            return next(
+                (
+                    submission
+                    for submission in self.submissions.values()
+                    if submission.id in parameters and submission.organization_id in parameters
+                ),
+                None,
+            )
         return None
 
     def add(self, entity: CheckInSubmission) -> None:
@@ -37,7 +48,7 @@ class FakeSession:
         self.committed = True
 
     def rollback(self) -> None:
-        return None
+        self.rolled_back = True
 
     def close(self) -> None:
         return None
@@ -60,10 +71,12 @@ def check_in_definition() -> CheckInDefinition:
         title="Weekly check-in",
         questionnaire={
             "canonical": "https://demo.example/Questionnaire/breast-active|1",
+            "version": "breast-active-v1",
             "questions": [
                 {
                     "link_id": "nausea_change",
                     "label": "Since your last check-in, is your nausea better, the same, or worse?",
+                    "required": True,
                 }
             ],
         },
@@ -118,6 +131,98 @@ def test_submit_check_in_is_atomic(
     assert response.json()["questionnaire_version"] == "breast-active-v1"
     assert session.committed is True
     assert len(session.submissions) == 1
+    submission = next(iter(session.submissions.values()))
+    assert submission.answers["questionnaire_version"] == "breast-active-v1"
+    assert submission.answers["items"] == [
+        {
+            "link_id": "nausea_change",
+            "label": "Since your last check-in, is your nausea better, the same, or worse?",
+            "value": "worse",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "answers, questionnaire_version",
+    [
+        ([{"link_id": "nausea_change", "value": "worse"}], "tampered-version"),
+        ([{"link_id": "unknown_question", "value": "worse"}], "breast-active-v1"),
+        (
+            [
+                {"link_id": "nausea_change", "value": "worse"},
+                {"link_id": "nausea_change", "value": "same"},
+            ],
+            "breast-active-v1",
+        ),
+    ],
+)
+def test_submission_rejects_definition_mismatches_without_committing(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+    answers: list[dict[str, str]],
+    questionnaire_version: str,
+) -> None:
+    """This fails if client claims can change the immutable questionnaire source record."""
+    session, _ = client_context
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": questionnaire_version,
+                    "answers": answers,
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert (
+        "does not match" in response.text
+        or "known" in response.text
+        or "repeat" in response.text
+    )
+    assert session.committed is False
+    assert session.rolled_back is True
+    assert session.submissions == {}
+
+
+def test_submission_requires_every_required_definition_answer(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """The server owns required-answer semantics, rather than trusting the form."""
+    session, _ = client_context
+    check_in_definition.questionnaire["questions"].append(
+        {"link_id": "transportation", "label": "Need a ride?", "required": True}
+    )
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert "required" in response.text
+    assert session.committed is False
+    assert session.rolled_back is True
+    assert session.submissions == {}
 
 
 def test_patient_can_export_only_own_synthetic_fhir_submission(
@@ -155,6 +260,36 @@ def test_patient_can_export_only_own_synthetic_fhir_submission(
 
     assert response.status_code == 200
     assert response.json()["resourceType"] == "Bundle"
+
+
+def test_patient_cannot_export_another_patients_submission(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if an actor can retrieve a same-tenant submission for another patient."""
+    session, actor = client_context
+    submission = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=uuid4(),
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"items": [], "provenance": {"source": "patient-supplied"}},
+    )
+    session.submissions[submission.id] = submission
+
+    async def export() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get(f"/v1/patient/check-ins/{submission.id}/fhir")
+
+    response = asyncio.run(export())
+
+    assert response.status_code == 404
 
 
 def test_submission_rejects_explicit_contact_fields_with_a_public_demo_warning(

@@ -13,6 +13,10 @@ A public portfolio demonstration of a synthetic-data oncology navigation workflo
 
 The API health endpoint is available at `GET /health` and returns `{"status":"ok"}`.
 
+## Synthetic patient demo
+
+`/demo/patient` uses a same-origin `/api` rewrite, creates a short-lived synthetic demo session, then loads the current check-in definition before allowing submission. It requires the synthetic supporting-actor and active check-in definition created by the planned Task 12 seed/reset workflow; without that seed, the page shows the safe demo-unavailable state rather than accepting an unauthenticated submission. Configure `OJCC_API_ORIGIN` only for the server-side rewrite target; browser requests remain same-origin and credentialed.
+
 ## Product design
 
 The approved design is available at [docs/product-design.md](docs/product-design.md).

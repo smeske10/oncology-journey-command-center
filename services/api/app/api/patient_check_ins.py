@@ -14,7 +14,12 @@ from app.auth.models import CurrentActor, Role
 from app.db.models import CheckInDefinition, CheckInSubmission
 from app.db.repositories import SqlAlchemyUnitOfWork, TenantScoped
 from app.db.session import get_session
-from app.domain.check_ins import CheckInSubmissionCreate, create_immutable_submission
+from app.domain.check_ins import (
+    CheckInDefinitionMismatchError,
+    CheckInSubmissionCreate,
+    create_immutable_submission,
+    questionnaire_version_for,
+)
 from app.fhir.check_in_mapper import map_check_in_to_fhir_bundle
 
 router = APIRouter(prefix="/v1/patient/check-ins", tags=["patient-check-ins"])
@@ -57,7 +62,7 @@ def get_current_check_in(
     return CheckInDefinitionResponse(
         id=definition.id,
         title=definition.title,
-        questionnaire_version=f"{definition.slug}-v{definition.version}",
+        questionnaire_version=questionnaire_version_for(definition),
         questions=questions if isinstance(questions, list) else [],
     )
 
@@ -95,6 +100,11 @@ def submit_check_in(
             )
             unit_of_work.add(cast(TenantScoped, submission))
             unit_of_work.commit()
+    except CheckInDefinitionMismatchError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
     except SQLAlchemyError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -9,6 +9,11 @@ _DEMO_TAG = {
     "code": "synthetic-demo",
     "display": "Synthetic demo data only",
 }
+_PATIENT_SUPPLIED_TAG = {
+    "system": "https://oncology-journey-command-center.example/provenance",
+    "code": "patient-supplied",
+    "display": "Patient-supplied synthetic response",
+}
 
 
 def map_check_in_to_fhir_bundle(submission: CheckInSubmission) -> dict[str, Any]:
@@ -23,7 +28,7 @@ def map_check_in_to_fhir_bundle(submission: CheckInSubmission) -> dict[str, Any]
         "subject": subject,
         "questionnaire": source_data.get("questionnaire_canonical", ""),
         "authored": submission.submitted_at.isoformat() if submission.submitted_at else None,
-        "item": [_questionnaire_item(item) for item in items if isinstance(item, dict)],
+        "item": _questionnaire_items(items, source_data.get("free_text")),
         "meta": {"tag": [_DEMO_TAG]},
     }
     entries: list[dict[str, Any]] = [{"resource": questionnaire_response}]
@@ -48,6 +53,19 @@ def _questionnaire_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _questionnaire_items(items: Any, free_text: Any) -> list[dict[str, Any]]:
+    questionnaire_items = [_questionnaire_item(item) for item in items if isinstance(item, dict)]
+    if isinstance(free_text, str) and free_text:
+        questionnaire_items.append(
+            {
+                "linkId": "additional_context",
+                "text": "Additional patient context",
+                "answer": [{"valueString": free_text}],
+            }
+        )
+    return questionnaire_items
+
+
 def _observation(
     item: dict[str, Any], subject: dict[str, str], submission: CheckInSubmission
 ) -> dict[str, Any]:
@@ -60,7 +78,7 @@ def _observation(
         ),
         "code": {"text": str(item.get("label", item.get("link_id", "")))},
         "method": {"text": "patient-supplied synthetic demo response"},
-        "meta": {"tag": [_DEMO_TAG]},
+        "meta": {"tag": [_DEMO_TAG, _PATIENT_SUPPLIED_TAG]},
     }
     observation.update(_observation_value(item.get("value")))
     return observation
