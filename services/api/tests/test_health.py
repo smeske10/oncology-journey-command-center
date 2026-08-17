@@ -17,5 +17,9 @@ def test_health_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_application_exposes_only_health_route() -> None:
-    assert {route.path for route in app.routes} == {"/health"}
+def test_application_exposes_health_and_demo_session_routes() -> None:
+    from app.api.demo_sessions import router
+
+    assert {route.path for route in app.routes if hasattr(route, "path")} == {"/health"}
+    assert "/v1/demo/session/{role}" in {route.path for route in router.routes}
+    assert any(getattr(route, "original_router", None) is router for route in app.routes)

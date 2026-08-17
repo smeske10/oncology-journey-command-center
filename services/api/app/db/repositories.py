@@ -7,6 +7,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models import SyntheticPatient
+
 TenantEntity = TypeVar("TenantEntity", bound="TenantScoped")
 
 
@@ -21,11 +23,33 @@ class UnitOfWork(Protocol):
 
     def add(self, entity: TenantScoped) -> None: ...
 
-    def get(self, model: type[TenantEntity], entity_id: UUID) -> TenantEntity | None: ...
+    def get(
+        self, model: type[TenantEntity], entity_id: UUID, *, organization_id: UUID
+    ) -> TenantEntity | None: ...
 
     def commit(self) -> None: ...
 
     def rollback(self) -> None: ...
+
+
+class PatientRepository(Protocol):
+    def get_for_actor(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> SyntheticPatient | None: ...
+
+
+class SqlAlchemyPatientRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_for_actor(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> SyntheticPatient | None:
+        statement = select(SyntheticPatient).where(
+            SyntheticPatient.id == patient_id,
+            SyntheticPatient.organization_id == organization_id,
+        )
+        return self._session.scalar(statement)
 
 
 class SqlAlchemyUnitOfWork:
@@ -53,10 +77,16 @@ class SqlAlchemyUnitOfWork:
             )
         self._require_session().add(entity)
 
-    def get(self, model: type[TenantEntity], entity_id: UUID) -> TenantEntity | None:
+    def get(
+        self, model: type[TenantEntity], entity_id: UUID, *, organization_id: UUID
+    ) -> TenantEntity | None:
+        if organization_id != self.organization_id:
+            raise ValueError(
+                "Lookup organization_id does not match the unit of work organization scope"
+            )
         statement = select(model).where(
             getattr(model, "id") == entity_id,
-            getattr(model, "organization_id") == self.organization_id,
+            getattr(model, "organization_id") == organization_id,
         )
         return cast(TenantEntity | None, self._require_session().scalar(statement))
 

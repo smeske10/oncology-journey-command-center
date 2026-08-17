@@ -42,7 +42,13 @@ def test_unit_of_work_requires_scope_and_rejects_cross_tenant_operations() -> No
         unit_of_work.add(SimpleNamespace(organization_id=organization_id))
         with pytest.raises(ValueError, match="organization scope"):
             unit_of_work.add(SimpleNamespace(organization_id=other_organization_id))
-        assert unit_of_work.get(ReportedNeed, UUID(int=1)) is None
+        with pytest.raises(TypeError):
+            unit_of_work.get(ReportedNeed, UUID(int=1))
+        assert unit_of_work.get(
+            ReportedNeed, UUID(int=1), organization_id=organization_id
+        ) is None
+        with pytest.raises(ValueError, match="organization scope"):
+            unit_of_work.get(ReportedNeed, UUID(int=1), organization_id=other_organization_id)
 
     assert session.added == [SimpleNamespace(organization_id=organization_id)]
     assert session.statement is not None
