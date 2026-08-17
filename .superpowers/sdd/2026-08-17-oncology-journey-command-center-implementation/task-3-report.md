@@ -124,3 +124,72 @@ An attempt to install only `setuptools` into that local environment was blocked 
 
 - A reachable PostgreSQL service was unavailable, so the real tenant-isolation integration test remains correctly environment-skipped. It will run unchanged once `DATABASE_URL` points to migrated PostgreSQL.
 - The full cross-stack verifier is blocked only by the local environment's missing `setuptools` bootstrap package and a blocked/interrupted attempt to install that package. Focused API tests, Ruff, Pyright, and whitespace validation completed successfully.
+
+---
+
+## Fix round 1: unavailable demo tenant configuration
+
+### Finding addressed
+
+`get_demo_session_service` previously accepted `settings.demo_organization_id=None`. The token decoder legitimately constructs a verifier-only `DemoSessionService` without an actor repository or organization, but the issuer route requires both. The missing value therefore reached `create_session()` and raised an unhandled `RuntimeError`.
+
+The issuer dependency now explicitly rejects a missing `DEMO_ORGANIZATION_ID` before creating the service. Its existing controlled configuration-error mapping returns `503` with only:
+
+```json
+{"detail":"Demo sessions are not configured"}
+```
+
+### RED evidence
+
+The endpoint regression test was added before the implementation change and run with:
+
+```powershell
+C:\tmp\ojcc-domain-venv\Scripts\python.exe -m pytest tests/test_auth.py -q -p no:cacheprovider
+```
+
+It reproduced the defect rather than returning an HTTP response:
+
+```text
+app\api\demo_sessions.py:37: in create_demo_session
+    token = session_service.create_session(role)
+app\auth\service.py:79: in create_session
+    raise RuntimeError("Demo session actor repository is not configured")
+E   RuntimeError: Demo session actor repository is not configured
+```
+
+The same RED run exposed a flaky older tamper test that changed only unused base64url padding bits. The test now deterministically changes the signed header input; no token behavior was relaxed.
+
+### GREEN and verification evidence
+
+After validating `DEMO_ORGANIZATION_ID` during dependency construction, the focused auth suite completed:
+
+```powershell
+C:\tmp\ojcc-domain-venv\Scripts\python.exe -m pytest tests/test_auth.py -q -p no:cacheprovider
+```
+
+```text
+12 passed in 0.75s
+```
+
+The following static checks also completed in the same fix round:
+
+```powershell
+C:\tmp\ojcc-domain-venv\Scripts\python.exe -m ruff check .
+C:\tmp\ojcc-domain-venv\Scripts\python.exe -m pyright --pythonpath C:\tmp\ojcc-domain-venv\Scripts\python.exe
+```
+
+```text
+All checks passed!
+0 errors, 0 warnings, 0 informations
+```
+
+### Additional token-claim coverage
+
+The fix round adds independent, re-signed-token regression cases for incorrect issuer, incorrect audience, empty `jti`, and future `nbf`. This exercises the decoder's individual claim checks rather than relying solely on a tampered signature to reject malformed identity claims.
+
+### Fix-round self-review
+
+- A missing tenant issuer setting now fails before the route can reach actor lookup or token issuance.
+- The decoder-only dependency remains able to omit organization scope intentionally: it never performs an actor lookup, while every issuer and repository lookup has an explicit organization id.
+- The new endpoint test asserts both the 503 status and the exact public detail, ensuring no `RuntimeError` text leaks to callers.
+- No dependency, lockfile, migration, router shape, or Task 4 behavior was changed.

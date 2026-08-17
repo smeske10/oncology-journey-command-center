@@ -14,6 +14,8 @@ def get_demo_session_service(
     session: Session = Depends(get_session),
 ) -> DemoSessionService:
     try:
+        if settings.demo_organization_id is None:
+            raise ValueError("DEMO_ORGANIZATION_ID must be configured")
         return DemoSessionService(
             actor_repository=SqlAlchemyActorRepository(session),
             secret=settings.demo_session_secret,

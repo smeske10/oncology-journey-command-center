@@ -1,4 +1,8 @@
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 from uuid import UUID, uuid4
 
 import httpx
@@ -10,6 +14,8 @@ from app.auth.models import CurrentActor, Role
 from app.auth.service import ActorRepository, DemoSessionService
 from app.config import Settings
 from app.main import app
+
+TEST_SESSION_SECRET = "test-only-signing-secret"
 
 
 def _actor(role: Role) -> CurrentActor:
@@ -27,6 +33,24 @@ class StaticActorRepository(ActorRepository):
         if actor is None or actor.organization_id != organization_id:
             return None
         return actor
+
+
+def _resign_token(token: str, mutate_claims: dict[str, object]) -> str:
+    header, encoded_payload, _ = token.split(".")
+    payload = json.loads(_decode_base64url(encoded_payload))
+    payload.update(mutate_claims)
+    encoded_payload = _encode_base64url(json.dumps(payload, separators=(",", ":")).encode())
+    signing_input = f"{header}.{encoded_payload}".encode()
+    signature = hmac.new(TEST_SESSION_SECRET.encode(), signing_input, hashlib.sha256).digest()
+    return f"{header}.{encoded_payload}.{_encode_base64url(signature)}"
+
+
+def _decode_base64url(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _encode_base64url(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
 
 
 def test_patient_facing_supporting_actor_cannot_use_navigator_permission() -> None:
@@ -51,7 +75,7 @@ def test_demo_sessions_are_signed_and_tamper_evident() -> None:
     )
 
     token = service.create_token(actor)
-    tampered_token = f"{token[:-1]}{'A' if token[-1] != 'A' else 'B'}"
+    tampered_token = f"{'A' if token[0] != 'A' else 'B'}{token[1:]}"
 
     assert service.current_actor(token) == actor
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
@@ -75,6 +99,30 @@ def test_demo_sessions_reject_expired_or_overlong_tokens() -> None:
         service.current_actor(expired_token, now=1_002)
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
         service.current_actor(overlong_token, now=1_001)
+
+
+@pytest.mark.parametrize(
+    "claim_update",
+    [
+        {"iss": "wrong-issuer"},
+        {"aud": "wrong-audience"},
+        {"jti": ""},
+        {"nbf": 1_001},
+    ],
+)
+def test_demo_sessions_reject_invalid_identity_claims(claim_update: dict[str, object]) -> None:
+    """This fails if identity claims are not independently validated after signing."""
+    actor = _actor(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+    )
+    token = service.create_token(actor, issued_at=1_000, expires_at=2_000)
+
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.current_actor(_resign_token(token, claim_update), now=1_000)
 
 
 def test_demo_session_requires_an_environment_secret() -> None:
@@ -118,6 +166,29 @@ def test_demo_session_route_sets_a_local_http_only_cookie() -> None:
     assert "samesite=lax" in cookie
     assert "path=/" in cookie
     assert "secure" not in cookie
+
+
+def test_demo_session_route_rejects_missing_tenant_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This fails if missing tenant configuration reaches session issuance as a server error."""
+    from app.api import demo_sessions
+
+    monkeypatch.setattr(
+        demo_sessions,
+        "settings",
+        Settings(demo_session_secret="test-only-signing-secret", demo_organization_id=None),
+    )
+
+    async def create_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    response = asyncio.run(create_session())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
 
 
 def test_demo_session_route_is_registered_without_enabling_api_docs() -> None:
