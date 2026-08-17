@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.api.demo_sessions import router as demo_sessions_router
+from app.api.patient_check_ins import router as patient_check_ins_router
 from app.config import settings
 
 app = FastAPI(
@@ -10,6 +11,7 @@ app = FastAPI(
     openapi_url=None,
 )
 app.include_router(demo_sessions_router)
+app.include_router(patient_check_ins_router)
 
 
 @app.get("/health")
