@@ -12,10 +12,12 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -54,6 +56,10 @@ def _state_constraint(column: str, enum_class: type[PythonEnum]) -> CheckConstra
     return CheckConstraint(f"{column} IN ({allowed_values})", name=f"{column}_state")
 
 
+def _tenant_identity_constraint(table_name: str) -> UniqueConstraint:
+    return UniqueConstraint("organization_id", "id", name=f"uq_{table_name}_organization_id_id")
+
+
 class Organization(Base):
     __tablename__ = "organization"
 
@@ -64,7 +70,10 @@ class Organization(Base):
 
 class User(Base):
     __tablename__ = "user_account"
-    __table_args__ = (Index("ix_user_account_org_email", "organization_id", "email", unique=True),)
+    __table_args__ = (
+        _tenant_identity_constraint("user_account"),
+        Index("ix_user_account_org_email", "organization_id", "email", unique=True),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
@@ -77,13 +86,19 @@ class User(Base):
 class RoleAssignment(Base):
     __tablename__ = "role_assignment"
     __table_args__ = (
+        _tenant_identity_constraint("role_assignment"),
         _state_constraint("role", UserRole),
+        ForeignKeyConstraint(
+            ["organization_id", "user_id"],
+            ["user_account.organization_id", "user_account.id"],
+            name="fk_role_assignment_organization_user_account",
+        ),
         Index("ix_role_assignment_org_user", "organization_id", "user_id", "role", unique=True),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_account.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     role: Mapped[UserRole] = mapped_column(_state_enum(UserRole, "user_role"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -91,6 +106,7 @@ class RoleAssignment(Base):
 class SyntheticPatient(Base):
     __tablename__ = "synthetic_patient"
     __table_args__ = (
+        _tenant_identity_constraint("synthetic_patient"),
         Index(
             "ix_synthetic_patient_org_external_ref", "organization_id", "external_ref", unique=True
         ),
@@ -108,6 +124,7 @@ class SyntheticPatient(Base):
 class PathwayDefinition(Base):
     __tablename__ = "pathway_definition"
     __table_args__ = (
+        _tenant_identity_constraint("pathway_definition"),
         Index(
             "ix_pathway_definition_org_slug_version",
             "organization_id",
@@ -130,16 +147,25 @@ class PathwayDefinition(Base):
 class CareEpisode(Base):
     __tablename__ = "care_episode"
     __table_args__ = (
+        _tenant_identity_constraint("care_episode"),
         _state_constraint("status", CareEpisodeStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_care_episode_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "pathway_definition_id"],
+            ["pathway_definition.organization_id", "pathway_definition.id"],
+            name="fk_care_episode_organization_pathway_definition",
+        ),
         Index("ix_care_episode_org_patient_status", "organization_id", "patient_id", "status"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    pathway_definition_id: Mapped[UUID] = mapped_column(
-        ForeignKey("pathway_definition.id"), nullable=False
-    )
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    pathway_definition_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     status: Mapped[CareEpisodeStatus] = mapped_column(
         _state_enum(CareEpisodeStatus, "care_episode_status"), default=CareEpisodeStatus.ACTIVE
     )
@@ -150,6 +176,12 @@ class CareEpisode(Base):
 class CheckInDefinition(Base):
     __tablename__ = "check_in_definition"
     __table_args__ = (
+        _tenant_identity_constraint("check_in_definition"),
+        ForeignKeyConstraint(
+            ["organization_id", "pathway_definition_id"],
+            ["pathway_definition.organization_id", "pathway_definition.id"],
+            name="fk_check_in_definition_organization_pathway_definition",
+        ),
         Index(
             "ix_check_in_definition_org_pathway_slug_version",
             "organization_id",
@@ -162,9 +194,7 @@ class CheckInDefinition(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    pathway_definition_id: Mapped[UUID] = mapped_column(
-        ForeignKey("pathway_definition.id"), nullable=False
-    )
+    pathway_definition_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     slug: Mapped[str] = mapped_column(String(128))
     version: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(255))
@@ -177,7 +207,18 @@ class CheckInDefinition(Base):
 class CheckInSubmission(Base):
     __tablename__ = "check_in_submission"
     __table_args__ = (
+        _tenant_identity_constraint("check_in_submission"),
         _state_constraint("status", CheckInStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_check_in_submission_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "check_in_definition_id"],
+            ["check_in_definition.organization_id", "check_in_definition.id"],
+            name="fk_check_in_submission_organization_check_in_definition",
+        ),
         Index(
             "ix_check_in_submission_org_patient_created",
             "organization_id",
@@ -188,10 +229,8 @@ class CheckInSubmission(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    check_in_definition_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("check_in_definition.id")
-    )
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    check_in_definition_id: Mapped[UUID | None] = mapped_column(Uuid)
     status: Mapped[CheckInStatus] = mapped_column(
         _state_enum(CheckInStatus, "check_in_status"), default=CheckInStatus.DRAFT
     )
@@ -205,7 +244,18 @@ class CheckInSubmission(Base):
 class ReportedNeed(Base):
     __tablename__ = "reported_need"
     __table_args__ = (
+        _tenant_identity_constraint("reported_need"),
         _state_constraint("status", NeedStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_reported_need_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "source_submission_id"],
+            ["check_in_submission.organization_id", "check_in_submission.id"],
+            name="fk_reported_need_organization_submission",
+        ),
         Index(
             "ix_reported_need_org_patient_status_created",
             "organization_id",
@@ -217,10 +267,8 @@ class ReportedNeed(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    source_submission_id: Mapped[UUID] = mapped_column(
-        ForeignKey("check_in_submission.id"), nullable=False
-    )
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    source_submission_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     kind: Mapped[str] = mapped_column(String(64))
     status: Mapped[NeedStatus] = mapped_column(
         _state_enum(NeedStatus, "need_status"), default=NeedStatus.OPEN
@@ -237,8 +285,19 @@ class ReportedNeed(Base):
 class SafetySignal(Base):
     __tablename__ = "safety_signal"
     __table_args__ = (
+        _tenant_identity_constraint("safety_signal"),
         _state_constraint("status", SafetySignalStatus),
         _state_constraint("severity", SafetySeverity),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_safety_signal_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "source_submission_id"],
+            ["check_in_submission.organization_id", "check_in_submission.id"],
+            name="fk_safety_signal_organization_submission",
+        ),
         Index(
             "ix_safety_signal_org_patient_status_severity",
             "organization_id",
@@ -250,10 +309,8 @@ class SafetySignal(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    source_submission_id: Mapped[UUID] = mapped_column(
-        ForeignKey("check_in_submission.id"), nullable=False
-    )
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    source_submission_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     rule_code: Mapped[str] = mapped_column(String(128))
     severity: Mapped[SafetySeverity] = mapped_column(_state_enum(SafetySeverity, "safety_severity"))
     status: Mapped[SafetySignalStatus] = mapped_column(
@@ -267,7 +324,23 @@ class SafetySignal(Base):
 class NavigationTask(Base):
     __tablename__ = "navigation_task"
     __table_args__ = (
+        _tenant_identity_constraint("navigation_task"),
         _state_constraint("status", NavigationTaskStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_navigation_task_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "reported_need_id"],
+            ["reported_need.organization_id", "reported_need.id"],
+            name="fk_navigation_task_organization_reported_need",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "assignee_user_id"],
+            ["user_account.organization_id", "user_account.id"],
+            name="fk_navigation_task_organization_assignee",
+        ),
         Index("ix_navigation_task_org_status_due_at", "organization_id", "status", "due_at"),
         Index(
             "ix_navigation_task_org_need_status", "organization_id", "reported_need_id", "status"
@@ -276,9 +349,9 @@ class NavigationTask(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    reported_need_id: Mapped[UUID | None] = mapped_column(ForeignKey("reported_need.id"))
-    assignee_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user_account.id"))
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    reported_need_id: Mapped[UUID | None] = mapped_column(Uuid)
+    assignee_user_id: Mapped[UUID | None] = mapped_column(Uuid)
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[NavigationTaskStatus] = mapped_column(
         _state_enum(NavigationTaskStatus, "navigation_task_status"),
@@ -294,7 +367,18 @@ class NavigationTask(Base):
 class ApprovalDecision(Base):
     __tablename__ = "approval_decision"
     __table_args__ = (
+        _tenant_identity_constraint("approval_decision"),
         _state_constraint("status", ApprovalStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "navigation_task_id"],
+            ["navigation_task.organization_id", "navigation_task.id"],
+            name="fk_approval_decision_organization_navigation_task",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "authorized_user_id"],
+            ["user_account.organization_id", "user_account.id"],
+            name="fk_approval_decision_organization_authorized_user",
+        ),
         Index(
             "ix_approval_decision_org_task_created",
             "organization_id",
@@ -305,10 +389,8 @@ class ApprovalDecision(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    navigation_task_id: Mapped[UUID] = mapped_column(
-        ForeignKey("navigation_task.id"), nullable=False
-    )
-    authorized_user_id: Mapped[UUID] = mapped_column(ForeignKey("user_account.id"), nullable=False)
+    navigation_task_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    authorized_user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     status: Mapped[ApprovalStatus] = mapped_column(_state_enum(ApprovalStatus, "approval_status"))
     proposed_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     final_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
@@ -319,6 +401,7 @@ class ApprovalDecision(Base):
 class Resource(Base):
     __tablename__ = "resource"
     __table_args__ = (
+        _tenant_identity_constraint("resource"),
         Index("ix_resource_org_category_active", "organization_id", "category", "is_active"),
     )
 
@@ -335,7 +418,13 @@ class Resource(Base):
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_document"
     __table_args__ = (
+        _tenant_identity_constraint("knowledge_document"),
         _state_constraint("status", KnowledgeDocumentStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "resource_id"],
+            ["resource.organization_id", "resource.id"],
+            name="fk_knowledge_document_organization_resource",
+        ),
         Index(
             "ix_knowledge_document_org_status_reviewed", "organization_id", "status", "reviewed_at"
         ),
@@ -343,7 +432,7 @@ class KnowledgeDocument(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    resource_id: Mapped[UUID | None] = mapped_column(ForeignKey("resource.id"))
+    resource_id: Mapped[UUID | None] = mapped_column(Uuid)
     title: Mapped[str] = mapped_column(String(255))
     version: Mapped[str] = mapped_column(String(64))
     status: Mapped[KnowledgeDocumentStatus] = mapped_column(
@@ -359,16 +448,32 @@ class KnowledgeDocument(Base):
 class AgentRun(Base):
     __tablename__ = "agent_run"
     __table_args__ = (
+        _tenant_identity_constraint("agent_run"),
         _state_constraint("status", AgentRunStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_agent_run_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "source_submission_id"],
+            ["check_in_submission.organization_id", "check_in_submission.id"],
+            name="fk_agent_run_organization_submission",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "reported_need_id"],
+            ["reported_need.organization_id", "reported_need.id"],
+            name="fk_agent_run_organization_reported_need",
+        ),
         Index("ix_agent_run_org_patient_created", "organization_id", "patient_id", "created_at"),
         Index("ix_agent_run_org_trace_id", "organization_id", "trace_id", unique=True),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID | None] = mapped_column(ForeignKey("synthetic_patient.id"))
-    source_submission_id: Mapped[UUID | None] = mapped_column(ForeignKey("check_in_submission.id"))
-    reported_need_id: Mapped[UUID | None] = mapped_column(ForeignKey("reported_need.id"))
+    patient_id: Mapped[UUID | None] = mapped_column(Uuid)
+    source_submission_id: Mapped[UUID | None] = mapped_column(Uuid)
+    reported_need_id: Mapped[UUID | None] = mapped_column(Uuid)
     trace_id: Mapped[str] = mapped_column(String(128))
     agent_name: Mapped[str] = mapped_column(String(128))
     status: Mapped[AgentRunStatus] = mapped_column(
@@ -384,16 +489,25 @@ class AgentRun(Base):
 class Outcome(Base):
     __tablename__ = "outcome"
     __table_args__ = (
+        _tenant_identity_constraint("outcome"),
         _state_constraint("status", OutcomeStatus),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_outcome_organization_patient",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "reported_need_id"],
+            ["reported_need.organization_id", "reported_need.id"],
+            name="fk_outcome_organization_reported_need",
+        ),
         Index("ix_outcome_org_patient_created", "organization_id", "patient_id", "created_at"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    patient_id: Mapped[UUID] = mapped_column(ForeignKey("synthetic_patient.id"), nullable=False)
-    reported_need_id: Mapped[UUID] = mapped_column(
-        ForeignKey("reported_need.id"), unique=True, nullable=False
-    )
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    reported_need_id: Mapped[UUID] = mapped_column(Uuid, unique=True, nullable=False)
     status: Mapped[OutcomeStatus] = mapped_column(_state_enum(OutcomeStatus, "outcome_status"))
     reason: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -404,6 +518,12 @@ class Outcome(Base):
 class AuditEvent(Base):
     __tablename__ = "audit_event"
     __table_args__ = (
+        _tenant_identity_constraint("audit_event"),
+        ForeignKeyConstraint(
+            ["organization_id", "actor_user_id"],
+            ["user_account.organization_id", "user_account.id"],
+            name="fk_audit_event_organization_actor",
+        ),
         Index(
             "ix_audit_event_org_entity_created",
             "organization_id",
@@ -415,7 +535,7 @@ class AuditEvent(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    actor_user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user_account.id"))
+    actor_user_id: Mapped[UUID | None] = mapped_column(Uuid)
     entity_type: Mapped[str] = mapped_column(String(128))
     entity_id: Mapped[UUID] = mapped_column(Uuid)
     event_type: Mapped[str] = mapped_column(String(128))
