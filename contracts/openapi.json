@@ -138,6 +138,24 @@
         "title": "CheckInSubmissionResponse",
         "type": "object"
       },
+      "EvidenceRead": {
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "text"
+        ],
+        "title": "EvidenceRead",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -149,6 +167,359 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "NavigationTaskRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "reported_need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Need Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reported_need_id",
+          "title",
+          "status",
+          "due_at",
+          "owner_id",
+          "created_at"
+        ],
+        "title": "NavigationTaskRead",
+        "type": "object"
+      },
+      "NavigatorQueueRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "PatientCaseRead": {
+        "properties": {
+          "longitudinal_submissions": {
+            "items": {
+              "$ref": "#/components/schemas/SubmissionRead"
+            },
+            "title": "Longitudinal Submissions",
+            "type": "array"
+          },
+          "navigation_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationTaskRead"
+            },
+            "title": "Navigation Tasks",
+            "type": "array"
+          },
+          "open_needs": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemRead"
+            },
+            "title": "Open Needs",
+            "type": "array"
+          },
+          "patient": {
+            "additionalProperties": true,
+            "title": "Patient",
+            "type": "object"
+          },
+          "safety_signals": {
+            "items": {
+              "$ref": "#/components/schemas/SafetySignalRead"
+            },
+            "title": "Safety Signals",
+            "type": "array"
+          },
+          "upcoming_synthetic_appointment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upcoming Synthetic Appointment"
+          }
+        },
+        "required": [
+          "patient",
+          "longitudinal_submissions",
+          "open_needs",
+          "safety_signals",
+          "navigation_tasks",
+          "upcoming_synthetic_appointment"
+        ],
+        "title": "PatientCaseRead",
+        "type": "object"
+      },
+      "PriorityResultRead": {
+        "properties": {
+          "level": {
+            "enum": [
+              "high",
+              "medium",
+              "routine"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "score",
+          "reasons"
+        ],
+        "title": "PriorityResultRead",
+        "type": "object"
+      },
+      "QueueItemRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "symptom_change",
+              "medication_question",
+              "transportation",
+              "financial_support",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/PriorityResultRead"
+          }
+        },
+        "required": [
+          "need_id",
+          "patient_id",
+          "patient_display_name",
+          "kind",
+          "priority",
+          "evidence",
+          "created_at",
+          "due_at",
+          "owner_id"
+        ],
+        "title": "QueueItemRead",
+        "type": "object"
+      },
+      "SafetySignalRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rule_code": {
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rule_code",
+          "severity",
+          "status",
+          "evidence",
+          "created_at"
+        ],
+        "title": "SafetySignalRead",
+        "type": "object"
+      },
+      "SubmissionRead": {
+        "properties": {
+          "free_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Text"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          }
+        },
+        "required": [
+          "id",
+          "submitted_at",
+          "items",
+          "free_text",
+          "provenance"
+        ],
+        "title": "SubmissionRead",
         "type": "object"
       },
       "UserRole": {
@@ -262,6 +633,70 @@
         "summary": "Create Demo Session",
         "tags": [
           "demo-sessions"
+        ]
+      }
+    },
+    "/v1/navigator/patients/{patient_id}/case": {
+      "get": {
+        "operationId": "get_navigator_case_v1_navigator_patients__patient_id__case_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "patient_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Patient Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatientCaseRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Navigator Case",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/queue": {
+      "get": {
+        "operationId": "get_navigator_queue_v1_navigator_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigatorQueueRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Navigator Queue",
+        "tags": [
+          "navigator"
         ]
       }
     },

@@ -3,6 +3,8 @@ import type { components } from "./api-types";
 type CheckInSubmissionInput = components["schemas"]["CheckInSubmissionCreate"];
 type CheckInSubmissionResponse = components["schemas"]["CheckInSubmissionResponse"];
 export type CheckInDefinitionResponse = components["schemas"]["CheckInDefinitionResponse"];
+export type NavigatorQueueResponse = components["schemas"]["NavigatorQueueRead"];
+export type NavigatorPatientCaseResponse = components["schemas"]["PatientCaseRead"];
 
 export type ApiErrorKind = "configuration" | "correction" | "persistence";
 
@@ -31,6 +33,17 @@ export async function submitCheckIn(
       headers: { "content-type": "application/json" },
       method: "POST",
     },
+  );
+}
+
+export async function bootstrapNavigatorQueue(): Promise<NavigatorQueueResponse> {
+  await request("/api/v1/demo/session/navigator", { method: "POST" });
+  return request<NavigatorQueueResponse>("/api/v1/navigator/queue");
+}
+
+export async function getNavigatorPatientCase(patientId: string): Promise<NavigatorPatientCaseResponse> {
+  return request<NavigatorPatientCaseResponse>(
+    `/api/v1/navigator/patients/${encodeURIComponent(patientId)}/case`,
   );
 }
 
