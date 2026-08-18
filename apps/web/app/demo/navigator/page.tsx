@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { PatientCase } from "../../../components/navigator/patient-case";
@@ -21,23 +21,27 @@ export default function NavigatorDemoPage() {
   const [caseError, setCaseError] = useState("");
   const [loadingCase, setLoadingCase] = useState(false);
 
+  const selectQueueItem = useCallback((item: NavigatorQueueItem) => {
+    setSelected(item);
+    setCaseData(undefined);
+    setCaseError("");
+    setLoadingCase(true);
+  }, []);
+
   useEffect(() => {
     void bootstrapNavigatorQueue()
       .then((response) => {
         const queueItems = response.items;
         setItems(queueItems);
-        setSelected(queueItems[0]);
+        if (queueItems[0]) selectQueueItem(queueItems[0]);
       })
       .catch((error: unknown) => setQueueError(readError(error, "The navigator queue could not be loaded.")))
       .finally(() => setLoadingQueue(false));
-  }, []);
+  }, [selectQueueItem]);
 
   useEffect(() => {
     if (!selected) return;
     const controller = new AbortController();
-    setLoadingCase(true);
-    setCaseError("");
-    setCaseData(undefined);
     void getNavigatorPatientCase(selected.patient_id, controller.signal)
       .then((response) => {
         if (!controller.signal.aborted) setCaseData(response);
@@ -51,7 +55,7 @@ export default function NavigatorDemoPage() {
         if (!controller.signal.aborted) setLoadingCase(false);
       });
     return () => controller.abort();
-  }, [selected?.patient_id]);
+  }, [selected?.need_id, selected?.patient_id]);
 
   return (
     <main style={mainStyle}>
@@ -63,7 +67,7 @@ export default function NavigatorDemoPage() {
       <WorkQueue
         error={queueError || undefined}
         items={items}
-        onSelect={setSelected}
+        onSelect={selectQueueItem}
         selectedNeedId={selected?.need_id}
         state={loadingQueue ? "loading" : undefined}
       />
