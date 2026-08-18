@@ -145,3 +145,5 @@ The existing PostgreSQL/Docker integration checks remain the two skips. No Docke
 ### Controller web-test alignment
 
 After the controller regenerated the TypeScript contract, its elevated full Vitest run reached the new race-condition test and found one test-only mismatch: the production request correctly calls `getNavigatorPatientCase(patientId, AbortSignal)`, while the first assertion expected a one-argument call. The regression now asserts an `AbortSignal` for both Patient A and Patient B and verifies that Patient A's signal is aborted immediately after selecting Patient B, before resolving A. The cancellation implementation remains unchanged; the controller will rerun the Node suite.
+
+The controller's subsequent run reached the final assertion with 8 tests passing, then found an equally test-only ambiguity: Patient B appears both in the selected queue-card heading and the patient-case heading. The assertion now scopes to the accessible `Patient case` region and its level-two heading, proving that the case—not merely the selected queue item—remains Patient B after Patient A resolves. Production UI and cancellation code are unchanged.

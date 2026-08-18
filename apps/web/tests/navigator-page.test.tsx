@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { NavigatorPatientCaseResponse, NavigatorQueueResponse } from "../lib/api-client";
@@ -85,11 +85,14 @@ test("keeps the selected patient case when an older request resolves last", asyn
   expect(firstSignal.aborted).toBe(true);
 
   patientB.resolve(patientCase("Patient B"));
-  await screen.findByRole("heading", { name: "Patient B" });
+  const caseRegion = screen.getByRole("region", { name: "Patient case" });
+  await within(caseRegion).findByRole("heading", { name: "Patient B", level: 2 });
   patientA.resolve(patientCase("Patient A"));
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: "Patient B" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Patient A" })).not.toBeInTheDocument();
+    expect(within(caseRegion).getByRole("heading", { name: "Patient B", level: 2 })).toBeVisible();
+    expect(
+      within(caseRegion).queryByRole("heading", { name: "Patient A", level: 2 }),
+    ).not.toBeInTheDocument();
   });
 });
