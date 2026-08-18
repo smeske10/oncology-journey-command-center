@@ -33,7 +33,8 @@ test("shows exact evidence and plain-language reasons for the selected queue ite
   expect(screen.getByText("Medication uncertainty")).toBeVisible();
   expect(screen.getByText("Due soon")).toBeVisible();
   expect(screen.getByText(/interferes with meals/i)).toBeVisible();
-  expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/not a clinical-risk score/i)).toBeVisible();
+  expect(screen.queryByText("115")).not.toBeInTheDocument();
 });
 
 test("provides loading, API-error, and empty queue states", () => {

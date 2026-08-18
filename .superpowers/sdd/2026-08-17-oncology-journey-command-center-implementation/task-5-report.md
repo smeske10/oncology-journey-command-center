@@ -87,3 +87,11 @@ No navigator E2E was added; no additional browser verification is pending beyond
 - Each generated API priority contains exact reason codes. The browser maps those codes into plain-language explanations and never presents the numeric score by itself.
 - Need extraction is explicit and deterministic: no inferred diagnosis, no risk label, no language model, and no mutation of immutable submission evidence.
 - The current UI client source references generated navigator response types. Once the approved generator runs, those type names will be emitted from the checked-in contract; hand-editing the generated file was intentionally avoided.
+
+## Controller verification fix: contract generation and score disclosure
+
+The controller successfully ran the installed OpenAPI TypeScript generator in its approved environment and refreshed `apps/web/lib/api-types.ts` with `NavigatorQueueRead` and `PatientCaseRead`.
+
+The controller's elevated full Vitest run then found one real test defect: 7 tests passed and the queue test failed because `queryByText(/score/i)` also matched the intentional product-boundary disclaimer, “This is not a clinical-risk score.” The UI did not display the numeric value at all, and removing the disclaimer would have weakened the safety boundary.
+
+The regression assertion now verifies the actual requirement: the plain-language reasons and disclaimer are visible, while the numeric fixture score (`115`) is not rendered. This preserves both transparent reasons and the explicit non-clinical-risk statement. The controller will rerun its bounded Node verification after this test-only correction.

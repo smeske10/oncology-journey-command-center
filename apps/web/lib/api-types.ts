@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/patients/{patient_id}/case": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Navigator Case */
+        get: operations["get_navigator_case_v1_navigator_patients__patient_id__case_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Navigator Queue */
+        get: operations["get_navigator_queue_v1_navigator_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/patient/check-ins/current": {
         parameters: {
             query?: never;
@@ -139,10 +173,149 @@ export interface components {
             /** Submitted At */
             submitted_at: string;
         };
+        /** EvidenceRead */
+        EvidenceRead: {
+            /** Field */
+            field: string;
+            /** Text */
+            text: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** NavigationTaskRead */
+        NavigationTaskRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Due At */
+            due_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Reported Need Id */
+            reported_need_id: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+        };
+        /** NavigatorQueueRead */
+        NavigatorQueueRead: {
+            /** Items */
+            items: components["schemas"]["QueueItemRead"][];
+        };
+        /** PatientCaseRead */
+        PatientCaseRead: {
+            /** Longitudinal Submissions */
+            longitudinal_submissions: components["schemas"]["SubmissionRead"][];
+            /** Navigation Tasks */
+            navigation_tasks: components["schemas"]["NavigationTaskRead"][];
+            /** Open Needs */
+            open_needs: components["schemas"]["QueueItemRead"][];
+            /** Patient */
+            patient: {
+                [key: string]: unknown;
+            };
+            /** Safety Signals */
+            safety_signals: components["schemas"]["SafetySignalRead"][];
+            /** Upcoming Synthetic Appointment */
+            upcoming_synthetic_appointment: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** PriorityResultRead */
+        PriorityResultRead: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "high" | "medium" | "routine";
+            /** Reasons */
+            reasons: string[];
+            /** Score */
+            score: number;
+        };
+        /** QueueItemRead */
+        QueueItemRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Due At */
+            due_at: string | null;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRead"][];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "symptom_change" | "medication_question" | "transportation" | "financial_support" | "other";
+            /**
+             * Need Id
+             * Format: uuid
+             */
+            need_id: string;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Patient Display Name */
+            patient_display_name: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            priority: components["schemas"]["PriorityResultRead"];
+        };
+        /** SafetySignalRead */
+        SafetySignalRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceRead"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Rule Code */
+            rule_code: string;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+        };
+        /** SubmissionRead */
+        SubmissionRead: {
+            /** Free Text */
+            free_text: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Items */
+            items: {
+                [key: string]: unknown;
+            }[];
+            /** Provenance */
+            provenance: {
+                [key: string]: unknown;
+            };
+            /** Submitted At */
+            submitted_at: string | null;
         };
         /**
          * UserRole
@@ -218,6 +391,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_navigator_case_v1_navigator_patients__patient_id__case_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                patient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientCaseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_navigator_queue_v1_navigator_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigatorQueueRead"];
                 };
             };
         };
