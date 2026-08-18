@@ -1,15 +1,18 @@
 # Oncology Journey Command Center
 
-**Product design specification**  
-**Date:** August 17, 2026  
-**Status:** Ready for stakeholder review  
+**Product design specification**
+
+**Date:** August 18, 2026
+
+**Status:** Reconciled architecture awaiting stakeholder review
+
 **Target:** Public portfolio release in four weeks, with up to two optional refinement weeks
 
 ## 1. Executive summary
 
 The Oncology Journey Command Center is a two-sided care-navigation application for people receiving active breast cancer treatment and the nurse navigators who support them between visits.
 
-Patients complete short, adaptive check-ins about symptoms, medication questions, distress, upcoming visits, and practical barriers. The system converts those reports into structured needs, applies deterministic safety rules, invokes narrow AI agents for bounded reasoning tasks, and presents an explainable proposed action plan to a nurse navigator. The navigator remains responsible for approving, editing, assigning, escalating, or declining every care-related action. Each need stays open until a patient or navigator records its disposition.
+Patients complete short, adaptive check-ins about symptoms, medication questions, distress, upcoming visits, and practical barriers. The system converts those reports into structured needs, applies deterministic safety rules, invokes narrow AI agents for bounded reasoning tasks, and presents explainable proposed actions to a nurse navigator. Agents and humans may propose changes, but organization policy determines the qualified human approval required before a safety-sensitive change takes effect. A need closes only when an authorized human records an immutable Outcome.
 
 The public portfolio release uses synthetic data only. It demonstrates production-minded product design, full-stack engineering, agentic orchestration, interoperability, safety governance, evaluation, and measurable workflow impact without claiming clinical efficacy, HIPAA compliance, or suitability for real patient care.
 
@@ -47,7 +50,7 @@ For the synthetic public release, "appropriate" means that the action matches th
 - Time from check-in submission to navigator review
 - Time from reported need to documented resolution
 - Percentage of needs resolved before the next scheduled visit
-- Navigator acceptance, editing, reassignment, escalation, and decline rates
+- Proposal approval, revision, reassignment, escalation, and decline rates
 - Aging of unresolved navigation tasks
 - Patient check-in completion and follow-up response rates
 - Patient-reported confidence and preparedness in simulated usability sessions
@@ -76,7 +79,7 @@ For the synthetic public release, "appropriate" means that the action matches th
 - A patient journey timeline showing check-ins, needs, tasks, decisions, and outcomes
 - Deterministic policy and safety engine
 - Bounded agent orchestration with structured outputs
-- Navigator approval, editing, reassignment, escalation, and decline controls
+- Navigator approval, revision, reassignment, escalation, and decline controls
 - Closed-loop follow-up and resolution tracking
 - FHIR-shaped clinical data and an import/export adapter
 - Governed, versioned knowledge content with citations
@@ -119,7 +122,7 @@ The patient experience is calm, mobile-first, and task-oriented. It avoids a bla
 - Review and submit before data is finalized
 - Journey timeline containing reported needs, navigator responses, approved resources, and resolution status
 - Approved educational content with source and review information
-- Patient confirmation that a need is resolved, unresolved, or still needs help
+- Patient confirmation that a need appears resolved, unresolved, or still needs help; confirmation supplies evidence, while an authorized human records the closing Outcome
 
 #### Patient interaction rules
 
@@ -142,10 +145,10 @@ The navigator experience is a prioritized work environment, not a transcript vie
 - Exact patient evidence that supports each extracted need
 - Explanation of each priority rule that matched
 - Proposed navigation plan with tasks, owners, due times, and approved resources
-- Accept, edit, assign, escalate, decline, or request-more-information actions
+- Approve, decline, revise, assign, escalate, or request-more-information actions; revision creates a successor proposal rather than editing history
 - Patient-facing message preview and approval gate
 - Resolution disposition with outcome reason
-- Complete history of agent outputs, source versions, human edits, and overrides
+- Complete history of agent outputs, source versions, human proposal revisions, and overrides
 
 ### 4.3 Administrator and evaluation view
 
@@ -165,32 +168,34 @@ The first release includes a limited internal view rather than a third full prod
 3. The patient completes structured questions and may add free text.
 4. The server validates the response, records consent and provenance, and stores an immutable submitted version.
 5. The deterministic policy engine checks emergency language, configured thresholds, access permissions, and prohibited actions.
-6. If an urgent rule matches, the system shows preapproved instructions, creates a high-priority navigator task, and skips any generative step that could delay routing.
+6. If an urgent rule matches, the system shows preapproved instructions, creates or identifies the corresponding ReportedNeed, creates its high-priority navigator task, and skips any generative step that could delay routing.
 7. If the response may continue, the workflow coordinator creates an idempotent orchestration job.
-8. Narrow agents structure needs, describe longitudinal changes, retrieve approved information, match nonclinical resources, and draft proposed navigation tasks.
+8. Narrow agents structure needs, describe longitudinal changes, retrieve approved information, match nonclinical resources, and create immutable proposed changes for governed actions.
 9. A quality gate validates schemas, citations, allowed actions, and policy compliance.
 10. Valid output is attached to a navigator-review task. Invalid or incomplete output enters a visible manual-review state.
-11. The navigator reviews the patient evidence and proposed plan, then accepts, edits, assigns, escalates, declines, or requests more information.
+11. The navigator reviews the patient evidence and proposed plan, then approves or declines each proposal, creates a revised proposal when an edit is needed, assigns work, escalates concerns, or requests more information.
 12. Approved patient-facing content is released, while internal tasks are routed to their owners.
 13. Follow-up checks whether the need has been resolved.
-14. Patient confirmation and navigator disposition close the need, while the full decision trail remains auditable.
+14. An authorized human records an Outcome to close the need. The same transaction cancels its remaining non-terminal tasks and preserves a per-task audit trail.
+15. If the concern recurs, the system creates a new need linked to the closed one rather than reopening or mutating history.
 
 ## 6. Agentic orchestration
 
 ### 6.1 Design principle
 
-The workflow system owns state, safety, permissions, and transitions. Language models perform narrow reasoning tasks inside that workflow. No model can directly change an escalation state, close a need, send clinical guidance, or create an unapproved external action.
+The workflow system owns state, safety, permissions, and transitions. Language models perform narrow reasoning tasks inside that workflow. No model can directly change an escalation state, close a need, dismiss a safety signal, send clinical guidance, or create an unapproved external action.
 
 ### 6.2 Workflow coordinator
 
 The coordinator is a deterministic state machine, not a conversational supervisor agent. It:
 
-- Reads the current workflow state
+- Creates and reads the durable `WorkflowRun`
 - Selects the next allowed task
 - Creates jobs with idempotency keys
 - Enforces timeouts and bounded retries
-- Records inputs, outputs, model configuration, tool use, and validation results
-- Routes failures to a recoverable manual-review state
+- Appends a `WorkflowTransitionEvent` for every actual state change
+- Records inputs, outputs, model configuration, tool use, validation results, and exact citations
+- Routes failures to a recoverable `ManualReviewTask`, which is operational recovery work rather than patient navigation work
 - Prevents duplicate tasks and messages
 
 ### 6.3 Bounded agent roles
@@ -263,39 +268,233 @@ The public release uses a modular monolith plus an asynchronous worker. This is 
 - Preview, staging, and production environments have separate databases and credentials.
 - The public sandbox contains only synthetic data and resets on a schedule or by an administrator action.
 
-## 8. Data model and interoperability
+## 8. Reconciled domain model and interoperability
 
-### 8.1 Core domain entities
+### 8.1 Architectural invariants
 
-- Organization
-- User
-- RoleAssignment
-- SyntheticPatient
-- CareEpisode
-- PathwayDefinition
-- CheckInDefinition
-- CheckInSubmission
-- ReportedNeed
-- SafetySignal
-- NavigationTask
-- ApprovalDecision
-- Resource
-- KnowledgeDocument
-- AgentRun
-- Outcome
-- AuditEvent
+The relational model uses one pattern consistently: terminal state is established by inserting the immutable record that authorizes it, never by writing a terminal value into a status column.
 
-### 8.2 Key relationships
+- An `Outcome` closes one `ReportedNeed`.
+- A `SafetySignalResolution` resolves one `SafetySignal`.
+- A fully approved dismissal `ProposedChange` dismisses one `SafetySignal`.
+- Corrections, reopenings, escalations, and proposal edits create successor rows instead of mutating history.
+- Stored status fields contain active states only. Reporting and application reads use the canonical effective-state views.
+- Organization-scoped relationships use composite foreign keys that include `organization_id` and, where applicable, patient and episode identifiers.
+- Immutable clinical and decision records are never cascade-deleted.
 
-- A patient has one or more care episodes.
-- A care episode follows one versioned pathway definition.
-- A submitted check-in creates zero or more reported needs and safety signals.
-- Each reported need has a lifecycle independent of the check-in that created it.
-- A reported need can own multiple navigation tasks, but it closes only through an explicit outcome.
-- Every agent run belongs to one workflow transition and retains input, output, validation, and source metadata.
-- Every approval decision records the proposed value, final value, authorized user, timestamp, and reason when edited or declined.
+Real foreign keys are required when the target set is closed and enumerable, especially when the reference can authorize a state change. Polymorphic references are permitted only for open-ended observational records. `AuditEvent` is the only polymorphic reference in this schema, and no polymorphic reference may authorize a mutation.
 
-### 8.3 FHIR-shaped representation
+```mermaid
+flowchart TB
+    Organization --> RoleAssignment
+    User --> RoleAssignment
+    Organization --> SyntheticPatient
+    SyntheticPatient --> CareEpisode
+    CareEpisode --> EpisodePathwayAssignment
+    PathwayDefinition --> EpisodePathwayAssignment
+    CheckInDefinition --> CheckInSubmission
+    CareEpisode --> CheckInSubmission
+    CheckInSubmission --> ReportedNeed
+    ReportedNeed -->|"owns"| NavigationTask
+    ReportedNeed -->|"closed by 0..1"| Outcome
+    CheckInSubmission --> SafetySignal
+    SafetySignal -->|"resolved by 0..1"| SafetySignalResolution
+    SafetySignal -->|"targeted by"| ProposedChange
+    NavigationTask -->|"targeted by"| ProposedChange
+    PatientMessage -->|"targeted by"| ProposedChange
+    ApprovalPolicy -->|"snapshotted onto"| ProposedChange
+    ProposedChange -->|"0..N decisions"| ApprovalDecision
+    WorkflowRun --> WorkflowTransitionEvent
+    WorkflowTransitionEvent --> AgentRun
+    AgentRun --> AgentRunCitation
+    KnowledgeDocument --> AgentRunCitation
+```
+
+### 8.2 Organization identity and authorization history
+
+`User` is a platform identity and may participate in multiple organizations. A nullable primary organization is only a user-interface preference; it grants no access. Each session selects exactly one active organization, and every authorization query uses that organization scope.
+
+`RoleAssignment` associates a user, organization, and controlled role. It records `granted_at` and nullable `revoked_at`. Assignments are never deleted: revocation closes the active interval, and a later re-grant creates a new row. Authorization at a historical timestamp is reconstructed by testing whether that timestamp falls inside the assignment interval. Approval decisions also snapshot the qualifying role for durable display and audit.
+
+Revocation records the time the authority actually ended and may not be silently backdated. Correcting an erroneous historical grant requires an explicit audited administrative procedure rather than rewriting the basis of decisions already made.
+
+The public demo seeds one organization, while the model and tenant constraints remain multi-organization.
+
+### 8.3 Care episodes, pathways, and questionnaires
+
+- A `SyntheticPatient` belongs to one organization and may have multiple `CareEpisode` rows.
+- `PathwayDefinition` is organization-scoped and versioned.
+- `EpisodePathwayAssignment` links an episode to an exact pathway version with `effective_from`, nullable `effective_to`, migration reason, and author. Effective intervals for one episode may not overlap.
+- `CheckInDefinition` is versioned and belongs to a pathway version.
+- Every submitted check-in references its organization, patient, care episode, and exact check-in definition version.
+- A mid-episode pathway migration creates a new assignment; it never rewrites earlier submissions or their interpretation context.
+
+### 8.4 Immutable submissions and corrections
+
+`CheckInSubmission` is immutable after submission. It records `submission_source` as `patient`, `authorized_proxy`, `clinician`, or `import`; human submissions include `submitted_by_user_id`, while imports include explicit external provenance. Tenant, patient, episode, questionnaire version, source answers, normalized answers, and submission time are retained together.
+
+A correction creates a new row with nullable `supersedes_submission_id`. That column is unique so the correction chain remains linear. A submission is active when no later submitted row supersedes it. The canonical `active_check_in_submission` view implements this predicate so corrections do not inflate completion or submission counts.
+
+Drafts are not submission rows. The public demo stores drafts client-side. Any later server-persisted draft uses a separate `CheckInDraft` entity and cannot claim `supersedes_submission_id`; abandoning a draft therefore cannot block a future correction.
+
+### 8.5 Reported needs, tasks, and outcomes
+
+`ReportedNeed` has exactly one origin: `source_submission_id` or `reopened_from_need_id`, enforced with an XOR constraint. `reopened_from_need_id` is unique so a recurrence chain cannot fork. The self-reference is tenant-, patient-, and episode-safe. A reopened concern is a new need with an empty task list, not a mutation of the closed need. The previous need and its cancelled tasks remain visible as history.
+
+Stored need state contains only `open` and `in_progress`. A need becomes `in_progress` when a navigator first assigns or starts one of its tasks; creating an unassigned task does not advance it. `NavigationTask.reported_need_id` is required.
+
+Navigation task states are `open`, `assigned`, `in_progress`, `completed`, and `cancelled`; only `completed` and `cancelled` are terminal. Terminal tasks cannot be restarted; later work requires a new task. Task cancellation records `cancelled_by_user_id`, `cancelled_at`, and a controlled `cancellation_reason`. `need_closed` is a routine lifecycle cancellation and is excluded from task-abandonment and cancellation-quality metrics.
+
+`Outcome.reported_need_id` is `NOT NULL UNIQUE`. `ReportedNeed.outcome_id` does not exist. An Outcome records the authorized human in `recorded_by_user_id`, its `recorded_at` timestamp, disposition, and supporting note. The presence of the Outcome closes the need.
+
+One authoritative PostgreSQL trigger runs when an Outcome is inserted. It atomically:
+
+1. Locks the need and its non-terminal tasks.
+2. Cancels each non-terminal task with `cancellation_reason = need_closed`.
+3. Copies the Outcome's `recorded_by_user_id` and `recorded_at` into each cancellation.
+4. Emits one `task_cancelled_by_closure` AuditEvent per task, attributed to the closer and linked to the Outcome.
+
+Application services insert the Outcome but never duplicate this cancellation behavior. Database guards reject task creation, assignment, or restart when an Outcome exists. The closure interface previews the tasks likely to be cancelled without blocking closure; the committed response reports the rows actually cancelled in case the preview became stale.
+
+The canonical `effective_need_state` view returns `closed` when an Outcome exists and otherwise returns the stored active state. Application, queue, export, and analytics code must not interpret the raw stored state directly.
+
+### 8.6 Safety signals and severity
+
+A `SafetySignal` has exactly one origin: `source_submission_id` or `escalated_from_signal_id`. `escalated_from_signal_id` is unique so the recovery chain cannot fork. Both paths preserve organization, patient, and episode alignment. Submission-originated signals may reference a need only from the same organization, patient, episode, and source submission.
+
+Each signal references a versioned `SignalRule`. The registry identifies `rule_kind` as `deterministic` or `human_escalation`. Explicit human recovery from a mistaken terminal decision creates a new signal linked through `escalated_from_signal_id` and uses the registered, versioned `human_escalation` rule identity. Terminal signals are never reopened or un-dismissed.
+
+Severity is ordinal. `deterministic_level` is immutable and records the rule-governed baseline; `effective_level` is the materialized current level. A model or automation may raise concern but cannot lower `effective_level` below `deterministic_level`. Lowering it requires an approved severity-override proposal.
+
+Stored signal state contains only `open` and `acknowledged`. Acknowledgement records `acknowledged_by_user_id` and `acknowledged_at`; both values are required together. The current release records the first acknowledgement only. If future safety review needs every observer, acknowledgement may become a `0..N` child table without changing the effective-state contract.
+
+`SafetySignalResolution` is an append-only one-to-one child with `safety_signal_id NOT NULL UNIQUE`, `resolved_by_user_id`, `resolved_at`, and required `resolution_reason`. Resolution is an ordinary human clinical action because it asserts that the concern was handled; it does not enter the approval workflow.
+
+Dismissal suppresses a concern and therefore requires approval. `dismissal_proposed_change_id` is an immutable `0..1` reference to the proposal as the authorization unit, not to one arbitrary decision. Dismissal category is controlled vocabulary carried in the proposal value, while rationale remains on the proposal and decision reasons remain on the decisions. Those values are not duplicated onto the signal.
+
+The `effective_safety_signal_state` view derives `dismissed` when an applied dismissal proposal exists, `resolved` when a SafetySignalResolution exists, `acknowledged` when acknowledgement exists, and otherwise `open`. Resolution and dismissal both require prior acknowledgement and are mutually exclusive. The ordering is a read contract, not a conflict-resolution policy: the presence of both terminal records is an integrity failure.
+
+Resolution insertion and final dismissal approval each lock the SafetySignal with `SELECT ... FOR UPDATE`, then recheck the competing terminal record. This prevents concurrent resolve and dismiss transactions from both committing. The resolution path rejects an applied dismissal; the dismissal path rejects an existing resolution.
+
+Approved severity overrides form a `0..N` history through their proposals. `current_severity_override_proposed_change_id` and `effective_level` are materialized conveniences updated atomically by the authoritative approval trigger. Historical queries use the proposal history, never the current pointer.
+
+### 8.7 Proposed changes, policies, and decisions
+
+`ProposedChange` separates who requested a change from who authorized it. It contains:
+
+- Exactly one proposer: `proposed_by_user_id` or `proposed_by_agent_run_id`
+- A fine-grained controlled `change_type`
+- The immutable proposed value and rationale
+- Exactly one explicit target foreign key
+- `supersedes_proposed_change_id UNIQUE` for a linear revision chain
+- The applied ApprovalPolicy identity and version for lineage
+- Snapshots of the resolved threshold, self-approval permission, required approval count, required approver role, and other policy inputs at proposal time
+
+There is no `target_field`: each change type identifies one permitted operation. There is no in-place proposal editing. A requested edit produces a new proposal revision and makes the previous revision `superseded`; previous decisions never carry forward. A revision may replace a pending or declined proposal but never an approved, applied proposal. A later severity override is a new root proposal against the same signal, which preserves the `0..N` applied-override history.
+
+The first release's approvable targets are exactly `safety_signal_id`, `navigation_task_id`, and `patient_message_id`, each implemented as a nullable composite foreign key. PostgreSQL enforces exactly one with `CHECK (num_nonnulls(...) = 1)`. One CASE-based check maps every change type to its permitted target column and fails when a new enum value lacks a mapping. Each target relationship includes organization scope. Adding another approvable entity requires a reviewed schema migration. If the closed target set grows past roughly twelve types, the design must reconsider a shared `Approvable` supertype rather than allow indefinite column sprawl.
+
+`PatientMessage` is the immutable candidate message artifact governed by its proposal; delivery status and attempts are separate operational records so approval never depends on mutable delivery fields.
+
+The first-release change types are deliberately narrow:
+
+| `change_type` | Required target | Authorized effect |
+|---|---|---|
+| `dismiss_signal` | `safety_signal_id` | Apply a controlled dismissal category after risk-based approval |
+| `override_signal_severity` | `safety_signal_id` | Set a new effective severity while preserving deterministic severity |
+| `authorize_navigation_task` | `navigation_task_id` | Authorize the proposed task content and action |
+| `authorize_patient_message` | `patient_message_id` | Authorize release of the immutable candidate message |
+
+The proposed value is JSONB validated against the versioned schema for its change type. Schema identity and version are stored on the proposal so a future validator change cannot reinterpret historical values.
+
+The target checks have this normative shape:
+
+```sql
+CHECK (num_nonnulls(safety_signal_id, navigation_task_id, patient_message_id) = 1),
+CHECK (
+  CASE change_type
+    WHEN 'dismiss_signal' THEN safety_signal_id IS NOT NULL
+    WHEN 'override_signal_severity' THEN safety_signal_id IS NOT NULL
+    WHEN 'authorize_navigation_task' THEN navigation_task_id IS NOT NULL
+    WHEN 'authorize_patient_message' THEN patient_message_id IS NOT NULL
+    ELSE false
+  END
+)
+```
+
+Proposal links from domain rows use matching composite parent keys, including `UNIQUE (proposed_change_id, safety_signal_id, organization_id, change_type)` for safety-signal proposals. `dismissal_proposed_change_id` and `current_severity_override_proposed_change_id` are each unique so one proposal cannot be applied to multiple signals.
+
+`ApprovalPolicy` is organization-, change-type-, and version-specific. It includes effective dates, severity threshold where applicable, whether self-approval is allowed, required approval count, and required approver role. Historical decisions use the snapshots on ProposedChange; later policy edits never rewrite earlier authorization history.
+
+`ApprovalDecision` contains `proposed_change_id`, `authorized_by_user_id`, `decision`, `authorized_at`, qualifying-role snapshot, and optional reason. The decision enum is only `approved` or `declined`; proposed and final values do not appear on the decision. A reason is required for a decline and optional for approval. `UNIQUE (proposed_change_id, authorized_by_user_id)` prevents one person from satisfying a count repeatedly.
+
+`effective_proposed_change_state` is derived with this precedence:
+
+1. `superseded` when a successor revision exists
+2. `declined` when any qualifying decision declines
+3. `approved` when the number of distinct qualifying approvals meets the snapshotted requirement
+4. `pending` otherwise
+
+A qualifying decline is immediately terminal; dissent cannot be outvoted. Qualification is evaluated against the approver's historical RoleAssignment interval and snapshotted onto the decision. Decision insertion locks the proposal and is permitted only while its effective state is current and pending. No decision may be appended after approval, decline, or supersession.
+
+Agent-originated proposals always require qualified human authorization. Organization policy classifies each human-proposed change by risk. High-risk clinical, medication, safety, and patient-message changes require independent qualified humans; the proposer cannot count toward the approval requirement. Low-risk operational changes and below-threshold dismissals may allow the proposer to count when the snapshotted policy explicitly permits self-approval.
+
+Dismissal policy is evaluated against immutable `deterministic_level`, never mutable `effective_level`. Every dismissal uses ProposedChange and ApprovalDecision. Below the configured threshold, organization policy may permit one qualified self-approval. At or above the threshold, dismissal requires two distinct qualified human approvals and disallows self-approval. Agents and automation may flag a signal for review but cannot create or approve `dismiss_signal` proposals.
+
+The final qualifying approval runs one authoritative database path. It locks the proposal and target, recomputes eligibility from the snapshotted policy, verifies that the revision is current, and atomically applies the dismissal or current severity override. Approval state cannot be enforced by a simple foreign key because it is derived from a decision set; the authoritative trigger performs that check.
+
+### 8.8 Workflow lineage and manual review
+
+`WorkflowRun` is the durable orchestration instance linked to its source submission or need. It stores the current materialized workflow state and trace identifier. `WorkflowTransitionEvent` is the append-only record of each actual change, including from-state, to-state, timestamp, and actor.
+
+An `AgentRun` may belong to one transition event, and one transition may involve multiple agent runs. Deterministic and human transitions remain traceable without inventing an AgentRun. Failed, invalid, or dead-lettered automation creates a separate `ManualReviewTask`; it never creates a patient NavigationTask without a ReportedNeed.
+
+### 8.9 Resources, knowledge, and citations
+
+`Resource` is an organization-scoped navigation service. `NavigationTaskResource` records whether a task-resource match was proposed, approved, or delivered and preserves the resource facts used at that time.
+
+`KnowledgeDocument` content is immutable and versioned. `OrganizationKnowledgeApproval` determines which exact document versions an organization may use, with effective dates and approval provenance. Withdrawal prevents all future retrieval and citation of that version but never invalidates or rewrites historical citations.
+
+`AgentRunCitation` links an AgentRun to the exact document version and passage used. Existing citations survive later source withdrawal so reviewers can reconstruct the evidence available when the run occurred.
+
+### 8.10 Audit actors and immutability
+
+`AuditEvent` is append-only and supports exactly one actor form:
+
+- `user`: `actor_user_id`
+- `agent`: `actor_agent_run_id`
+- `policy`: named policy component and version
+- `system`: named system component
+
+Its target remains polymorphic because the audited target set is intentionally open-ended and the event never authorizes a state change. A dangling historical target may reduce navigability but cannot grant authority or mutate domain state.
+
+The application database role has no UPDATE or DELETE privileges on `CheckInSubmission`, `ProposedChange`, `ApprovalDecision`, `Outcome`, `SafetySignalResolution`, `AuditEvent`, or `WorkflowTransitionEvent`. BEFORE UPDATE OR DELETE rejection triggers provide a second backstop. Corrections and reversals use successor records.
+
+### 8.11 Canonical derived-state views
+
+The database publishes and the application exclusively consumes:
+
+- `active_check_in_submission`
+- `effective_need_state`
+- `effective_safety_signal_state`
+- `effective_proposed_change_state`
+
+Dashboards, queues, exports, and analytics must not infer terminal or current state from raw active-state columns. These views are versioned database contracts and receive direct integration tests.
+
+### 8.12 Trigger-bypass and restore integrity
+
+PostgreSQL tools may set `session_replication_role = replica`, disabling normal triggers during restore or ETL. Such operations may not reopen application writes until a fail-fast integrity audit confirms at least:
+
+- No closed need has a non-terminal NavigationTask.
+- No task was created, assigned, or restarted after its need closed.
+- Every task cancelled by closure has the expected per-task AuditEvent and closer attribution.
+- No SafetySignal has both a SafetySignalResolution and an applied dismissal proposal.
+- Every applied proposal is current, fully approved under its snapshotted policy, correctly targeted, and tenant-aligned.
+- No immutable correction, reopening, escalation, or proposal-revision chain forks.
+
+The audit reports violations; it never silently chooses a winning terminal state or fabricates missing authorization. Repair requires an explicit, audited reconciliation procedure.
+
+### 8.13 FHIR-shaped representation
 
 - Patient identity and demographics map to `Patient`.
 - Submitted check-ins map to `QuestionnaireResponse`.
@@ -306,6 +505,18 @@ The public release uses a modular monolith plus an asynchronous worker. This is 
 
 The relational domain model remains the application's source of truth. FHIR is an explicit interoperability boundary, not a replacement for workflow-specific storage.
 
+### 8.14 Reconciliation boundary for the existing build
+
+This section supersedes earlier diagrams, draft DDL, and simplified relationships already present in the portfolio implementation. Migration must replace conflicting relationships rather than support dual representations. In particular:
+
+- Drop `ReportedNeed.outcome_id`; Outcome owns the required unique foreign key.
+- Replace task-bound or polymorphic ApprovalDecision targets with ProposedChange and its explicit target foreign keys.
+- Split proposer data and proposed value from ApprovalDecision into ProposedChange.
+- Replace stored terminal need and signal states with the canonical derived views.
+- Add care-episode, submission-source, rule-provenance, workflow-lineage, and temporal-role relationships rather than inferring them from JSON or audit logs.
+
+The public environment contains synthetic, reproducible data, so its seed can be regenerated under the reconciled schema. The implementation plan must still use explicit migrations and tests; it must not preserve obsolete columns merely to avoid reseeding demo data.
+
 ## 9. Safety, privacy, and trust
 
 ### 9.1 Product boundary
@@ -314,8 +525,10 @@ The product supports navigation and operational coordination. It does not diagno
 
 ### 9.2 Safety controls
 
-- Deterministic urgent-language and configured-threshold rules execute before model calls.
-- A model may add a higher-concern review signal but cannot lower or clear a deterministic escalation.
+- Deterministic urgent-language and configured-threshold rules execute before model calls and record the exact rule identity and version.
+- A model may propose higher review priority but cannot create, lower, or clear the rule-governed safety baseline. A qualified human may lower effective severity only through an approved, policy-snapshotted proposal.
+- Safety dismissal is distinct from resolution, requires prior acknowledgement, and is authorized through risk-based approval evaluated against immutable deterministic severity.
+- High-severity dismissal requires two distinct qualified human approvals. An agent cannot initiate or approve dismissal.
 - Clinical or medication-related patient messages require navigator approval.
 - Agent tools use least-privilege, task-specific access.
 - Retrieval is limited to approved and currently valid sources.
@@ -365,6 +578,14 @@ The system does not draft a factual answer. It records a structured decline and 
 
 The system preserves both statements, does not reconcile them as fact, and proposes a clarification task. If a deterministic concern is present, the higher-priority state remains active.
 
+### Stale or conflicting lifecycle command
+
+Commands that race with need closure, signal resolution, signal dismissal, proposal supersession, or another final approval lock the affected aggregate and re-evaluate its current derived state. The losing command returns a typed conflict response and makes no partial change. The interface reloads the current state and explains which intervening action won.
+
+### Correction interrupted before submission
+
+The draft remains outside `CheckInSubmission`. The previously active submission continues to count as active until a completed correction row supersedes it.
+
 ### Notification failure
 
 The underlying task remains open. Delivery status is visible, retries are bounded, and the navigator receives an operational alert before the task can be considered complete.
@@ -380,6 +601,12 @@ New submissions fail closed with a clear retry message unless they can be durabl
 - Unit tests for domain rules and state transitions
 - Property-based tests for invalid transition sequences and idempotency
 - Authorization tests for every role and tenant boundary
+- Historical-role tests for granted, revoked, and re-granted approval authority
+- Proposal-policy tests for snapshot stability, distinct approvers, qualifying roles, revision scoping, immediate decline, and deterministic-level thresholds
+- Database race tests for concurrent resolution and dismissal, concurrent proposal approvals, and Outcome insertion against task assignment
+- Append-only privilege and rejection-trigger tests
+- Derived-view contract tests for active submissions, effective need state, effective signal state, and effective proposal state
+- Post-restore integrity-audit fixtures for every trigger-bypass invariant
 - Policy-engine tests covering urgent routing and prohibited actions
 - FHIR mapping and schema-validation tests
 - Queue retry, timeout, and dead-letter tests
@@ -418,8 +645,10 @@ Agent evaluations measure:
 - Medication question routed to human review
 - Practical barrier matched to a vetted resource and closed
 - Agent failure entering a visible manual-review state
-- Navigator edit preserving both original and final values
-- Patient confirmation reopening an unresolved need
+- Navigator revision preserving the original proposal, successor proposal, and revision-scoped decisions
+- Patient report of a recurring concern creating a new need linked to the closed need without restoring cancelled tasks
+- Need closure preview followed by atomic Outcome insertion, task cancellation, and per-task audit events
+- Competing safety resolution and dismissal requests allowing exactly one terminal record
 - Demo reset restoring all seeded journeys
 - Keyboard-only and screen-reader-critical flows
 
@@ -427,6 +656,8 @@ Agent evaluations measure:
 
 - All labeled urgent synthetic cases reach human review.
 - No clinical or medication-related message can be sent without authorized approval.
+- No high-severity dismissal can take effect without two distinct qualified human approvals evaluated against deterministic severity.
+- No need or safety signal can have competing terminal records.
 - Every displayed factual claim from the knowledge workflow includes an approved source reference.
 - Every failed asynchronous job remains visible and recoverable.
 - No role or tenant isolation test fails.
@@ -439,8 +670,9 @@ These are engineering gates for synthetic cases, not evidence of clinical safety
 ### Product events
 
 - Check-in started, saved, submitted, and abandoned
-- Need created, prioritized, reviewed, assigned, escalated, and closed
-- Proposed action accepted, edited, declined, or reassigned
+- Need created, prioritized, reviewed, assigned, escalated, closed, and reopened-as-new
+- Proposal created, revised, approved, declined, superseded, and applied
+- Safety signal created, acknowledged, resolved, dismissed, and escalated-as-new
 - Patient message approved, delivered, failed, and acknowledged
 - Follow-up completed and resolution confirmed
 - Source opened and citation inspected
@@ -453,7 +685,10 @@ These are engineering gates for synthetic cases, not evidence of clinical safety
 - Schema-validation and policy-failure rates
 - Retrieval quality and unsupported-answer rate
 - Manual-review backlog and dead-letter count
-- Navigator override and edit patterns
+- Navigator override and proposal-revision patterns
+- Safety-signal dismissal rate by signal type, deterministic rule and version, deterministic severity, organization, and controlled dismissal category
+- Task cancellations by controlled reason, with `need_closed` reported separately from abandonment-quality metrics
+- Correction volume reported through active submissions so superseded rows do not inflate completion rates
 
 ### Traceability
 
@@ -476,7 +711,7 @@ One trace identifier links the patient submission, policy evaluation, agent runs
 
 - Repository, environments, continuous integration, and design system
 - Domain schema, synthetic tenant, authentication, and authorization
-- Patient check-in flow with draft and submission states
+- Patient check-in flow with separate draft storage and immutable submission records
 - Seed data and initial FHIR mapping
 - Unit, accessibility, and end-to-end test harnesses
 
@@ -521,7 +756,7 @@ The seeded public demo should tell one coherent story in under five minutes:
 4. Switch to the navigator command center.
 5. Show how the case is prioritized and which exact evidence supports it.
 6. Inspect the proposed tasks, approved sources, and agent trace.
-7. Edit and approve the appropriate navigation actions.
+7. Revise and approve the appropriate navigation actions while preserving both proposal versions.
 8. Return to the patient experience and confirm follow-up.
 9. Close one need while leaving another visibly unresolved.
 10. Open the evaluation view to show safety gates, golden-set results, and failure recovery.
@@ -574,4 +809,3 @@ This specification is ready to move into implementation planning when the review
 - The agent, deterministic-policy, and human-approval responsibilities are clear.
 - The synthetic-data and public-demo strategy is acceptable.
 - No required first-release capability is missing.
-
