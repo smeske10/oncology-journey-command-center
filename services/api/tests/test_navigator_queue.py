@@ -208,7 +208,7 @@ def test_navigator_queue_returns_exact_evidence_and_explainable_order(
         {"field": "nausea_change", "text": "worse"},
         {"field": "free_text", "text": "Nausea now interferes with meals."},
     ]
-    assert item["priority"]["reasons"] == ["worsening_report", "medication_uncertainty", "due_soon"]
+    assert item["priority"]["reasons"] == ["worsening_report", "due_soon"]
 
 
 def test_navigator_case_contains_each_workspace_section_and_priority_reason(
@@ -225,7 +225,6 @@ def test_navigator_case_contains_each_workspace_section_and_priority_reason(
     assert case["longitudinal_submissions"][0]["free_text"] == "Nausea now interferes with meals."
     assert case["open_needs"][0]["priority"]["reasons"] == [
         "worsening_report",
-        "medication_uncertainty",
         "due_soon",
     ]
     assert case["safety_signals"][0]["rule_code"] == "demo-review-required"
@@ -299,5 +298,123 @@ def test_need_factory_preserves_immutable_evidence_and_has_a_stable_idempotency_
     second = NeedFactory.from_submission(submission)
 
     assert first == second
-    assert first[0].evidence[-1].text == "Nausea now interferes with meals."
-    assert first[0].idempotency_key == f"{submission.id}:symptom_change"
+    assert first[0].evidence[0].text == "worse"
+    assert first[0].idempotency_key == (
+        f"{submission.id}:symptom_change:{first[0].evidence_hash}"
+    )
+
+
+def test_queue_priority_uses_only_evidence_for_each_need(
+    navigator_context: tuple[NavigatorSession, CurrentActor, SyntheticPatient],
+) -> None:
+    """A practical barrier cannot inherit clinical ordering reasons from the same submission."""
+    session, actor, patient = navigator_context
+    source_submission = session.submissions[0]
+    transport_need = PersistedNeed(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=patient.id,
+        source_submission_id=source_submission.id,
+        kind="transportation",
+        status=NeedStatus.OPEN,
+        created_at=session.needs[0].created_at,
+        evidence=[{"field": "transportation", "text": "yes"}],
+    )
+    session.needs.append(transport_need)
+    session.needs.append(
+        PersistedNeed(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            patient_id=patient.id,
+            source_submission_id=source_submission.id,
+            kind="medication_question",
+            status=NeedStatus.OPEN,
+            created_at=session.needs[0].created_at,
+            evidence=[{"field": "medication_question", "text": "yes"}],
+        )
+    )
+
+    response = get("/v1/navigator/queue")
+
+    assert response.status_code == 200, response.text
+    items_by_kind = {item["kind"]: item for item in response.json()["items"]}
+    transport_score = items_by_kind["transportation"]["priority"]["score"]
+    assert items_by_kind["symptom_change"]["priority"]["score"] > transport_score
+    assert items_by_kind["medication_question"]["priority"]["score"] > transport_score
+    assert "worsening_report" in items_by_kind["symptom_change"]["priority"]["reasons"]
+    assert "medication_uncertainty" in items_by_kind["medication_question"]["priority"]["reasons"]
+    assert "worsening_report" not in items_by_kind["transportation"]["priority"]["reasons"]
+    assert "medication_uncertainty" not in items_by_kind["transportation"]["priority"]["reasons"]
+
+
+def test_queue_uses_injected_deployment_priority_policy(
+    navigator_context: tuple[NavigatorSession, CurrentActor, SyntheticPatient],
+) -> None:
+    """Route ordering is driven by an injectable deployment policy, never implicit defaults."""
+    from app.api.navigator_queue import get_navigator_priority_policy
+    from app.domain.prioritization import OperationalPriorityWeights
+
+    session, actor, patient = navigator_context
+    source_submission = session.submissions[0]
+    session.needs.append(
+        PersistedNeed(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            patient_id=patient.id,
+            source_submission_id=source_submission.id,
+            kind="transportation",
+            status=NeedStatus.OPEN,
+            created_at=session.needs[0].created_at,
+            evidence=[{"field": "transportation", "text": "yes"}],
+        )
+    )
+    policy = OperationalPriorityWeights(
+        kind_weights={
+            "symptom_change": 0,
+            "medication_question": 0,
+            "transportation": 200,
+            "financial_support": 0,
+            "other": 0,
+        },
+        worsening_report=1,
+        medication_uncertainty=1,
+        due_soon=0,
+        unresolved_over_24_hours=0,
+        unresolved_over_48_hours=0,
+        high_threshold=100,
+        medium_threshold=50,
+    )
+    app.dependency_overrides[get_navigator_priority_policy] = lambda: policy
+    try:
+        response = get("/v1/navigator/queue")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    first = response.json()["items"][0]
+    assert first["kind"] == "transportation"
+    assert first["priority"]["reasons"] == ["configured_kind_transportation"]
+
+
+def test_queue_sort_uses_uuid_as_a_stable_final_tiebreaker() -> None:
+    """Equal operational fields cannot reorder across requests or Python implementations."""
+    from app.api.navigator_queue import QueueItemRead, _queue_sort_key
+
+    created_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+    common = {
+        "patient_id": uuid4(),
+        "patient_display_name": "Synthetic patient",
+        "kind": "transportation",
+        "priority": {"level": "routine", "score": 0, "reasons": []},
+        "evidence": [],
+        "created_at": created_at,
+        "due_at": None,
+        "owner_id": None,
+    }
+    later = QueueItemRead(need_id=UUID(int=2), **common)
+    earlier = QueueItemRead(need_id=UUID(int=1), **common)
+
+    assert [item.need_id for item in sorted([later, earlier], key=_queue_sort_key)] == [
+        earlier.need_id,
+        later.need_id,
+    ]

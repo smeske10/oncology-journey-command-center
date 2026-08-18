@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import require_role
 from app.auth.models import CurrentActor, Role
+from app.config import settings
 from app.db.models import (
     CheckInSubmission,
     NavigationTask,
@@ -23,7 +24,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.domain.enums import NavigationTaskStatus, NeedStatus
 from app.domain.needs import NeedKind
-from app.domain.prioritization import PriorityResult, rank_need
+from app.domain.prioritization import OperationalPriorityWeights, PriorityResult, rank_need
 
 router = APIRouter(prefix="/v1/navigator", tags=["navigator"])
 
@@ -91,10 +92,29 @@ class PatientCaseRead(BaseModel):
     upcoming_synthetic_appointment: dict[str, Any] | None
 
 
+class NavigatorPriorityPolicyProvider(Protocol):
+    """Tenant override seam; a future repository can replace the deployment provider."""
+
+    def for_organization(self, organization_id: UUID) -> OperationalPriorityWeights: ...
+
+
+class DeploymentNavigatorPriorityPolicyProvider:
+    def for_organization(self, organization_id: UUID) -> OperationalPriorityWeights:
+        del organization_id
+        return settings.navigator_priority_policy
+
+
+def get_navigator_priority_policy(
+    actor: CurrentActor = Depends(require_role(Role.NAVIGATOR)),
+) -> OperationalPriorityWeights:
+    return DeploymentNavigatorPriorityPolicyProvider().for_organization(actor.organization_id)
+
+
 @router.get("/queue", response_model=NavigatorQueueRead)
 def get_navigator_queue(
     actor: CurrentActor = Depends(require_role(Role.NAVIGATOR)),
     session: Session = Depends(get_session),
+    priority_policy: OperationalPriorityWeights = Depends(get_navigator_priority_policy),
 ) -> NavigatorQueueRead:
     needs = session.scalars(
         select(ReportedNeed).where(
@@ -102,7 +122,10 @@ def get_navigator_queue(
             ReportedNeed.status.in_([NeedStatus.OPEN, NeedStatus.IN_PROGRESS]),
         )
     ).all()
-    items = [_queue_item_for_need(session, actor.organization_id, need) for need in needs]
+    items = [
+        _queue_item_for_need(session, actor.organization_id, need, priority_policy=priority_policy)
+        for need in needs
+    ]
     return NavigatorQueueRead(items=sorted(items, key=_queue_sort_key))
 
 
@@ -111,6 +134,7 @@ def get_navigator_case(
     patient_id: UUID,
     actor: CurrentActor = Depends(require_role(Role.NAVIGATOR)),
     session: Session = Depends(get_session),
+    priority_policy: OperationalPriorityWeights = Depends(get_navigator_priority_policy),
 ) -> PatientCaseRead:
     patient = session.scalars(
         select(SyntheticPatient).where(
@@ -159,7 +183,16 @@ def get_navigator_case(
         },
         longitudinal_submissions=[_submission_read(submission) for submission in submissions],
         open_needs=sorted(
-            [_queue_item_for_need(session, actor.organization_id, need, patient) for need in needs],
+            [
+                _queue_item_for_need(
+                    session,
+                    actor.organization_id,
+                    need,
+                    patient,
+                    priority_policy=priority_policy,
+                )
+                for need in needs
+            ],
             key=_queue_sort_key,
         ),
         safety_signals=[_safety_signal_read(signal) for signal in signals],
@@ -173,16 +206,12 @@ def _queue_item_for_need(
     organization_id: UUID,
     need: ReportedNeed,
     patient: SyntheticPatient | None = None,
+    *,
+    priority_policy: OperationalPriorityWeights,
 ) -> QueueItemRead:
     patient = patient or _patient_for_need(session, organization_id, need.patient_id)
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient case not found")
-    submission = session.scalars(
-        select(CheckInSubmission).where(
-            CheckInSubmission.id == need.source_submission_id,
-            CheckInSubmission.organization_id == organization_id,
-        )
-    ).first()
     tasks = session.scalars(
         select(NavigationTask).where(
             NavigationTask.organization_id == organization_id,
@@ -194,7 +223,7 @@ def _queue_item_for_need(
         )
     ).all()
     task = min(tasks, key=_task_due_sort_key, default=None)
-    priority = _priority_for_need(need, submission, task)
+    priority = _priority_for_need(need, task, priority_policy)
     evidence = [_evidence_read(item) for item in need.evidence if isinstance(item, dict)]
     return QueueItemRead(
         need_id=need.id,
@@ -222,8 +251,8 @@ def _patient_for_need(
 
 def _priority_for_need(
     need: ReportedNeed,
-    submission: CheckInSubmission | None,
     task: NavigationTask | None,
+    priority_policy: OperationalPriorityWeights,
 ) -> PriorityResult:
     now = datetime.now(UTC)
     created_at = _created_at(need.created_at)
@@ -231,18 +260,17 @@ def _priority_for_need(
     due_in_hours = None
     if task and task.due_at:
         due_in_hours = (task.due_at - now).total_seconds() / 3600
-    items = submission.answers.get("items", []) if submission else []
+    evidence = [item for item in need.evidence if isinstance(item, dict)]
     has_medication_question = any(
-        isinstance(item, dict)
-        and item.get("link_id") == "medication_question"
-        and _is_affirmative(item.get("value"))
-        for item in items
+        item.get("field") == "medication_question" and _is_affirmative(item.get("text"))
+        for item in evidence
     )
     worsening = any(
-        isinstance(item, dict)
-        and isinstance(item.get("value"), str)
-        and item["value"].casefold() == "worse"
-        for item in items
+        isinstance(item.get("field"), str)
+        and item["field"].endswith("_change")
+        and isinstance(item.get("text"), str)
+        and item["text"].casefold() == "worse"
+        for item in evidence
     )
     return rank_need(
         kind=need.kind,
@@ -250,6 +278,7 @@ def _priority_for_need(
         medication_question=has_medication_question,
         age_hours=age_hours,
         due_in_hours=due_in_hours,
+        weights=priority_policy,
     )
 
 

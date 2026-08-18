@@ -1,9 +1,11 @@
-"""Deterministic extraction of navigation needs from immutable check-in source data."""
+"""Deterministic need extraction with deeply immutable patient-supplied evidence."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias, TypeGuard, cast
 from uuid import UUID
 
 from app.db.models import CheckInSubmission
@@ -15,6 +17,9 @@ NeedKind = Literal[
     "financial_support",
     "other",
 ]
+FrozenJson: TypeAlias = None | bool | int | float | str | tuple["FrozenJson", ...] | tuple[
+    tuple[str, "FrozenJson"], ...
+]
 
 
 @dataclass(frozen=True)
@@ -22,78 +27,77 @@ class Evidence:
     source_submission_id: UUID
     field: str
     text: str
-    value: Any
+    value: FrozenJson
 
 
 @dataclass(frozen=True)
 class ReportedNeed:
-    """Idempotency-friendly input for a persisted reported need command."""
+    """Deterministic input for a future idempotent durable reported-need command."""
 
     kind: NeedKind
     source_submission_id: UUID
     evidence: tuple[Evidence, ...]
+    evidence_hash: str
     idempotency_key: str
 
 
 class NeedFactory:
-    """Maps explicit submitted fields to workflow needs without inference or model calls."""
+    """Maps explicit source fields only; it neither infers diagnoses nor calls a model."""
 
     @classmethod
     def from_submission(cls, submission: CheckInSubmission) -> list[ReportedNeed]:
-        items = submission.answers.get("items", [])
+        answers = submission.answers if isinstance(submission.answers, dict) else {}
+        items = answers.get("items", [])
         if not isinstance(items, list):
             return []
 
-        exact_evidence = tuple(
-            cls._evidence_from_item(submission.id, item)
-            for item in items
-            if isinstance(item, dict) and isinstance(item.get("link_id"), str)
-        )
-        free_text = submission.answers.get("free_text")
-        if isinstance(free_text, str) and free_text:
-            exact_evidence += (
-                Evidence(
-                    source_submission_id=submission.id,
-                    field="free_text",
-                    text=free_text,
-                    value=free_text,
-                ),
-            )
-
-        kinds: list[NeedKind] = []
+        candidates: dict[NeedKind, list[Evidence]] = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
-            link_id = item.get("link_id")
-            value = item.get("value")
-            if not isinstance(link_id, str):
+            kind = cls._kind_for_item(item)
+            if kind is None:
                 continue
-            if link_id.endswith("_change") and cls._is_worsening(value):
-                kinds.append("symptom_change")
-            elif link_id == "medication_question" and cls._is_affirmative(value):
-                kinds.append("medication_question")
-            elif link_id == "transportation" and cls._is_affirmative(value):
-                kinds.append("transportation")
-            elif link_id == "financial_support" and cls._is_affirmative(value):
-                kinds.append("financial_support")
+            candidates.setdefault(kind, []).append(cls._evidence_from_item(submission.id, item))
 
-        return [
-            ReportedNeed(
-                kind=kind,
-                source_submission_id=submission.id,
-                evidence=exact_evidence,
-                idempotency_key=f"{submission.id}:{kind}",
+        needs: list[ReportedNeed] = []
+        for kind, evidence in candidates.items():
+            frozen_evidence = tuple(evidence)
+            evidence_hash = _evidence_hash(frozen_evidence)
+            needs.append(
+                ReportedNeed(
+                    kind=kind,
+                    source_submission_id=submission.id,
+                    evidence=frozen_evidence,
+                    evidence_hash=evidence_hash,
+                    idempotency_key=f"{submission.id}:{kind}:{evidence_hash}",
+                )
             )
-            for kind in dict.fromkeys(kinds)
-        ]
+        return needs
+
+    @classmethod
+    def _kind_for_item(cls, item: dict[str, Any]) -> NeedKind | None:
+        link_id = item.get("link_id")
+        value = item.get("value")
+        if not isinstance(link_id, str):
+            return None
+        if link_id.endswith("_change") and cls._is_worsening(value):
+            return "symptom_change"
+        if link_id == "medication_question" and cls._is_affirmative(value):
+            return "medication_question"
+        if link_id == "transportation" and cls._is_affirmative(value):
+            return "transportation"
+        if link_id == "financial_support" and cls._is_affirmative(value):
+            return "financial_support"
+        return None
 
     @staticmethod
     def _evidence_from_item(submission_id: UUID, item: dict[str, Any]) -> Evidence:
-        value = item.get("value")
+        value = _freeze_json(item.get("value"))
         return Evidence(
             source_submission_id=submission_id,
             field=str(item["link_id"]),
-            text=str(value),
+            text=_evidence_text(value),
             value=value,
         )
 
@@ -101,6 +105,52 @@ class NeedFactory:
     def _is_worsening(value: object) -> bool:
         return isinstance(value, str) and value.casefold() == "worse"
 
-    @staticmethod
-    def _is_affirmative(value: object) -> bool:
-        return value is True or (isinstance(value, str) and value.casefold() in {"yes", "true"})
+    @classmethod
+    def _is_affirmative(cls, value: object) -> bool:
+        if value is True or (isinstance(value, str) and value.casefold() in {"yes", "true"}):
+            return True
+        return isinstance(value, list) and any(cls._is_affirmative(item) for item in value)
+
+
+def _freeze_json(value: object) -> FrozenJson:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError("Evidence JSON object keys must be strings")
+        return tuple((key, _freeze_json(value[key])) for key in sorted(value))
+    raise ValueError("Evidence values must be JSON-compatible")
+
+
+def _evidence_hash(evidence: tuple[Evidence, ...]) -> str:
+    payload = [
+        {"field": item.field, "text": item.text, "value": _thaw_json(item.value)}
+        for item in evidence
+    ]
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _evidence_text(value: FrozenJson) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(_thaw_json(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _thaw_json(value: FrozenJson) -> object:
+    if isinstance(value, tuple):
+        tuple_value = cast(tuple[FrozenJson, ...], value)
+        if _is_frozen_object(tuple_value):
+            return {key: _thaw_json(item_value) for key, item_value in tuple_value}
+        return [_thaw_json(item) for item in tuple_value]
+    return value
+
+
+def _is_frozen_object(
+    value: tuple[FrozenJson, ...],
+) -> TypeGuard[tuple[tuple[str, FrozenJson], ...]]:
+    return all(
+        isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str) for item in value
+    )

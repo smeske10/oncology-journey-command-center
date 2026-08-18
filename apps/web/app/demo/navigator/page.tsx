@@ -24,7 +24,7 @@ export default function NavigatorDemoPage() {
   useEffect(() => {
     void bootstrapNavigatorQueue()
       .then((response) => {
-        const queueItems = response.items as NavigatorQueueItem[];
+        const queueItems = response.items;
         setItems(queueItems);
         setSelected(queueItems[0]);
       })
@@ -34,12 +34,23 @@ export default function NavigatorDemoPage() {
 
   useEffect(() => {
     if (!selected) return;
+    const controller = new AbortController();
     setLoadingCase(true);
     setCaseError("");
-    void getNavigatorPatientCase(selected.patient_id)
-      .then(setCaseData)
-      .catch((error: unknown) => setCaseError(readError(error, "The patient case could not be loaded.")))
-      .finally(() => setLoadingCase(false));
+    setCaseData(undefined);
+    void getNavigatorPatientCase(selected.patient_id, controller.signal)
+      .then((response) => {
+        if (!controller.signal.aborted) setCaseData(response);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setCaseError(readError(error, "The patient case could not be loaded."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingCase(false);
+      });
+    return () => controller.abort();
   }, [selected?.patient_id]);
 
   return (

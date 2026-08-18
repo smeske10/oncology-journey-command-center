@@ -1,10 +1,10 @@
-import type { components } from "./api-types";
+import type { components, paths } from "./api-types";
 
 type CheckInSubmissionInput = components["schemas"]["CheckInSubmissionCreate"];
 type CheckInSubmissionResponse = components["schemas"]["CheckInSubmissionResponse"];
 export type CheckInDefinitionResponse = components["schemas"]["CheckInDefinitionResponse"];
-export type NavigatorQueueResponse = components["schemas"]["NavigatorQueueRead"];
-export type NavigatorPatientCaseResponse = components["schemas"]["PatientCaseRead"];
+export type NavigatorQueueResponse = paths["/v1/navigator/queue"]["get"]["responses"][200]["content"]["application/json"];
+export type NavigatorPatientCaseResponse = paths["/v1/navigator/patients/{patient_id}/case"]["get"]["responses"][200]["content"]["application/json"];
 
 export type ApiErrorKind = "configuration" | "correction" | "persistence";
 
@@ -41,9 +41,13 @@ export async function bootstrapNavigatorQueue(): Promise<NavigatorQueueResponse>
   return request<NavigatorQueueResponse>("/api/v1/navigator/queue");
 }
 
-export async function getNavigatorPatientCase(patientId: string): Promise<NavigatorPatientCaseResponse> {
+export async function getNavigatorPatientCase(
+  patientId: string,
+  signal?: AbortSignal,
+): Promise<NavigatorPatientCaseResponse> {
   return request<NavigatorPatientCaseResponse>(
     `/api/v1/navigator/patients/${encodeURIComponent(patientId)}/case`,
+    { signal },
   );
 }
 

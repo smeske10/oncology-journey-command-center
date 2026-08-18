@@ -2,23 +2,9 @@
 
 import type { CSSProperties } from "react";
 
-export type Priority = {
-  level: "high" | "medium" | "routine";
-  reasons: string[];
-  score: number;
-};
+import type { NavigatorQueueResponse } from "../../lib/api-client";
 
-export type NavigatorQueueItem = {
-  created_at: string;
-  due_at: string | null;
-  evidence: Array<{ field: string; text: string }>;
-  kind: string;
-  need_id: string;
-  owner_id: string | null;
-  patient_display_name: string;
-  patient_id: string;
-  priority: Priority;
-};
+export type NavigatorQueueItem = NavigatorQueueResponse["items"][number];
 
 type WorkQueueProps = {
   error?: string;
@@ -79,7 +65,7 @@ export function WorkQueue({ error, items, onSelect, selectedNeedId, state }: Wor
         <p>{humanizeKind(selected.kind)}</p>
         <h4>Why this item is ordered here</h4>
         <ul>
-          {selected.priority.reasons.map((reason) => <li key={reason}>{reasonLabels[reason] ?? reason}</li>)}
+          {selected.priority.reasons.map((reason) => <li key={reason}>{reasonLabel(reason)}</li>)}
         </ul>
         <h4>Exact patient-reported evidence</h4>
         <ul>
@@ -94,6 +80,10 @@ export function WorkQueue({ error, items, onSelect, selectedNeedId, state }: Wor
 
 function humanizeKind(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function reasonLabel(reason: string): string {
+  return reasonLabels[reason] ?? humanizeKind(reason.replace("configured_kind_", "reported_"));
 }
 
 function formatDate(value: string): string {
