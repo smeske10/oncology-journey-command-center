@@ -324,7 +324,7 @@ The public demo seeds one organization, while the model and tenant constraints r
 
 - A `SyntheticPatient` belongs to one organization and may have multiple `CareEpisode` rows.
 - `PathwayDefinition` is organization-scoped and versioned.
-- `EpisodePathwayAssignment` links an episode to an exact pathway version with `effective_from`, nullable `effective_to`, migration reason, and author. Effective intervals for one episode may not overlap.
+- `EpisodePathwayAssignment` links an episode to an exact pathway version with timestamptz `effective_from`, nullable timestamptz `effective_to`, migration reason, and author. `CHECK (effective_to IS NULL OR effective_from < effective_to)` rejects empty or reversed intervals. Because overlap is a cross-row property, PostgreSQL enforces it with `EXCLUDE USING gist (organization_id WITH =, care_episode_id WITH =, tstzrange(effective_from, effective_to, '[)') WITH &&)` using `btree_gist`; a row-local CHECK is insufficient.
 - `CheckInDefinition` is versioned and belongs to a pathway version.
 - Every submitted check-in references its organization, patient, care episode, and exact check-in definition version.
 - A mid-episode pathway migration creates a new assignment; it never rewrites earlier submissions or their interpretation context.
@@ -435,7 +435,9 @@ Proposal links from domain rows use matching composite parent keys, including `U
 3. `approved` when the number of distinct qualifying approvals meets the snapshotted requirement
 4. `pending` otherwise
 
-A qualifying decline is immediately terminal; dissent cannot be outvoted. Qualification is evaluated against the approver's historical RoleAssignment interval and snapshotted onto the decision. Decision insertion locks the proposal and is permitted only while its effective state is current and pending. No decision may be appended after approval, decline, or supersession.
+A qualifying decline is immediately terminal; dissent cannot be outvoted. `ApprovalDecision` carries `organization_id` and `qualifying_role_assignment_id`. Qualification requires that the referenced RoleAssignment belong to the authorizing user, match the proposal's organization, contain `authorized_at` within its grant interval, and supply the snapshotted required role. The qualifying role is also snapshotted onto the decision. A qualifying role held in another organization never counts.
+
+Decision insertion locks the proposal and is permitted only while its effective state is current and pending. No decision may be appended after approval, decline, or supersession. A separate authoritative proposal-revision trigger handles `supersedes_proposed_change_id`: it locks the predecessor, recomputes its derived state, requires the same organization, target, and change type, and permits replacement only when the predecessor is pending or declined. It rejects approved, applied, or already-superseded predecessors; the unique successor constraint prevents concurrent forks.
 
 Agent-originated proposals always require qualified human authorization. Organization policy classifies each human-proposed change by risk. High-risk clinical, medication, safety, and patient-message changes require independent qualified humans; the proposer cannot count toward the approval requirement. Low-risk operational changes and below-threshold dismissals may allow the proposer to count when the snapshotted policy explicitly permits self-approval.
 
@@ -451,7 +453,7 @@ An `AgentRun` may belong to one transition event, and one transition may involve
 
 ### 8.9 Resources, knowledge, and citations
 
-`Resource` is an organization-scoped navigation service. `NavigationTaskResource` records whether a task-resource match was proposed, approved, or delivered and preserves the resource facts used at that time.
+`Resource` is an organization-scoped navigation service. `NavigationTaskResource` records whether a task-resource match was proposed, approved, or delivered and preserves the resource facts used at that time. These are not independent approval states: the exact proposed resource links are part of the versioned value for `authorize_navigation_task`; applying that proposal materializes their `approved` state. `delivered` is a later operational event. No separate resource change type is required.
 
 `KnowledgeDocument` content is immutable and versioned. `OrganizationKnowledgeApproval` determines which exact document versions an organization may use, with effective dates and approval provenance. Withdrawal prevents all future retrieval and citation of that version but never invalidates or rewrites historical citations.
 
@@ -459,12 +461,40 @@ An `AgentRun` may belong to one transition event, and one transition may involve
 
 ### 8.10 Audit actors and immutability
 
-`AuditEvent` is append-only and supports exactly one actor form:
+`AuditEvent` is append-only and uses a required controlled `actor_type` discriminator with exactly one actor form:
 
 - `user`: `actor_user_id`
 - `agent`: `actor_agent_run_id`
 - `policy`: named policy component and version
-- `system`: named system component
+- `system`: named system component and version
+
+The actor invariant is enforced with a CASE constraint, not `num_nonnulls`, because policy and system identities each span two columns:
+
+```sql
+CHECK (
+  CASE actor_type
+    WHEN 'user' THEN
+      actor_user_id IS NOT NULL AND actor_agent_run_id IS NULL AND
+      actor_policy_component IS NULL AND actor_policy_version IS NULL AND
+      actor_system_component IS NULL AND actor_system_version IS NULL
+    WHEN 'agent' THEN
+      actor_user_id IS NULL AND actor_agent_run_id IS NOT NULL AND
+      actor_policy_component IS NULL AND actor_policy_version IS NULL AND
+      actor_system_component IS NULL AND actor_system_version IS NULL
+    WHEN 'policy' THEN
+      actor_user_id IS NULL AND actor_agent_run_id IS NULL AND
+      NULLIF(trim(actor_policy_component), '') IS NOT NULL AND
+      NULLIF(trim(actor_policy_version), '') IS NOT NULL AND
+      actor_system_component IS NULL AND actor_system_version IS NULL
+    WHEN 'system' THEN
+      actor_user_id IS NULL AND actor_agent_run_id IS NULL AND
+      actor_policy_component IS NULL AND actor_policy_version IS NULL AND
+      NULLIF(trim(actor_system_component), '') IS NOT NULL AND
+      NULLIF(trim(actor_system_version), '') IS NOT NULL
+    ELSE false
+  END
+)
+```
 
 Its target remains polymorphic because the audited target set is intentionally open-ended and the event never authorizes a state change. A dangling historical target may reduce navigability but cannot grant authority or mutate domain state.
 
@@ -490,18 +520,24 @@ PostgreSQL tools may set `session_replication_role = replica`, disabling normal 
 - Every task cancelled by closure has the expected per-task AuditEvent and closer attribution.
 - No SafetySignal has both a SafetySignalResolution and an applied dismissal proposal.
 - Every applied proposal is current, fully approved under its snapshotted policy, correctly targeted, and tenant-aligned.
+- Every approval's qualifying RoleAssignment belongs to its authorizing user and proposal organization and was active at authorization time.
+- Every AuditEvent satisfies the actor-type-specific identity shape.
+- No care episode has overlapping pathway-assignment intervals.
 - No immutable correction, reopening, escalation, or proposal-revision chain forks.
 
 The audit reports violations; it never silently chooses a winning terminal state or fabricates missing authorization. Repair requires an explicit, audited reconciliation procedure.
 
-### 8.13 FHIR-shaped representation
+### 8.13 FHIR R4-shaped representation
 
 - Patient identity and demographics map to `Patient`.
-- Submitted check-ins map to `QuestionnaireResponse`.
+- Each immutable submitted check-in maps to a distinct `QuestionnaireResponse`. The adapter renders a superseded response as `amended` and its active successor as `completed`.
+- FHIR R4 `QuestionnaireResponse` has no native `relatesTo`. The correction edge is exported through a `Provenance` targeting the successor and referencing the predecessor through `Provenance.entity` with role `revision`.
 - Searchable or trended patient-reported answers map to `Observation` and are tagged as patient-supplied.
 - Active navigation and treatment-context summaries map to `CarePlan` where appropriate.
 - Navigator work maps to `Task`.
-- Source and transformation lineage map to `Provenance` where appropriate.
+- `SafetySignal` maps to a profiled `DetectedIssue`, including patient, identified time, effective severity, source evidence, and rule identity/version. Resolution maps to `DetectedIssue.mitigation`. Because FHIR R4 has no distinct dismissed state or separate deterministic and effective severity fields, those semantics use declared profile extensions rather than lossy status substitution.
+- An applied ProposedChange and its complete ApprovalDecision set map to one `Provenance` targeting the resulting FHIR resource. The proposer and every qualifying authorizer appear as separately typed agents; the policy URI/version and immutable proposal identity remain traceable. Pending, declined, and superseded proposals remain internal workflow records because they did not produce an external state change.
+- Internal AuditEvent and ManualReviewTask records do not cross the FHIR boundary in the first release. FHIR Provenance represents externally meaningful creation, revision, and authorization lineage; it does not replace the application's complete operational audit log.
 
 The relational domain model remains the application's source of truth. FHIR is an explicit interoperability boundary, not a replacement for workflow-specific storage.
 
@@ -602,13 +638,16 @@ New submissions fail closed with a clear retry message unless they can be durabl
 - Property-based tests for invalid transition sequences and idempotency
 - Authorization tests for every role and tenant boundary
 - Historical-role tests for granted, revoked, and re-granted approval authority
+- Cross-organization approval tests proving that a role in one organization never qualifies for another
 - Proposal-policy tests for snapshot stability, distinct approvers, qualifying roles, revision scoping, immediate decline, and deterministic-level thresholds
+- Pathway-assignment exclusion tests for adjacent, overlapping, open-ended, and cross-episode intervals
+- Audit-actor constraint tests for all four valid forms, mixed forms, empty component identities, and missing versions
 - Database race tests for concurrent resolution and dismissal, concurrent proposal approvals, and Outcome insertion against task assignment
 - Append-only privilege and rejection-trigger tests
 - Derived-view contract tests for active submissions, effective need state, effective signal state, and effective proposal state
 - Post-restore integrity-audit fixtures for every trigger-bypass invariant
 - Policy-engine tests covering urgent routing and prohibited actions
-- FHIR mapping and schema-validation tests
+- FHIR mapping and schema-validation tests covering QuestionnaireResponse corrections through Provenance revision entities, DetectedIssue safety fields and extensions, and complete agents for applied approvals
 - Queue retry, timeout, and dead-letter tests
 - Audit completeness tests for critical commands
 
@@ -797,6 +836,9 @@ Each expansion requires separate discovery, safety review, and implementation pl
 - [PRO-TECT cluster-randomized trial](https://pubmed.ncbi.nlm.nih.gov/39920394/): outcomes from electronic patient-reported symptom monitoring during cancer treatment.
 - [FDA Clinical Decision Support Software guidance, January 2026](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/clinical-decision-support-software): current regulatory framing for decision-support software functions.
 - [HL7 US Core screening and assessment guidance](https://hl7.org/fhir/us/core/STU7/screening-and-assessments.html): representation of questionnaires, questionnaire responses, and searchable observations.
+- [HL7 FHIR R4 QuestionnaireResponse](https://hl7.org/fhir/R4/questionnaireresponse.html): submitted-response lifecycle and the `amended` status used by the export adapter.
+- [HL7 FHIR R4 DetectedIssue](https://hl7.org/fhir/R4/detectedissue.html): safety-issue severity, evidence, and mitigation representation.
+- [HL7 FHIR R4 Provenance](https://hl7.org/fhir/R4/provenance.html): revision entities, policy references, and multiple responsible agents for applied changes.
 
 ## 19. Approval criteria for implementation planning
 
