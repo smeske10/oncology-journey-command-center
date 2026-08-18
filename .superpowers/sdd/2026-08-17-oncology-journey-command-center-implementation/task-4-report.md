@@ -158,3 +158,21 @@ The two API skips remain the existing PostgreSQL/Docker-dependent integration ch
 - No invalid submission commits; the route's unit-of-work exits through rollback before the 422 is returned.
 - The scoped FHIR test verifies a same-tenant but different patient receives 404.
 - Test doubles now respect submitted definition/submission IDs and tenant IDs, ensuring scoped repository predicates are exercised rather than silently ignored.
+
+## Post-commit type-alignment fix
+
+The controller's production build reached test type checking and found this concrete regression:
+
+```text
+apps/web/tests/api-client.test.ts(43,27): TS2558 Expected 0 type arguments, but got 1
+```
+
+The failing expression was the Vitest assertion helper `toMatchObject<ApiError>(...)`; Vitest's matcher accepts no generic type parameters. The minimal test-only fix removes that unsupported type argument and its now-unused import. It does not change the generated API contract or any production API-client type.
+
+The local bounded build retry was stopped before type checking by the known managed Node sandbox limitation:
+
+```text
+EPERM: operation not permitted, lstat 'C:\\Users\\smesk'
+```
+
+The controller must rerun the same build through its approved elevated environment to capture the green compiler evidence. The build also rewrote `apps/web/next-env.d.ts` from `.next/dev/types` to `.next/types`; that generated change was pre-existing in the worktree for this fix and is intentionally not included in the focused type-alignment commit.

@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 
-import { ApiError, bootstrapPatientCheckIn, submitCheckIn } from "../lib/api-client";
+import { bootstrapPatientCheckIn, submitCheckIn } from "../lib/api-client";
 
 test("bootstraps a synthetic session and loads the generated current-check-in contract", async () => {
   const fetchMock = vi.fn()
@@ -40,5 +40,5 @@ test("reports a correction error separately from a persistence failure", async (
       questionnaire_version: "breast-active-v1",
       answers: [{ link_id: "nausea_change", value: "worse" }],
     }),
-  ).rejects.toMatchObject<ApiError>({ kind: "correction" });
+  ).rejects.toMatchObject({ kind: "correction" });
 });
