@@ -288,6 +288,8 @@ Real foreign keys are required when the target set is closed and enumerable, esp
 flowchart TB
     Organization --> RoleAssignment
     User --> RoleAssignment
+    User --> PatientIdentityLink
+    SyntheticPatient --> PatientIdentityLink
     Organization --> SyntheticPatient
     SyntheticPatient --> CareEpisode
     CareEpisode --> EpisodePathwayAssignment
@@ -315,6 +317,8 @@ flowchart TB
 `User` is a platform identity and may participate in multiple organizations. A nullable primary organization is only a user-interface preference; it grants no access. Each session selects exactly one active organization, and every authorization query uses that organization scope.
 
 `RoleAssignment` associates a user, organization, and controlled role. It records `granted_at` and nullable `revoked_at`. Assignments are never deleted: revocation closes the active interval, and a later re-grant creates a new row. Authorization at a historical timestamp is reconstructed by testing whether that timestamp falls inside the assignment interval. Approval decisions also snapshot the qualifying role for durable display and audit.
+
+`PatientIdentityLink` is the explicit, organization-scoped bridge between a platform `User` and a `SyntheticPatient`. It replaces any assumption that a user identifier is also a patient identifier. It records `linked_at` and nullable `revoked_at`; partial unique indexes permit at most one non-revoked link per user and per synthetic patient. Patient-session creation resolves and validates this link, then carries both identifiers. Future proxy access uses a separate authorized relationship rather than overloading this identity link.
 
 Revocation records the time the authority actually ended and may not be silently backdated. Correcting an erroneous historical grant requires an explicit audited administrative procedure rather than rewriting the basis of decisions already made.
 
