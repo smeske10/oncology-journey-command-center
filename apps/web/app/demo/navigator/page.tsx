@@ -20,6 +20,8 @@ export default function NavigatorDemoPage() {
   const [caseData, setCaseData] = useState<NavigatorPatientCaseResponse>();
   const [caseError, setCaseError] = useState("");
   const [loadingCase, setLoadingCase] = useState(false);
+  const selectedNeedId = selected?.need_id;
+  const selectedPatientId = selected?.patient_id;
 
   const selectQueueItem = useCallback((item: NavigatorQueueItem) => {
     setSelected(item);
@@ -40,9 +42,9 @@ export default function NavigatorDemoPage() {
   }, [selectQueueItem]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selectedNeedId || !selectedPatientId) return;
     const controller = new AbortController();
-    void getNavigatorPatientCase(selected.patient_id, controller.signal)
+    void getNavigatorPatientCase(selectedPatientId, controller.signal)
       .then((response) => {
         if (!controller.signal.aborted) setCaseData(response);
       })
@@ -55,7 +57,7 @@ export default function NavigatorDemoPage() {
         if (!controller.signal.aborted) setLoadingCase(false);
       });
     return () => controller.abort();
-  }, [selected?.need_id, selected?.patient_id]);
+  }, [selectedNeedId, selectedPatientId]);
 
   return (
     <main style={mainStyle}>
