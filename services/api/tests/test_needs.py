@@ -60,3 +60,32 @@ def test_need_evidence_is_deeply_immutable_and_hashed_canonically() -> None:
     assert first.evidence[0].value == ("yes", (("details", ("bus", "weekday")),))
     assert first.evidence_hash == second.evidence_hash
     assert first.idempotency_key == f"{submission.id}:transportation:{first.evidence_hash}"
+
+
+def test_canonical_evidence_distinguishes_empty_and_nested_json_container_types() -> None:
+    organization_id = uuid4()
+    patient_id = uuid4()
+    submission_id = uuid4()
+
+    def extracted(value: object):
+        return NeedFactory.from_submission(
+            CheckInSubmission(
+                id=submission_id,
+                organization_id=organization_id,
+                patient_id=patient_id,
+                answers={"items": [{"link_id": "transportation", "value": value}]},
+            )
+        )[0]
+
+    empty_list = extracted(["yes", []])
+    empty_object = extracted(["yes", {}])
+    nested = extracted(["yes", {"b": [], "a": {"nested": [{}]}}])
+    reordered_nested = extracted(["yes", {"a": {"nested": [{}]}, "b": []}])
+
+    assert empty_list.evidence_hash != empty_object.evidence_hash
+    assert empty_list.idempotency_key != empty_object.idempotency_key
+    assert nested.evidence_hash == reordered_nested.evidence_hash
+    assert nested.evidence[0].value == (
+        "yes",
+        (("a", (("nested", ((),)),)), ("b", ())),
+    )

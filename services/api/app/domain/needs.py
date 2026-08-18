@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Literal, TypeAlias, TypeGuard, cast
+from typing import Any, Literal, TypeAlias
 from uuid import UUID
 
 from app.db.models import CheckInSubmission
@@ -17,9 +17,17 @@ NeedKind = Literal[
     "financial_support",
     "other",
 ]
-FrozenJson: TypeAlias = None | bool | int | float | str | tuple["FrozenJson", ...] | tuple[
-    tuple[str, "FrozenJson"], ...
-]
+
+
+class FrozenList(tuple):
+    """Immutable internal list marker; distinct from objects even when empty."""
+
+
+class FrozenObject(tuple):
+    """Immutable internal object marker; never derived from user string/tag values."""
+
+
+FrozenJson: TypeAlias = None | bool | int | float | str | FrozenList | FrozenObject
 
 
 @dataclass(frozen=True)
@@ -116,11 +124,11 @@ def _freeze_json(value: object) -> FrozenJson:
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, list):
-        return tuple(_freeze_json(item) for item in value)
+        return FrozenList(_freeze_json(item) for item in value)
     if isinstance(value, dict):
         if not all(isinstance(key, str) for key in value):
             raise ValueError("Evidence JSON object keys must be strings")
-        return tuple((key, _freeze_json(value[key])) for key in sorted(value))
+        return FrozenObject((key, _freeze_json(value[key])) for key in sorted(value))
     raise ValueError("Evidence values must be JSON-compatible")
 
 
@@ -140,17 +148,8 @@ def _evidence_text(value: FrozenJson) -> str:
 
 
 def _thaw_json(value: FrozenJson) -> object:
-    if isinstance(value, tuple):
-        tuple_value = cast(tuple[FrozenJson, ...], value)
-        if _is_frozen_object(tuple_value):
-            return {key: _thaw_json(item_value) for key, item_value in tuple_value}
-        return [_thaw_json(item) for item in tuple_value]
+    if isinstance(value, FrozenObject):
+        return {key: _thaw_json(item_value) for key, item_value in value}
+    if isinstance(value, FrozenList):
+        return [_thaw_json(item) for item in value]
     return value
-
-
-def _is_frozen_object(
-    value: tuple[FrozenJson, ...],
-) -> TypeGuard[tuple[tuple[str, FrozenJson], ...]]:
-    return all(
-        isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str) for item in value
-    )

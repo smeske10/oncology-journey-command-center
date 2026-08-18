@@ -155,3 +155,32 @@ The controller's final lint run identified a production React lifecycle issue: t
 The explicit, memoized queue-selection transition now sets selected item, clears prior case/error state, and marks the case loading before the request begins. The effect now only synchronizes the external request and async callbacks, depends on stable `selected.need_id` and `selected.patient_id` scalars, and retains AbortController cleanup plus the stale-resolution guard. Initial queue bootstrap invokes the same transition only in its asynchronous success callback.
 
 The controller then confirmed 9/9 web tests passed but reported the remaining exhaustive-deps warning: the effect still read `selected` through optional chaining while declaring expressions inline. The page now derives `selectedNeedId` and `selectedPatientId` once before the effect, reads only those keys in the effect, and declares exactly those two dependencies. JSX selection behavior is unchanged.
+
+## Fix round 2: unambiguous canonical evidence containers
+
+### RED evidence
+
+The new focused regression created equivalent transportation needs from `["yes", []]` and `["yes", {}]`. Before this fix, both values froze to an empty tuple, then thawed as an object; the test reproduced the collision:
+
+```text
+AssertionError: identical evidence_hash values for ["yes", []] and ["yes", {}]
+```
+
+The same test also covers nested mixed containers and reversed object-key insertion order.
+
+### GREEN implementation and verification
+
+`FrozenList` and `FrozenObject` are now distinct immutable internal tuple subclasses. They are created only from incoming JSON list/object containers, so no patient-supplied string can be mistaken for an internal tag. Thawing dispatches by internal class, preserving empty and nested JSON container types. Canonical JSON still sorts object keys and uses stable separators before SHA-256 hashing.
+
+```text
+focused needs/prioritization: 7 passed in 0.43s
+full API: 46 passed, 2 skipped in 5.75s
+ruff check app tests: All checks passed!
+pyright app: 0 errors, 0 warnings, 0 informations
+```
+
+### Round-2 self-review
+
+- `[]`, `{}`, and all nested list/object combinations are unambiguous in the immutable snapshot and its canonical serialization.
+- Mapping insertion order cannot influence `evidence_hash` or idempotency keys; JSON types and values do.
+- The snapshot remains deeply immutable and retains no mutable source reference. No web, policy, queue, or clinical-risk behavior changed.
