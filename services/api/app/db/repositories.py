@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import SyntheticPatient
+from app.db import models
 
 TenantEntity = TypeVar("TenantEntity", bound="TenantScoped")
 
@@ -35,7 +35,7 @@ class UnitOfWork(Protocol):
 class PatientRepository(Protocol):
     def get_for_actor(
         self, *, patient_id: UUID, organization_id: UUID
-    ) -> SyntheticPatient | None: ...
+    ) -> models.SyntheticPatient | None: ...
 
 
 class SqlAlchemyPatientRepository:
@@ -44,10 +44,10 @@ class SqlAlchemyPatientRepository:
 
     def get_for_actor(
         self, *, patient_id: UUID, organization_id: UUID
-    ) -> SyntheticPatient | None:
-        statement = select(SyntheticPatient).where(
-            SyntheticPatient.id == patient_id,
-            SyntheticPatient.organization_id == organization_id,
+    ) -> models.SyntheticPatient | None:
+        statement = select(models.SyntheticPatient).where(
+            models.SyntheticPatient.id == patient_id,
+            models.SyntheticPatient.organization_id == organization_id,
         )
         return self._session.scalar(statement)
 
