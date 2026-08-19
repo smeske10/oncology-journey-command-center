@@ -19,7 +19,7 @@ class AgentRun(Base):
     __tablename__ = "agent_run"
     __table_args__ = (
         tenant_identity_constraint("agent_run"),
-        state_constraint("status", AgentRunStatus),
+        state_constraint("agent_run", "status", AgentRunStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

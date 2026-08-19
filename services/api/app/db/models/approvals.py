@@ -19,7 +19,7 @@ class ApprovalDecision(Base):
     __tablename__ = "approval_decision"
     __table_args__ = (
         tenant_identity_constraint("approval_decision"),
-        state_constraint("status", ApprovalStatus),
+        state_constraint("approval_decision", "status", ApprovalStatus),
         ForeignKeyConstraint(
             ["organization_id", "navigation_task_id"],
             ["navigation_task.organization_id", "navigation_task.id"],

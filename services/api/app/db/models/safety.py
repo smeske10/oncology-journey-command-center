@@ -18,8 +18,8 @@ class SafetySignal(Base):
     __tablename__ = "safety_signal"
     __table_args__ = (
         tenant_identity_constraint("safety_signal"),
-        state_constraint("status", SafetySignalStatus),
-        state_constraint("severity", SafetySeverity),
+        state_constraint("safety_signal", "status", SafetySignalStatus),
+        state_constraint("safety_signal", "severity", SafetySeverity),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

@@ -50,7 +50,7 @@ class CareEpisode(Base):
     __tablename__ = "care_episode"
     __table_args__ = (
         tenant_identity_constraint("care_episode"),
-        state_constraint("status", CareEpisodeStatus),
+        state_constraint("care_episode", "status", CareEpisodeStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

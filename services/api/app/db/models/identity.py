@@ -49,7 +49,7 @@ class RoleAssignment(Base):
     __tablename__ = "role_assignment"
     __table_args__ = (
         tenant_identity_constraint("role_assignment"),
-        state_constraint("role", UserRole),
+        state_constraint("role_assignment", "role", UserRole),
         ForeignKeyConstraint(
             ["organization_id", "user_id"],
             ["user_account.organization_id", "user_account.id"],

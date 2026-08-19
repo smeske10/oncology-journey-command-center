@@ -19,9 +19,13 @@ def state_enum(enum_class: type[PythonEnum], name: str) -> Enum:
     )
 
 
-def state_constraint(column: str, enum_class: type[PythonEnum]) -> CheckConstraint:
+def state_constraint(
+    table_name: str, column: str, enum_class: type[PythonEnum]
+) -> CheckConstraint:
     allowed_values = ", ".join(f"'{member.value}'" for member in enum_class)
-    return CheckConstraint(f"{column} IN ({allowed_values})", name=f"{column}_state")
+    return CheckConstraint(
+        f"{column} IN ({allowed_values})", name=f"ck_{table_name}_{column}_state"
+    )
 
 
 def tenant_identity_constraint(table_name: str) -> UniqueConstraint:

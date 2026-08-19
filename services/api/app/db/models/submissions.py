@@ -22,7 +22,7 @@ class CheckInSubmission(Base):
     __tablename__ = "check_in_submission"
     __table_args__ = (
         tenant_identity_constraint("check_in_submission"),
-        state_constraint("status", CheckInStatus),
+        state_constraint("check_in_submission", "status", CheckInStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

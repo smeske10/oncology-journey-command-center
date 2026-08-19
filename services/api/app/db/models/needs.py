@@ -22,7 +22,7 @@ class ReportedNeed(Base):
     __tablename__ = "reported_need"
     __table_args__ = (
         tenant_identity_constraint("reported_need"),
-        state_constraint("status", NeedStatus),
+        state_constraint("reported_need", "status", NeedStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],
@@ -61,7 +61,7 @@ class NavigationTask(Base):
     __tablename__ = "navigation_task"
     __table_args__ = (
         tenant_identity_constraint("navigation_task"),
-        state_constraint("status", NavigationTaskStatus),
+        state_constraint("navigation_task", "status", NavigationTaskStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],
@@ -102,7 +102,7 @@ class Outcome(Base):
     __tablename__ = "outcome"
     __table_args__ = (
         tenant_identity_constraint("outcome"),
-        state_constraint("status", OutcomeStatus),
+        state_constraint("outcome", "status", OutcomeStatus),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

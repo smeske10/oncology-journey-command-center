@@ -44,7 +44,7 @@ class KnowledgeDocument(Base):
     __tablename__ = "knowledge_document"
     __table_args__ = (
         tenant_identity_constraint("knowledge_document"),
-        state_constraint("status", KnowledgeDocumentStatus),
+        state_constraint("knowledge_document", "status", KnowledgeDocumentStatus),
         ForeignKeyConstraint(
             ["organization_id", "resource_id"],
             ["resource.organization_id", "resource.id"],
