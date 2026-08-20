@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -10,13 +11,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
 from app.db.models import (
+    CareEpisode,
     CheckInDefinition,
     CheckInSubmission,
     Organization,
     PathwayDefinition,
     ReportedNeed,
     SyntheticPatient,
+    User,
 )
+from app.domain.enums import SubmissionSource
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -98,11 +102,25 @@ def test_need_lifecycle_is_independent_of_submission(
     synthetic_patient: SyntheticPatient,
     check_in_definition: CheckInDefinition,
 ) -> None:
+    user = User(email="patient-author@example.test", display_name="Patient author")
+    db_session.add(user)
+    db_session.flush()
+    episode = CareEpisode(
+        organization_id=organization.id,
+        patient_id=synthetic_patient.id,
+        status="active",
+    )
+    db_session.add(episode)
+    db_session.flush()
     submission = CheckInSubmission(
         organization_id=organization.id,
         patient_id=synthetic_patient.id,
+        care_episode_id=episode.id,
         check_in_definition_id=check_in_definition.id,
         status="submitted",
+        submission_source=SubmissionSource.PATIENT,
+        submitted_by_user_id=user.id,
+        submitted_at=datetime.now(UTC),
     )
     need = ReportedNeed(
         organization_id=organization.id,

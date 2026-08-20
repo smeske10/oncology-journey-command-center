@@ -4,12 +4,13 @@ import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.models import CurrentActor
 from app.db.models import CheckInDefinition, CheckInSubmission
-from app.domain.enums import CheckInStatus
+from app.domain.enums import CheckInStatus, SubmissionSource
 from app.domain.types import uuid7
 
 PUBLIC_DEMO_PHI_WARNING = (
@@ -78,10 +79,15 @@ def create_immutable_submission(
     *,
     actor: CurrentActor,
     definition: CheckInDefinition,
+    care_episode_id: UUID,
     payload: CheckInSubmissionCreate,
 ) -> CheckInSubmission:
     """Build the source-of-truth record before any policy or orchestration work starts."""
     _validate_submission_against_definition(definition, payload)
+    if actor.patient_id is None:
+        raise CheckInDefinitionMismatchError(
+            "Patient identity link is required to submit a check-in"
+        )
     labels = _question_labels(definition.questionnaire)
     answers = [
         {
@@ -101,10 +107,13 @@ def create_immutable_submission(
     return CheckInSubmission(
         id=uuid7(),
         organization_id=actor.organization_id,
-        patient_id=actor.user_id,
+        patient_id=actor.patient_id,
+        care_episode_id=care_episode_id,
         check_in_definition_id=definition.id,
         status=CheckInStatus.SUBMITTED,
         answers=source_data,
+        submission_source=SubmissionSource.PATIENT,
+        submitted_by_user_id=actor.user_id,
         submitted_at=datetime.now(UTC),
     )
 

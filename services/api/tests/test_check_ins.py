@@ -10,7 +10,7 @@ import pytest
 
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
-from app.db.models import CheckInDefinition, CheckInSubmission
+from app.db.models import CareEpisode, CheckInDefinition, CheckInSubmission
 from app.db.session import get_session
 from app.domain.enums import CheckInStatus
 from app.main import app
@@ -19,6 +19,7 @@ from app.main import app
 @dataclass
 class FakeSession:
     definition: CheckInDefinition
+    episode: CareEpisode
     submissions: dict[UUID, CheckInSubmission] = field(default_factory=dict)
     committed: bool = False
     rolled_back: bool = False
@@ -29,6 +30,14 @@ class FakeSession:
         if entity is CheckInDefinition:
             if self.definition.id in parameters and self.definition.organization_id in parameters:
                 return self.definition
+            return None
+        if entity is CareEpisode:
+            if (
+                self.episode.organization_id in parameters
+                and self.episode.patient_id in parameters
+                and self.episode.status in parameters
+            ):
+                return self.episode
             return None
         if entity is CheckInSubmission:
             return next(
@@ -91,8 +100,17 @@ def client_context(
         user_id=uuid4(),
         organization_id=check_in_definition.organization_id,
         role=Role.SUPPORTING_ACTOR,
+        patient_id=uuid4(),
     )
-    session = FakeSession(definition=check_in_definition)
+    session = FakeSession(
+        definition=check_in_definition,
+        episode=CareEpisode(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            patient_id=actor.patient_id,
+            status="active",
+        ),
+    )
     app.dependency_overrides[current_actor] = lambda: actor
     app.dependency_overrides[get_session] = lambda: session
     try:
@@ -225,6 +243,40 @@ def test_submission_requires_every_required_definition_answer(
     assert session.submissions == {}
 
 
+def test_submission_rejects_an_actor_without_a_patient_identity_link(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if a supporting role can submit before a patient link is resolved."""
+    session, actor = client_context
+    app.dependency_overrides[current_actor] = lambda: CurrentActor(
+        user_id=actor.user_id,
+        organization_id=actor.organization_id,
+        role=actor.role,
+    )
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Patient identity link is required"}
+    assert session.committed is False
+    assert session.submissions == {}
+
+
 def test_patient_can_export_only_own_synthetic_fhir_submission(
     patient_cookie: dict[str, str],
     check_in_definition: CheckInDefinition,
@@ -235,7 +287,8 @@ def test_patient_can_export_only_own_synthetic_fhir_submission(
     submission = CheckInSubmission(
         id=uuid4(),
         organization_id=actor.organization_id,
-        patient_id=actor.user_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
         check_in_definition_id=check_in_definition.id,
         status=CheckInStatus.SUBMITTED,
         submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
@@ -246,6 +299,8 @@ def test_patient_can_export_only_own_synthetic_fhir_submission(
             "free_text": None,
             "provenance": {"source": "patient-supplied", "actor_id": str(actor.user_id)},
         },
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
     )
     session.submissions[submission.id] = submission
 
@@ -273,10 +328,13 @@ def test_patient_cannot_export_another_patients_submission(
         id=uuid4(),
         organization_id=actor.organization_id,
         patient_id=uuid4(),
+        care_episode_id=session.episode.id,
         check_in_definition_id=check_in_definition.id,
         status=CheckInStatus.SUBMITTED,
         submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
         answers={"items": [], "provenance": {"source": "patient-supplied"}},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
     )
     session.submissions[submission.id] = submission
 

@@ -7,6 +7,7 @@ import json
 import secrets
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.auth.models import CurrentActor, Role
-from app.db.models import RoleAssignment, User
+from app.db.models import PatientIdentityLink, RoleAssignment, User
 
 TOKEN_ISSUER = "ojcc-demo"
 TOKEN_AUDIENCE = "ojcc-web"
@@ -23,7 +24,7 @@ MAX_SESSION_LIFETIME_SECONDS = 2 * 60 * 60
 
 class ActorRepository(Protocol):
     def find_active_actor(
-        self, *, organization_id: UUID, role: Role
+        self, *, organization_id: UUID, role: Role, at: datetime | None = None
     ) -> CurrentActor | None: ...
 
 
@@ -32,28 +33,46 @@ class SqlAlchemyActorRepository:
         self._session = session
 
     def find_active_actor(
-        self, *, organization_id: UUID, role: Role
+        self, *, organization_id: UUID, role: Role, at: datetime | None = None
     ) -> CurrentActor | None:
+        at = datetime.now(UTC) if at is None else at
         statement = (
-            select(User.id, User.organization_id, RoleAssignment.role)
+            select(
+                User.id,
+                RoleAssignment.organization_id,
+                RoleAssignment.role,
+                PatientIdentityLink.patient_id,
+            )
             .join(
                 RoleAssignment,
                 and_(
                     RoleAssignment.user_id == User.id,
-                    RoleAssignment.organization_id == User.organization_id,
+                ),
+            )
+            .outerjoin(
+                PatientIdentityLink,
+                and_(
+                    PatientIdentityLink.user_id == User.id,
+                    PatientIdentityLink.organization_id == RoleAssignment.organization_id,
+                    PatientIdentityLink.linked_at <= at,
+                    PatientIdentityLink.revoked_at.is_(None)
+                    | (at < PatientIdentityLink.revoked_at),
                 ),
             )
             .where(
-                User.organization_id == organization_id,
                 RoleAssignment.organization_id == organization_id,
                 RoleAssignment.role == role,
+                RoleAssignment.granted_at <= at,
+                (RoleAssignment.revoked_at.is_(None) | (at < RoleAssignment.revoked_at)),
                 User.is_active.is_(True),
             )
         )
+        if role == Role.SUPPORTING_ACTOR:
+            statement = statement.where(PatientIdentityLink.patient_id.is_not(None))
         row = self._session.execute(statement).one_or_none()
         if row is None:
             return None
-        return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2])
+        return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2], patient_id=row[3])
 
 
 class DemoSessionService:
@@ -105,6 +124,8 @@ class DemoSessionService:
             "role": actor.role.value,
             "sub": str(actor.user_id),
         }
+        if actor.patient_id is not None:
+            payload["patient"] = str(actor.patient_id)
         signing_input = f"{_encode_json(header)}.{_encode_json(payload)}".encode("ascii")
         signature = hmac.new(self._secret, signing_input, hashlib.sha256).digest()
         return f"{signing_input.decode('ascii')}.{_encode_bytes(signature)}"
@@ -146,6 +167,7 @@ def _actor_from_claims(payload: Mapping[str, object], *, now: int) -> CurrentAct
         user_id=UUID(_string_claim(payload, "sub")),
         organization_id=UUID(_string_claim(payload, "org")),
         role=Role(_string_claim(payload, "role")),
+        patient_id=UUID(_string_claim(payload, "patient")) if "patient" in payload else None,
     )
 
 

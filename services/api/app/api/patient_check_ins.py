@@ -93,9 +93,21 @@ def submit_check_in(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Check-in not found",
                 )
+            if actor.patient_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Patient identity link is required",
+                )
+            episode = unit_of_work.find_active_care_episode(patient_id=actor.patient_id)
+            if episode is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No active care episode",
+                )
             submission = create_immutable_submission(
                 actor=actor,
                 definition=definition,
+                care_episode_id=episode.id,
                 payload=payload,
             )
             unit_of_work.add(cast(TenantScoped, submission))
@@ -131,7 +143,7 @@ def export_submission_as_synthetic_fhir(
                 organization_id=actor.organization_id,
             ),
         )
-        if submission is None or submission.patient_id != actor.user_id:
+        if submission is None or submission.patient_id != actor.patient_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Check-in submission not found",

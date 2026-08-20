@@ -72,11 +72,6 @@ class NavigationTask(Base):
             ["reported_need.organization_id", "reported_need.id"],
             name="fk_navigation_task_organization_reported_need",
         ),
-        ForeignKeyConstraint(
-            ["organization_id", "assignee_user_id"],
-            ["user_account.organization_id", "user_account.id"],
-            name="fk_navigation_task_organization_assignee",
-        ),
         Index("ix_navigation_task_org_status_due_at", "organization_id", "status", "due_at"),
         Index(
             "ix_navigation_task_org_need_status", "organization_id", "reported_need_id", "status"
@@ -86,7 +81,9 @@ class NavigationTask(Base):
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
     patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     reported_need_id: Mapped[UUID | None] = mapped_column(Uuid)
-    assignee_user_id: Mapped[UUID | None] = mapped_column(Uuid)
+    assignee_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_account.id", name="fk_navigation_task_assignee_user")
+    )
     title: Mapped[str] = mapped_column(String(255))
     status: Mapped[NavigationTaskStatus] = mapped_column(
         state_enum(NavigationTaskStatus, "navigation_task_status"),

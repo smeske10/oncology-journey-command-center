@@ -11,8 +11,10 @@ def test_core_domain_metadata_uses_postgresql_jsonb_and_tenant_first_indexes() -
         "organization",
         "user_account",
         "role_assignment",
+        "patient_identity_link",
         "synthetic_patient",
         "care_episode",
+        "episode_pathway_assignment",
         "pathway_definition",
         "check_in_definition",
         "check_in_submission",
@@ -40,18 +42,17 @@ def test_core_domain_metadata_uses_postgresql_jsonb_and_tenant_first_indexes() -
 
 def test_tenant_owned_relationships_use_organization_aware_foreign_keys() -> None:
     expected_relationships = {
-        "role_assignment": {"user_account"},
-        "care_episode": {"synthetic_patient", "pathway_definition"},
+        "care_episode": {"synthetic_patient"},
+        "episode_pathway_assignment": {"care_episode", "pathway_definition"},
         "check_in_definition": {"pathway_definition"},
         "check_in_submission": {"synthetic_patient", "check_in_definition"},
         "reported_need": {"synthetic_patient", "check_in_submission"},
         "safety_signal": {"synthetic_patient", "check_in_submission"},
-        "navigation_task": {"synthetic_patient", "reported_need", "user_account"},
-        "approval_decision": {"navigation_task", "user_account"},
+        "navigation_task": {"synthetic_patient", "reported_need"},
+        "approval_decision": {"navigation_task"},
         "knowledge_document": {"resource"},
         "agent_run": {"synthetic_patient", "check_in_submission", "reported_need"},
         "outcome": {"synthetic_patient", "reported_need"},
-        "audit_event": {"user_account"},
     }
 
     for table_name, referenced_tables in expected_relationships.items():
@@ -70,9 +71,18 @@ def test_tenant_owned_relationships_use_organization_aware_foreign_keys() -> Non
 
 def test_check_constraint_names_match_the_immutable_task_five_contract() -> None:
     expected_names = {
-        "role_assignment": {"ck_role_assignment_ck_role_assignment_role_state"},
+        "role_assignment": {
+            "ck_role_assignment_ck_role_assignment_grant_interval",
+            "ck_role_assignment_ck_role_assignment_role_state",
+        },
         "care_episode": {"ck_care_episode_ck_care_episode_status_state"},
-        "check_in_submission": {"ck_check_in_submission_ck_check_in_submission_status_state"},
+        "episode_pathway_assignment": {
+            "ck_episode_pathway_assignment_ck_episode_pathway_assignment_effective_interval"
+        },
+        "check_in_submission": {
+            "ck_check_in_submission_ck_check_in_submission_provenance",
+            "ck_check_in_submission_ck_check_in_submission_status_state",
+        },
         "reported_need": {"ck_reported_need_ck_reported_need_status_state"},
         "safety_signal": {
             "ck_safety_signal_ck_safety_signal_severity_state",

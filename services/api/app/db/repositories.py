@@ -93,6 +93,14 @@ class SqlAlchemyUnitOfWork:
     def commit(self) -> None:
         self._require_session().commit()
 
+    def find_active_care_episode(self, *, patient_id: UUID) -> models.CareEpisode | None:
+        statement = select(models.CareEpisode).where(
+            models.CareEpisode.organization_id == self.organization_id,
+            models.CareEpisode.patient_id == patient_id,
+            models.CareEpisode.status == "active",
+        )
+        return self._require_session().scalar(statement)
+
     def rollback(self) -> None:
         self._require_session().rollback()
 

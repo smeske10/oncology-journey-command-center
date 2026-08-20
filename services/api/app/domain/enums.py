@@ -13,9 +13,15 @@ class CareEpisodeStatus(str, Enum):
 
 
 class CheckInStatus(str, Enum):
-    DRAFT = "draft"
     SUBMITTED = "submitted"
     PROCESSED = "processed"
+
+
+class SubmissionSource(str, Enum):
+    PATIENT = "patient"
+    AUTHORIZED_PROXY = "authorized_proxy"
+    CLINICIAN = "clinician"
+    IMPORT = "import"
 
 
 class NeedStatus(str, Enum):

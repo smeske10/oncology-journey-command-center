@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -34,11 +35,12 @@ class Organization(Base):
 class User(Base):
     __tablename__ = "user_account"
     __table_args__ = (
-        tenant_identity_constraint("user_account"),
-        Index("ix_user_account_org_email", "organization_id", "email", unique=True),
+        Index("ix_user_account_email", "email", unique=True),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
-    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
+    primary_organization_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("organization.id", name="fk_user_account_primary_organization")
+    )
     email: Mapped[str] = mapped_column(String(320))
     display_name: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -48,19 +50,65 @@ class User(Base):
 class RoleAssignment(Base):
     __tablename__ = "role_assignment"
     __table_args__ = (
-        tenant_identity_constraint("role_assignment"),
         state_constraint("role_assignment", "role", UserRole),
-        ForeignKeyConstraint(
-            ["organization_id", "user_id"],
-            ["user_account.organization_id", "user_account.id"],
-            name="fk_role_assignment_organization_user_account",
+        CheckConstraint(
+            "revoked_at IS NULL OR granted_at <= revoked_at",
+            name="ck_role_assignment_grant_interval",
         ),
-        Index("ix_role_assignment_org_user", "organization_id", "user_id", "role", unique=True),
+        Index(
+            "ix_role_assignment_active_org_user_role",
+            "organization_id",
+            "user_id",
+            "role",
+            unique=True,
+            postgresql_where="revoked_at IS NULL",
+        ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
-    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_account.id", name="fk_role_assignment_user_account"), nullable=False
+    )
     role: Mapped[UserRole] = mapped_column(state_enum(UserRole, "user_role"), nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PatientIdentityLink(Base):
+    __tablename__ = "patient_identity_link"
+    __table_args__ = (
+        tenant_identity_constraint("patient_identity_link"),
+        ForeignKeyConstraint(
+            ["organization_id", "patient_id"],
+            ["synthetic_patient.organization_id", "synthetic_patient.id"],
+            name="fk_patient_identity_link_organization_patient",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR linked_at <= revoked_at",
+            name="ck_patient_identity_link_interval",
+        ),
+        Index(
+            "ix_patient_identity_link_active_user",
+            "organization_id",
+            "user_id",
+            unique=True,
+            postgresql_where="revoked_at IS NULL",
+        ),
+        Index(
+            "ix_patient_identity_link_active_patient",
+            "organization_id",
+            "patient_id",
+            unique=True,
+            postgresql_where="revoked_at IS NULL",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("user_account.id"), nullable=False)
+    patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

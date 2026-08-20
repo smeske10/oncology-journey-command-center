@@ -11,3 +11,4 @@ class CurrentActor:
     user_id: UUID
     organization_id: UUID
     role: Role
+    patient_id: UUID | None = None

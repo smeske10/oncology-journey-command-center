@@ -25,11 +25,6 @@ class ApprovalDecision(Base):
             ["navigation_task.organization_id", "navigation_task.id"],
             name="fk_approval_decision_organization_navigation_task",
         ),
-        ForeignKeyConstraint(
-            ["organization_id", "authorized_user_id"],
-            ["user_account.organization_id", "user_account.id"],
-            name="fk_approval_decision_organization_authorized_user",
-        ),
         Index(
             "ix_approval_decision_org_task_created",
             "organization_id",
@@ -40,7 +35,9 @@ class ApprovalDecision(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
     navigation_task_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    authorized_user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    authorized_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_account.id", name="fk_approval_decision_authorized_user"), nullable=False
+    )
     status: Mapped[ApprovalStatus] = mapped_column(state_enum(ApprovalStatus, "approval_status"))
     proposed_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     final_value: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

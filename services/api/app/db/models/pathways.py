@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -13,8 +14,9 @@ from sqlalchemy import (
     Integer,
     String,
     Uuid,
+    text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -56,22 +58,66 @@ class CareEpisode(Base):
             ["synthetic_patient.organization_id", "synthetic_patient.id"],
             name="fk_care_episode_organization_patient",
         ),
-        ForeignKeyConstraint(
-            ["organization_id", "pathway_definition_id"],
-            ["pathway_definition.organization_id", "pathway_definition.id"],
-            name="fk_care_episode_organization_pathway_definition",
+        Index(
+            "ix_care_episode_org_patient_id",
+            "organization_id",
+            "patient_id",
+            "id",
+            unique=True,
         ),
         Index("ix_care_episode_org_patient_status", "organization_id", "patient_id", "status"),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
     patient_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
-    pathway_definition_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     status: Mapped[CareEpisodeStatus] = mapped_column(
         state_enum(CareEpisodeStatus, "care_episode_status"), default=CareEpisodeStatus.ACTIVE
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EpisodePathwayAssignment(Base):
+    __tablename__ = "episode_pathway_assignment"
+    __table_args__ = (
+        tenant_identity_constraint("episode_pathway_assignment"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_from < effective_to",
+            name="ck_episode_pathway_assignment_effective_interval",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "care_episode_id"],
+            ["care_episode.organization_id", "care_episode.id"],
+            name="fk_episode_pathway_assignment_organization_episode",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "pathway_definition_id"],
+            ["pathway_definition.organization_id", "pathway_definition.id"],
+            name="fk_episode_pathway_assignment_organization_pathway",
+        ),
+        ExcludeConstraint(
+            ("organization_id", "="),
+            ("care_episode_id", "="),
+            (text("tstzrange(effective_from, effective_to, '[)')"), "&&"),
+            name="ex_episode_pathway_assignment_no_overlap",
+            using="gist",
+        ),
+        Index(
+            "ix_episode_pathway_assignment_org_episode_effective_from",
+            "organization_id",
+            "care_episode_id",
+            "effective_from",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid7)
+    organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
+    care_episode_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    pathway_definition_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    migration_reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    authored_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("user_account.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CheckInDefinition(Base):
