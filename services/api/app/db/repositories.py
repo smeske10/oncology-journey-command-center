@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Protocol, TypeVar, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.db import models
@@ -100,6 +101,32 @@ class SqlAlchemyUnitOfWork:
             models.CareEpisode.status == "active",
         )
         return self._require_session().scalar(statement)
+
+    def definition_matches_effective_pathway(
+        self, *, care_episode_id: UUID, check_in_definition_id: UUID, at: datetime | None = None
+    ) -> bool:
+        at = datetime.now(UTC) if at is None else at
+        statement = (
+            select(models.EpisodePathwayAssignment.id)
+            .join(
+                models.CheckInDefinition,
+                and_(
+                    models.CheckInDefinition.organization_id
+                    == models.EpisodePathwayAssignment.organization_id,
+                    models.CheckInDefinition.pathway_definition_id
+                    == models.EpisodePathwayAssignment.pathway_definition_id,
+                ),
+            )
+            .where(
+                models.EpisodePathwayAssignment.organization_id == self.organization_id,
+                models.EpisodePathwayAssignment.care_episode_id == care_episode_id,
+                models.CheckInDefinition.id == check_in_definition_id,
+                models.EpisodePathwayAssignment.effective_from <= at,
+                models.EpisodePathwayAssignment.effective_to.is_(None)
+                | (at < models.EpisodePathwayAssignment.effective_to),
+            )
+        )
+        return self._require_session().scalar(statement) is not None
 
     def rollback(self) -> None:
         self._require_session().rollback()

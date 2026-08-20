@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import current_actor, require_role
 from app.auth.models import CurrentActor, Role
-from app.db.models import CheckInDefinition, CheckInSubmission
+from app.db.models import (
+    CareEpisode,
+    CheckInDefinition,
+    CheckInSubmission,
+    EpisodePathwayAssignment,
+)
 from app.db.repositories import SqlAlchemyUnitOfWork, TenantScoped
 from app.db.session import get_session
 from app.domain.check_ins import (
@@ -51,9 +57,37 @@ def get_current_check_in(
     actor: CurrentActor = Depends(require_role(Role.SUPPORTING_ACTOR)),
     session: Session = Depends(get_session),
 ) -> CheckInDefinitionResponse:
+    if actor.patient_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Patient identity link is required",
+        )
+    now = datetime.now(UTC)
     definition = session.scalars(
         select(CheckInDefinition)
-        .where(CheckInDefinition.organization_id == actor.organization_id)
+        .join(
+            EpisodePathwayAssignment,
+            and_(
+                EpisodePathwayAssignment.organization_id == CheckInDefinition.organization_id,
+                EpisodePathwayAssignment.pathway_definition_id
+                == CheckInDefinition.pathway_definition_id,
+            ),
+        )
+        .join(
+            CareEpisode,
+            and_(
+                CareEpisode.organization_id == EpisodePathwayAssignment.organization_id,
+                CareEpisode.id == EpisodePathwayAssignment.care_episode_id,
+            ),
+        )
+        .where(
+            CheckInDefinition.organization_id == actor.organization_id,
+            CareEpisode.patient_id == actor.patient_id,
+            CareEpisode.status == "active",
+            EpisodePathwayAssignment.effective_from <= now,
+            EpisodePathwayAssignment.effective_to.is_(None)
+            | (now < EpisodePathwayAssignment.effective_to),
+        )
         .order_by(CheckInDefinition.created_at.desc())
     ).first()
     if definition is None:
@@ -103,6 +137,14 @@ def submit_check_in(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="No active care episode",
+                )
+            if not unit_of_work.definition_matches_effective_pathway(
+                care_episode_id=episode.id,
+                check_in_definition_id=definition.id,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Check-in definition is not active for this care episode",
                 )
             submission = create_immutable_submission(
                 actor=actor,

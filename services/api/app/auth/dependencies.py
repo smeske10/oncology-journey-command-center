@@ -5,11 +5,13 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.auth.models import CurrentActor, Role
-from app.auth.service import DemoSessionService
+from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.config import settings
 from app.db.models import PatientIdentityLink, RoleAssignment, User
+from app.db.session import get_session
 
 SESSION_COOKIE_NAME = "ojcc_session"
 
@@ -72,6 +74,7 @@ def get_current_demo_session_service() -> DemoSessionService:
 def current_actor(
     request: Request,
     session_service: DemoSessionService = Depends(get_current_demo_session_service),
+    session: Session = Depends(get_session),
 ) -> CurrentActor:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token is None:
@@ -80,12 +83,23 @@ def current_actor(
             detail="Authentication required",
         )
     try:
-        return session_service.current_actor(token)
+        token_actor = session_service.current_actor(token)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired demo session",
         ) from error
+    active_actor = SqlAlchemyActorRepository(session).find_active_actor_for_user(
+        organization_id=token_actor.organization_id,
+        user_id=token_actor.user_id,
+        role=token_actor.role,
+    )
+    if active_actor is None or active_actor.patient_id != token_actor.patient_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo session is no longer authorized",
+        )
+    return active_actor
 
 
 def require_role(*allowed: Role) -> Callable[[CurrentActor], CurrentActor]:

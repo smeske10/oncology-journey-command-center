@@ -129,12 +129,50 @@ def upgrade() -> None:
         postgresql_where=sa.text("revoked_at IS NULL"),
     )
 
-    if not context.is_offline_mode() and bind.execute(
-        sa.text("SELECT EXISTS (SELECT 1 FROM care_episode)")
-    ).scalar():
-        raise RuntimeError(
-            "Cannot infer pathway-assignment authorship for existing care episodes; reseed synthetic data."
+    if not context.is_offline_mode():
+        op.execute(
+            """
+            INSERT INTO patient_identity_link
+                (id, organization_id, user_id, patient_id, linked_at)
+            SELECT
+                md5(random()::text || clock_timestamp()::text)::uuid,
+                patient.organization_id,
+                account.id,
+                patient.id,
+                GREATEST(account.created_at, patient.created_at)
+            FROM synthetic_patient AS patient
+            JOIN user_account AS account
+              ON account.id = patient.id
+             AND account.primary_organization_id = patient.organization_id
+            """
         )
+        op.execute(
+            """
+            DO $$
+            DECLARE episode_id uuid;
+            BEGIN
+                SELECT episode.id INTO episode_id
+                FROM care_episode AS episode
+                LEFT JOIN patient_identity_link AS link
+                  ON link.organization_id = episode.organization_id
+                 AND link.patient_id = episode.patient_id
+                WHERE link.id IS NULL
+                LIMIT 1;
+                IF episode_id IS NOT NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot migrate care episode %: legacy patient identity has no unambiguous matching user',
+                        episode_id;
+                END IF;
+            END $$;
+            """
+        )
+    op.execute(
+        """
+        CREATE TEMP TABLE legacy_episode_pathway ON COMMIT DROP AS
+        SELECT id, organization_id, patient_id, pathway_definition_id, started_at
+        FROM care_episode
+        """
+    )
     op.drop_constraint("fk_care_episode_organization_pathway_definition", "care_episode")
     op.drop_column("care_episode", "pathway_definition_id")
     op.create_index(
@@ -189,13 +227,27 @@ def upgrade() -> None:
         "episode_pathway_assignment",
         ["organization_id", "care_episode_id", "effective_from"],
     )
-
-    if not context.is_offline_mode() and bind.execute(
-        sa.text("SELECT EXISTS (SELECT 1 FROM check_in_submission)")
-    ).scalar():
-        raise RuntimeError(
-            "Cannot infer care-episode or submission provenance for existing submissions; reseed synthetic data."
+    if not context.is_offline_mode():
+        op.execute(
+            """
+            INSERT INTO episode_pathway_assignment
+                (id, organization_id, care_episode_id, pathway_definition_id,
+                 effective_from, migration_reason, authored_by_user_id)
+            SELECT
+                md5(random()::text || clock_timestamp()::text || legacy.id::text)::uuid,
+                legacy.organization_id,
+                legacy.id,
+                legacy.pathway_definition_id,
+                legacy.started_at,
+                'legacy_patient_identity_backfill',
+                link.user_id
+            FROM legacy_episode_pathway AS legacy
+            JOIN patient_identity_link AS link
+              ON link.organization_id = legacy.organization_id
+             AND link.patient_id = legacy.patient_id
+            """
         )
+
     op.drop_constraint("ck_check_in_submission_status_state", "check_in_submission", type_="check")
     op.add_column("check_in_submission", sa.Column("care_episode_id", sa.Uuid(), nullable=True))
     op.add_column(
@@ -206,6 +258,81 @@ def upgrade() -> None:
     op.add_column("check_in_submission", sa.Column("external_source", sa.String(255)))
     op.add_column("check_in_submission", sa.Column("external_record_id", sa.String(255)))
     op.add_column("check_in_submission", sa.Column("supersedes_submission_id", sa.Uuid()))
+    if not context.is_offline_mode():
+        op.execute(
+            """
+            DO $$
+            DECLARE submission_id uuid;
+            BEGIN
+                SELECT submission.id INTO submission_id
+                FROM check_in_submission AS submission
+                LEFT JOIN patient_identity_link AS link
+                  ON link.organization_id = submission.organization_id
+                 AND link.patient_id = submission.patient_id
+                WHERE link.id IS NULL OR submission.submitted_at IS NULL
+                LIMIT 1;
+                IF submission_id IS NOT NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot migrate check-in submission %: patient authorship or submitted timestamp is ambiguous',
+                        submission_id;
+                END IF;
+                SELECT submission.id INTO submission_id
+                FROM check_in_submission AS submission
+                JOIN check_in_definition AS definition
+                  ON definition.id = submission.check_in_definition_id
+                 AND definition.organization_id = submission.organization_id
+                LEFT JOIN LATERAL (
+                    SELECT assignment.care_episode_id
+                    FROM episode_pathway_assignment AS assignment
+                    JOIN care_episode AS episode
+                      ON episode.id = assignment.care_episode_id
+                     AND episode.organization_id = assignment.organization_id
+                    WHERE assignment.organization_id = submission.organization_id
+                      AND episode.patient_id = submission.patient_id
+                      AND assignment.pathway_definition_id = definition.pathway_definition_id
+                      AND assignment.effective_from <= submission.submitted_at
+                      AND (assignment.effective_to IS NULL
+                           OR submission.submitted_at < assignment.effective_to)
+                ) AS episode_match ON true
+                GROUP BY submission.id
+                HAVING count(episode_match.care_episode_id) <> 1
+                LIMIT 1;
+                IF submission_id IS NOT NULL THEN
+                    RAISE EXCEPTION
+                        'Cannot migrate check-in submission %: expected one effective legacy care episode',
+                        submission_id;
+                END IF;
+            END $$;
+            """
+        )
+        op.execute(
+            """
+            UPDATE check_in_submission AS submission
+            SET care_episode_id = (
+                    SELECT assignment.care_episode_id
+                    FROM check_in_definition AS definition
+                    JOIN episode_pathway_assignment AS assignment
+                      ON assignment.organization_id = definition.organization_id
+                     AND assignment.pathway_definition_id = definition.pathway_definition_id
+                    JOIN care_episode AS episode
+                      ON episode.id = assignment.care_episode_id
+                     AND episode.organization_id = assignment.organization_id
+                    WHERE definition.organization_id = submission.organization_id
+                      AND definition.id = submission.check_in_definition_id
+                      AND episode.patient_id = submission.patient_id
+                      AND assignment.effective_from <= submission.submitted_at
+                      AND (assignment.effective_to IS NULL
+                           OR submission.submitted_at < assignment.effective_to)
+                ),
+                submission_source = 'patient',
+                submitted_by_user_id = (
+                    SELECT link.user_id
+                    FROM patient_identity_link AS link
+                    WHERE link.organization_id = submission.organization_id
+                      AND link.patient_id = submission.patient_id
+                )
+            """
+        )
     op.alter_column("check_in_submission", "care_episode_id", nullable=False)
     op.alter_column("check_in_submission", "check_in_definition_id", nullable=False)
     op.alter_column("check_in_submission", "submission_source", nullable=False)

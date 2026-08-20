@@ -75,6 +75,6 @@ class CheckInSubmission(Base):
     external_source: Mapped[str | None] = mapped_column()
     external_record_id: Mapped[str | None] = mapped_column()
     supersedes_submission_id: Mapped[UUID | None] = mapped_column(Uuid, unique=True)
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reported_needs: Mapped[list["ReportedNeed"]] = relationship(back_populates="source_submission")

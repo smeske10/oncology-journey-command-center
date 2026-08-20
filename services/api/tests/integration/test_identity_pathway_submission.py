@@ -6,12 +6,16 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 
-from app.auth.service import SqlAlchemyActorRepository
+from app.auth.dependencies import current_actor
+from app.auth.models import CurrentActor
+from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.config import settings
 from app.db.models import (
     CareEpisode,
@@ -156,6 +160,58 @@ def test_revoked_role_or_patient_link_cannot_create_patient_actor(db_session: Se
     )
 
     assert actor is None
+
+
+@pytest.mark.parametrize("revoked_record", ["role", "link"])
+def test_request_revalidates_revoked_patient_authority_after_token_issuance(
+    db_session: Session, revoked_record: str
+) -> None:
+    """This fails if a signed token can outlive a revoked role or patient identity link."""
+    organization, user, patient = _identity_fixture(db_session)
+    now = datetime.now(UTC)
+    link = PatientIdentityLink(
+        organization_id=organization.id,
+        user_id=user.id,
+        patient_id=patient.id,
+        linked_at=now - timedelta(minutes=1),
+    )
+    role = RoleAssignment(
+        organization_id=organization.id,
+        user_id=user.id,
+        role=UserRole.SUPPORTING_ACTOR,
+        granted_at=now - timedelta(minutes=1),
+    )
+    db_session.add_all([link, role])
+    db_session.flush()
+    actor = CurrentActor(
+        user_id=user.id,
+        organization_id=organization.id,
+        role=UserRole.SUPPORTING_ACTOR,
+        patient_id=patient.id,
+    )
+    service = DemoSessionService(
+        actor_repository=None,
+        secret="test-only-signing-secret",
+        ttl_minutes=30,
+        organization_id=None,
+    )
+    token = service.create_token(actor)
+    request = Request(
+        {"type": "http", "headers": [(b"cookie", f"ojcc_session={token}".encode())]}
+    )
+    assert current_actor(request, service, db_session) == actor
+
+    if revoked_record == "role":
+        role.revoked_at = datetime.now(UTC)
+    else:
+        link.revoked_at = datetime.now(UTC)
+    db_session.flush()
+
+    with pytest.raises(HTTPException) as exc_info:
+        current_actor(request, service, db_session)
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Demo session is no longer authorized"
 
 
 def test_pathway_assignments_reject_overlap_and_allow_adjacent_intervals(

@@ -74,6 +74,49 @@ class SqlAlchemyActorRepository:
             return None
         return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2], patient_id=row[3])
 
+    def find_active_actor_for_user(
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        role: Role,
+        at: datetime | None = None,
+    ) -> CurrentActor | None:
+        at = datetime.now(UTC) if at is None else at
+        statement = (
+            select(
+                User.id,
+                RoleAssignment.organization_id,
+                RoleAssignment.role,
+                PatientIdentityLink.patient_id,
+            )
+            .join(RoleAssignment, RoleAssignment.user_id == User.id)
+            .outerjoin(
+                PatientIdentityLink,
+                and_(
+                    PatientIdentityLink.user_id == User.id,
+                    PatientIdentityLink.organization_id == RoleAssignment.organization_id,
+                    PatientIdentityLink.linked_at <= at,
+                    PatientIdentityLink.revoked_at.is_(None)
+                    | (at < PatientIdentityLink.revoked_at),
+                ),
+            )
+            .where(
+                User.id == user_id,
+                RoleAssignment.organization_id == organization_id,
+                RoleAssignment.role == role,
+                RoleAssignment.granted_at <= at,
+                RoleAssignment.revoked_at.is_(None) | (at < RoleAssignment.revoked_at),
+                User.is_active.is_(True),
+            )
+        )
+        if role == Role.SUPPORTING_ACTOR:
+            statement = statement.where(PatientIdentityLink.patient_id.is_not(None))
+        row = self._session.execute(statement).one_or_none()
+        if row is None:
+            return None
+        return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2], patient_id=row[3])
+
 
 class DemoSessionService:
     def __init__(

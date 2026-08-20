@@ -10,7 +10,12 @@ import pytest
 
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
-from app.db.models import CareEpisode, CheckInDefinition, CheckInSubmission
+from app.db.models import (
+    CareEpisode,
+    CheckInDefinition,
+    CheckInSubmission,
+    EpisodePathwayAssignment,
+)
 from app.db.session import get_session
 from app.domain.enums import CheckInStatus
 from app.main import app
@@ -20,6 +25,7 @@ from app.main import app
 class FakeSession:
     definition: CheckInDefinition
     episode: CareEpisode
+    assignment: EpisodePathwayAssignment
     submissions: dict[UUID, CheckInSubmission] = field(default_factory=dict)
     committed: bool = False
     rolled_back: bool = False
@@ -38,6 +44,16 @@ class FakeSession:
                 and self.episode.status in parameters
             ):
                 return self.episode
+            return None
+        if entity is EpisodePathwayAssignment:
+            if (
+                self.assignment.organization_id in parameters
+                and self.assignment.care_episode_id in parameters
+                and self.definition.id in parameters
+                and self.assignment.pathway_definition_id
+                == self.definition.pathway_definition_id
+            ):
+                return self.assignment.id
             return None
         if entity is CheckInSubmission:
             return next(
@@ -110,7 +126,17 @@ def client_context(
             patient_id=actor.patient_id,
             status="active",
         ),
+        assignment=EpisodePathwayAssignment(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            care_episode_id=uuid4(),
+            pathway_definition_id=check_in_definition.pathway_definition_id,
+            effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+            migration_reason="test",
+            authored_by_user_id=actor.user_id,
+        ),
     )
+    session.assignment.care_episode_id = session.episode.id
     app.dependency_overrides[current_actor] = lambda: actor
     app.dependency_overrides[get_session] = lambda: session
     try:
@@ -273,6 +299,36 @@ def test_submission_rejects_an_actor_without_a_patient_identity_link(
 
     assert response.status_code == 403
     assert response.json() == {"detail": "Patient identity link is required"}
+    assert session.committed is False
+    assert session.submissions == {}
+
+
+def test_submission_rejects_a_definition_outside_the_episode_pathway(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if any same-tenant questionnaire can be submitted for an unrelated pathway."""
+    session, _ = client_context
+    session.assignment.pathway_definition_id = uuid4()
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Check-in definition is not active for this care episode"}
     assert session.committed is False
     assert session.submissions == {}
 
