@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from sqlalchemy.sql.naming import conv
 
 from app.domain.enums import CareEpisodeStatus
 from app.domain.types import uuid7
@@ -83,7 +84,7 @@ class EpisodePathwayAssignment(Base):
         tenant_identity_constraint("episode_pathway_assignment"),
         CheckConstraint(
             "effective_to IS NULL OR effective_from < effective_to",
-            name="ck_episode_pathway_assignment_effective_interval",
+            name=conv("ck_episode_pathway_assignment_ck_episode_pathway_assign_155e"),
         ),
         ForeignKeyConstraint(
             ["organization_id", "care_episode_id"],

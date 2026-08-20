@@ -77,7 +77,7 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
         },
         "care_episode": {"ck_care_episode_ck_care_episode_status_state"},
         "episode_pathway_assignment": {
-            "ck_episode_pathway_assignment_ck_episode_pathway_assignment_effective_interval"
+            "ck_episode_pathway_assignment_ck_episode_pathway_assign_155e"
         },
         "check_in_submission": {
             "ck_check_in_submission_ck_check_in_submission_provenance",
