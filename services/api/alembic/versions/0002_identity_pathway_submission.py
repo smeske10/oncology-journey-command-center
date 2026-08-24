@@ -96,7 +96,10 @@ def upgrade() -> None:
         sa.Column("linked_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True)),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_patient_identity_link"),
         sa.UniqueConstraint(
@@ -160,7 +163,8 @@ def upgrade() -> None:
                 LIMIT 1;
                 IF episode_id IS NOT NULL THEN
                     RAISE EXCEPTION
-                        'Cannot migrate care episode %: legacy patient identity has no unambiguous matching user',
+                        'Cannot migrate care episode %: legacy patient """
+            """identity has no unambiguous matching user',
                         episode_id;
                 END IF;
             END $$;
@@ -192,7 +196,10 @@ def upgrade() -> None:
         sa.Column("migration_reason", sa.String(500), nullable=False),
         sa.Column("authored_by_user_id", sa.Uuid(), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_episode_pathway_assignment"),
         sa.UniqueConstraint(
@@ -273,7 +280,8 @@ def upgrade() -> None:
                 LIMIT 1;
                 IF submission_id IS NOT NULL THEN
                     RAISE EXCEPTION
-                        'Cannot migrate check-in submission %: patient authorship or submitted timestamp is ambiguous',
+                        'Cannot migrate check-in submission %: patient """
+            """authorship or submitted timestamp is ambiguous',
                         submission_id;
                 END IF;
                 SELECT submission.id INTO submission_id
@@ -299,7 +307,8 @@ def upgrade() -> None:
                 LIMIT 1;
                 IF submission_id IS NOT NULL THEN
                     RAISE EXCEPTION
-                        'Cannot migrate check-in submission %: expected one effective legacy care episode',
+                        'Cannot migrate check-in submission %: expected """
+            """one effective legacy care episode',
                         submission_id;
                 END IF;
             END $$;
