@@ -237,15 +237,22 @@ git commit -m "feat: reconcile identity and submission provenance"
 
 - Modify: `services/api/app/db/models/needs.py`
 - Modify: `services/api/app/db/models/audit.py`
+- Modify: `services/api/app/db/models/submissions.py`
 - Modify: `services/api/app/domain/enums.py`
 - Modify: `services/api/app/domain/needs.py`
 - Create: `services/api/app/domain/outcomes.py`
 - Create: `services/api/app/api/navigator_outcomes.py`
+- Modify: `services/api/app/api/navigator_queue.py`
 - Modify: `services/api/app/main.py`
 - Create: `services/api/alembic/versions/0003_need_task_outcome_lifecycle.py`
 - Create: `services/api/tests/test_outcomes.py`
 - Create: `services/api/tests/integration/test_need_task_lifecycle.py`
+- Modify: `services/api/tests/integration/test_core_domain.py`
+- Modify: `services/api/tests/test_core_domain_migration.py`
+- Modify: `services/api/tests/test_core_domain_metadata.py`
 - Modify: `services/api/tests/test_navigator_queue.py`
+- Modify: `contracts/openapi.json`
+- Modify: `apps/web/lib/api-types.ts`
 
 - [ ] **Step 1: Write failing lifecycle tests**
 
@@ -258,7 +265,13 @@ assert all(task.cancellation_reason == "need_closed" for task in open_tasks)
 assert completed_task.state == "completed"
 ```
 
-Prove there is one task-level AuditEvent per automatic cancellation; actor and timestamp equal the Outcome recorder and timestamp. Prove task creation, assignment, or restart fails after closure and reopening creates a new need with no inherited tasks.
+Prove there is one task-level AuditEvent per automatic cancellation; actor and timestamp equal the Outcome recorder and timestamp. Prove task creation, assignment, or restart fails after closure and reopening creates a new need with no inherited tasks. Prove an unassigned task leaves the need open, while the first assignment or start advances it to `in_progress`.
+
+Add two-session PostgreSQL races for Outcome insertion against task creation, assignment, and start; no interleaving may commit a closed need with a non-terminal task. Race two different Outcome commands for one need, and race identical idempotency keys, proving one Outcome and a deterministic replay response.
+
+Add negative cross-organization, cross-patient, and cross-episode relationship tests. Add route tests for non-navigator, revoked, and cross-organization actors.
+
+Extend the disposable PostgreSQL migration fixture with representative open need and task rows at revision `0002`, then upgrade to `0003`. Add a separate diagnostic test for legacy terminal data whose Outcome recorder cannot be established without inventing authorship; the migration must fail precisely and direct the synthetic demo to reset.
 
 - [ ] **Step 2: Replace closure columns with authorizing records**
 
@@ -268,21 +281,39 @@ Prove there is one task-level AuditEvent per automatic cancellation; actor and t
 CHECK (num_nonnulls(source_submission_id, reopened_from_need_id) = 1)
 ```
 
-Make `reopened_from_need_id` unique. Remove `ReportedNeed.outcome_id`, stored terminal values, and closure timestamps. Make `Outcome.reported_need_id NOT NULL UNIQUE`. Create `effective_need_state` and make all queues and exports read it rather than raw status.
+Add required `care_episode_id`, backfilled from the source submission for existing open needs. Make the source-submission edge composite across organization, patient, care episode, and submission ID. Make `reopened_from_need_id` unique and enforce a composite self-reference across organization, patient, and care episode. Remove `ReportedNeed.outcome_id`, stored terminal values, and closure timestamps.
+
+Make `NavigationTask.reported_need_id NOT NULL` and enforce that its organization and patient match the referenced need. Add the `assigned` state plus cancellation actor, timestamp, and controlled reason columns; completed and cancelled tasks are irreversible.
+
+Make `Outcome.reported_need_id NOT NULL UNIQUE`, enforce organization and patient alignment with the need, and store `recorded_by_user_id`, `recorded_at`, `disposition`, supporting `note`, and an idempotency key with `UNIQUE (organization_id, idempotency_key)`. Create `effective_need_state` and make the navigator queue, navigator case, and every need-facing export read it rather than raw status. Task 3 owns this need-view adaptation; Task 6 later regression-tests the journey while integrating safety and proposal views.
 
 - [ ] **Step 3: Implement one authoritative closure trigger**
 
-The `AFTER INSERT ON outcome` trigger must lock the need and its non-terminal tasks, cancel those tasks using `need_closed`, attribute cancellation to the Outcome recorder, and insert one AuditEvent per task in the same transaction. Do not duplicate this logic in the service layer. Add separate database guards for task creation and active-state transitions on a closed need.
+The `AFTER INSERT ON outcome` trigger must lock the need and its non-terminal tasks, cancel those tasks using `need_closed`, attribute cancellation to the Outcome recorder, and insert one `task_cancelled_by_closure` AuditEvent per task in the same transaction. Each event targets the task and links the authorizing Outcome in its payload. Do not duplicate this logic in the service layer.
+
+Task creation, assignment, and start guards must lock the parent need in the same order as closure before checking for an Outcome. The same database mechanism advances an open need to `in_progress` on first assignment or start, but not when an unassigned task is created. Separate guards reject terminal-state reversal.
 
 - [ ] **Step 4: Add closure preview and outcome command**
 
-Expose a read-only preview listing the tasks that closure will cancel, followed by one idempotent outcome command. The UI may warn but must not block closure. Repeated commands with the same idempotency key return the existing Outcome.
+Expose these navigator-only, organization-scoped operations:
+
+- `GET /v1/navigator/needs/{need_id}/outcome-preview` lists the currently non-terminal tasks likely to be cancelled.
+- `POST /v1/navigator/needs/{need_id}/outcomes` requires an `Idempotency-Key` header and accepts disposition plus note. The authenticated navigator supplies recorder identity; the server supplies recorded time.
+
+The UI may warn but must not block closure. Repeating the same organization, key, need, and payload returns the existing Outcome. Reusing a key for another need or payload returns `409 Conflict`. The committed response derives the actually cancelled task identifiers from the trigger-authored AuditEvents, never from the potentially stale preview.
+
+Keep reopening at the domain and database boundary in this task: lock the predecessor, require that it already has an Outcome, then create a new need with `reopened_from_need_id`, the same organization/patient/episode, and no tasks. Reject reopening an active need. Do not add a reopening UI or unrelated workflow feature.
 
 Run:
 
 ```powershell
 python -m pytest tests/test_outcomes.py tests/test_navigator_queue.py tests/integration/test_need_task_lifecycle.py -q
 python -m alembic upgrade head
+python scripts/export_openapi.py
+npx --no-install openapi-typescript contracts/openapi.json -o apps/web/lib/api-types.ts
+npm --workspace apps/web run lint
+npm --workspace apps/web test -- --run
+npm --workspace apps/web run build
 ```
 
 Expected: PASS, including the database guard tests.
@@ -294,7 +325,7 @@ python -m pytest tests -q
 python -m ruff check app tests
 python -m pyright app
 git diff --check
-git add services/api
+git add services/api contracts/openapi.json apps/web/lib/api-types.ts
 git commit -m "feat: derive need closure from outcomes"
 ```
 
