@@ -1,5 +1,11 @@
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$npmExecutable = if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+    "npm.cmd"
+}
+else {
+    "npm"
+}
 
 function Invoke-VerificationCommand {
     param([scriptblock]$Command)
@@ -24,10 +30,10 @@ try {
         Pop-Location
     }
 
-    Invoke-VerificationCommand { npm.cmd --workspace apps/web run lint }
-    Invoke-VerificationCommand { npm.cmd --workspace apps/web test -- --run }
-    Invoke-VerificationCommand { npm.cmd --workspace apps/web run build }
-    Invoke-VerificationCommand { npm.cmd --workspace apps/web run test:e2e }
+    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run lint }
+    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web test -- --run }
+    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run build }
+    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run test:e2e }
 }
 finally {
     Pop-Location
