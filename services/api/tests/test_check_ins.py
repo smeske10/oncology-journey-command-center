@@ -1,0 +1,448 @@
+import asyncio
+from collections.abc import Generator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID, uuid4
+
+import httpx
+import pytest
+
+from app.auth.dependencies import current_actor
+from app.auth.models import CurrentActor, Role
+from app.db.models import (
+    CareEpisode,
+    CheckInDefinition,
+    CheckInSubmission,
+    EpisodePathwayAssignment,
+)
+from app.db.session import get_session
+from app.domain.enums import CheckInStatus
+from app.main import app
+
+
+@dataclass
+class FakeSession:
+    definition: CheckInDefinition
+    episode: CareEpisode
+    assignment: EpisodePathwayAssignment
+    submissions: dict[UUID, CheckInSubmission] = field(default_factory=dict)
+    committed: bool = False
+    rolled_back: bool = False
+
+    def scalar(self, statement: Any) -> CheckInDefinition | CheckInSubmission | None:
+        entity = statement.column_descriptions[0]["entity"]
+        parameters = set(statement.compile().params.values())
+        if entity is CheckInDefinition:
+            if self.definition.id in parameters and self.definition.organization_id in parameters:
+                return self.definition
+            return None
+        if entity is CareEpisode:
+            if (
+                self.episode.organization_id in parameters
+                and self.episode.patient_id in parameters
+                and self.episode.status in parameters
+            ):
+                return self.episode
+            return None
+        if entity is EpisodePathwayAssignment:
+            if (
+                self.assignment.organization_id in parameters
+                and self.assignment.care_episode_id in parameters
+                and self.definition.id in parameters
+                and self.assignment.pathway_definition_id
+                == self.definition.pathway_definition_id
+            ):
+                return self.assignment.id
+            return None
+        if entity is CheckInSubmission:
+            return next(
+                (
+                    submission
+                    for submission in self.submissions.values()
+                    if submission.id in parameters and submission.organization_id in parameters
+                ),
+                None,
+            )
+        return None
+
+    def add(self, entity: CheckInSubmission) -> None:
+        self.submissions[entity.id] = entity
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def rollback(self) -> None:
+        self.rolled_back = True
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def patient_cookie() -> dict[str, str]:
+    return {"ojcc_session": "synthetic-test-session"}
+
+
+@pytest.fixture
+def check_in_definition() -> CheckInDefinition:
+    organization_id = uuid4()
+    return CheckInDefinition(
+        id=uuid4(),
+        organization_id=organization_id,
+        pathway_definition_id=uuid4(),
+        slug="weekly-check-in",
+        version=1,
+        title="Weekly check-in",
+        questionnaire={
+            "canonical": "https://demo.example/Questionnaire/breast-active|1",
+            "version": "breast-active-v1",
+            "questions": [
+                {
+                    "link_id": "nausea_change",
+                    "label": "Since your last check-in, is your nausea better, the same, or worse?",
+                    "required": True,
+                }
+            ],
+        },
+    )
+
+
+@pytest.fixture
+def client_context(
+    check_in_definition: CheckInDefinition,
+) -> Generator[tuple[FakeSession, CurrentActor], None, None]:
+    actor = CurrentActor(
+        user_id=uuid4(),
+        organization_id=check_in_definition.organization_id,
+        role=Role.SUPPORTING_ACTOR,
+        patient_id=uuid4(),
+    )
+    session = FakeSession(
+        definition=check_in_definition,
+        episode=CareEpisode(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            patient_id=actor.patient_id,
+            status="active",
+        ),
+        assignment=EpisodePathwayAssignment(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            care_episode_id=uuid4(),
+            pathway_definition_id=check_in_definition.pathway_definition_id,
+            effective_from=datetime(2026, 1, 1, tzinfo=UTC),
+            migration_reason="test",
+            authored_by_user_id=actor.user_id,
+        ),
+    )
+    session.assignment.care_episode_id = session.episode.id
+    app.dependency_overrides[current_actor] = lambda: actor
+    app.dependency_overrides[get_session] = lambda: session
+    try:
+        yield session, actor
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_submit_check_in_is_atomic(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if the route responds before persisting a patient submission."""
+    session, _ = client_context
+    payload = {
+        "questionnaire_version": "breast-active-v1",
+        "answers": [{"link_id": "nausea_change", "value": "worse"}],
+        "free_text": "Nausea now interferes with meals.",
+    }
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json=payload,
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "submitted"
+    assert response.json()["questionnaire_version"] == "breast-active-v1"
+    assert session.committed is True
+    assert len(session.submissions) == 1
+    submission = next(iter(session.submissions.values()))
+    assert submission.answers["questionnaire_version"] == "breast-active-v1"
+    assert submission.answers["items"] == [
+        {
+            "link_id": "nausea_change",
+            "label": "Since your last check-in, is your nausea better, the same, or worse?",
+            "value": "worse",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "answers, questionnaire_version",
+    [
+        ([{"link_id": "nausea_change", "value": "worse"}], "tampered-version"),
+        ([{"link_id": "unknown_question", "value": "worse"}], "breast-active-v1"),
+        (
+            [
+                {"link_id": "nausea_change", "value": "worse"},
+                {"link_id": "nausea_change", "value": "same"},
+            ],
+            "breast-active-v1",
+        ),
+    ],
+)
+def test_submission_rejects_definition_mismatches_without_committing(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+    answers: list[dict[str, str]],
+    questionnaire_version: str,
+) -> None:
+    """This fails if client claims can change the immutable questionnaire source record."""
+    session, _ = client_context
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": questionnaire_version,
+                    "answers": answers,
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert (
+        "does not match" in response.text
+        or "known" in response.text
+        or "repeat" in response.text
+    )
+    assert session.committed is False
+    assert session.rolled_back is True
+    assert session.submissions == {}
+
+
+def test_submission_requires_every_required_definition_answer(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """The server owns required-answer semantics, rather than trusting the form."""
+    session, _ = client_context
+    check_in_definition.questionnaire["questions"].append(
+        {"link_id": "transportation", "label": "Need a ride?", "required": True}
+    )
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert "required" in response.text
+    assert session.committed is False
+    assert session.rolled_back is True
+    assert session.submissions == {}
+
+
+def test_submission_rejects_an_actor_without_a_patient_identity_link(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if a supporting role can submit before a patient link is resolved."""
+    session, actor = client_context
+    app.dependency_overrides[current_actor] = lambda: CurrentActor(
+        user_id=actor.user_id,
+        organization_id=actor.organization_id,
+        role=actor.role,
+    )
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Patient identity link is required"}
+    assert session.committed is False
+    assert session.submissions == {}
+
+
+def test_submission_rejects_a_definition_outside_the_episode_pathway(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if any same-tenant questionnaire can be submitted for an unrelated pathway."""
+    session, _ = client_context
+    session.assignment.pathway_definition_id = uuid4()
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "worse"}],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Check-in definition is not active for this care episode"}
+    assert session.committed is False
+    assert session.submissions == {}
+
+
+def test_patient_can_export_only_own_synthetic_fhir_submission(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if the patient-scoped FHIR export route is absent."""
+    session, actor = client_context
+    submission = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={
+            "questionnaire_version": "breast-active-v1",
+            "questionnaire_canonical": "https://demo.example/Questionnaire/breast-active|1",
+            "items": [{"link_id": "nausea_change", "label": "Nausea change", "value": "worse"}],
+            "free_text": None,
+            "provenance": {"source": "patient-supplied", "actor_id": str(actor.user_id)},
+        },
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    session.submissions[submission.id] = submission
+
+    async def export() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get(f"/v1/patient/check-ins/{submission.id}/fhir")
+
+    response = asyncio.run(export())
+
+    assert response.status_code == 200
+    assert response.json()["resourceType"] == "Bundle"
+
+
+def test_patient_cannot_export_another_patients_submission(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if an actor can retrieve a same-tenant submission for another patient."""
+    session, actor = client_context
+    submission = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=uuid4(),
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"items": [], "provenance": {"source": "patient-supplied"}},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    session.submissions[submission.id] = submission
+
+    async def export() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get(f"/v1/patient/check-ins/{submission.id}/fhir")
+
+    response = asyncio.run(export())
+
+    assert response.status_code == 404
+
+
+def test_submission_rejects_explicit_contact_fields_with_a_public_demo_warning(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if a contact field lacks the public-demo warning."""
+    payload = {
+        "questionnaire_version": "breast-active-v1",
+        "answers": [{"link_id": "nausea_change", "value": "worse"}],
+        "mobile": "synthetic contact placeholder",
+    }
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json=payload,
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert "must not receive real health information" in response.text
+
+
+def test_patient_check_in_router_is_registered_without_enabling_docs() -> None:
+    """This fails if the patient router stops being included in the application."""
+    from app.api.patient_check_ins import router
+
+    router_paths = {getattr(route, "path", "") for route in router.routes}
+    assert "/v1/patient/check-ins/current" in router_paths
+    assert "/v1/patient/check-ins/{definition_id}/submissions" in router_paths
+    assert "/v1/patient/check-ins/{submission_id}/fhir" in router_paths
+    assert any(getattr(route, "original_router", None) is router for route in app.routes)
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None

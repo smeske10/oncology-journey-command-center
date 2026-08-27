@@ -11,4 +11,9 @@ __pycache__/
 coverage/
 playwright-report/
 test-results/
+.coverage
+dist/
+*.pyc
+*.egg-info/
+.mypy_cache/
 

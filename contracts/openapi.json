@@ -1,0 +1,1058 @@
+{
+  "components": {
+    "schemas": {
+      "AnswerInput": {
+        "additionalProperties": false,
+        "properties": {
+          "link_id": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Link Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "link_id",
+          "value"
+        ],
+        "title": "AnswerInput",
+        "type": "object"
+      },
+      "CheckInDefinitionResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "questionnaire_version": {
+            "title": "Questionnaire Version",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "questionnaire_version",
+          "questions"
+        ],
+        "title": "CheckInDefinitionResponse",
+        "type": "object"
+      },
+      "CheckInSubmissionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/AnswerInput"
+            },
+            "maxItems": 40,
+            "minItems": 1,
+            "title": "Answers",
+            "type": "array"
+          },
+          "free_text": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Text"
+          },
+          "questionnaire_version": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Questionnaire Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "questionnaire_version",
+          "answers"
+        ],
+        "title": "CheckInSubmissionCreate",
+        "type": "object"
+      },
+      "CheckInSubmissionResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "questionnaire_version": {
+            "title": "Questionnaire Version",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "questionnaire_version",
+          "submitted_at"
+        ],
+        "title": "CheckInSubmissionResponse",
+        "type": "object"
+      },
+      "EvidenceRead": {
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "text"
+        ],
+        "title": "EvidenceRead",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "NavigationTaskRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "reported_need_id": {
+            "format": "uuid",
+            "title": "Reported Need Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reported_need_id",
+          "title",
+          "status",
+          "due_at",
+          "owner_id",
+          "created_at"
+        ],
+        "title": "NavigationTaskRead",
+        "type": "object"
+      },
+      "NavigatorQueueRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "OutcomeCommandCreate": {
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "disposition"
+        ],
+        "title": "OutcomeCommandCreate",
+        "type": "object"
+      },
+      "OutcomeCommandRead": {
+        "properties": {
+          "cancelled_task_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Cancelled Task Ids",
+            "type": "array"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome_id": {
+            "format": "uuid",
+            "title": "Outcome Id",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by_user_id": {
+            "format": "uuid",
+            "title": "Recorded By User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome_id",
+          "need_id",
+          "disposition",
+          "note",
+          "recorded_by_user_id",
+          "recorded_at",
+          "cancelled_task_ids"
+        ],
+        "title": "OutcomeCommandRead",
+        "type": "object"
+      },
+      "OutcomeDisposition": {
+        "enum": [
+          "resolved",
+          "closed_unresolved"
+        ],
+        "title": "OutcomeDisposition",
+        "type": "string"
+      },
+      "OutcomePreviewRead": {
+        "properties": {
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomePreviewTaskRead"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "need_id",
+          "tasks"
+        ],
+        "title": "OutcomePreviewRead",
+        "type": "object"
+      },
+      "OutcomePreviewTaskRead": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "title": "OutcomePreviewTaskRead",
+        "type": "object"
+      },
+      "PatientCaseRead": {
+        "properties": {
+          "longitudinal_submissions": {
+            "items": {
+              "$ref": "#/components/schemas/SubmissionRead"
+            },
+            "title": "Longitudinal Submissions",
+            "type": "array"
+          },
+          "navigation_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/NavigationTaskRead"
+            },
+            "title": "Navigation Tasks",
+            "type": "array"
+          },
+          "open_needs": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemRead"
+            },
+            "title": "Open Needs",
+            "type": "array"
+          },
+          "patient": {
+            "additionalProperties": true,
+            "title": "Patient",
+            "type": "object"
+          },
+          "safety_signals": {
+            "items": {
+              "$ref": "#/components/schemas/SafetySignalRead"
+            },
+            "title": "Safety Signals",
+            "type": "array"
+          },
+          "upcoming_synthetic_appointment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upcoming Synthetic Appointment"
+          }
+        },
+        "required": [
+          "patient",
+          "longitudinal_submissions",
+          "open_needs",
+          "safety_signals",
+          "navigation_tasks",
+          "upcoming_synthetic_appointment"
+        ],
+        "title": "PatientCaseRead",
+        "type": "object"
+      },
+      "PriorityResultRead": {
+        "properties": {
+          "level": {
+            "enum": [
+              "high",
+              "medium",
+              "routine"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level",
+          "score",
+          "reasons"
+        ],
+        "title": "PriorityResultRead",
+        "type": "object"
+      },
+      "QueueItemRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "symptom_change",
+              "medication_question",
+              "transportation",
+              "financial_support",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/PriorityResultRead"
+          }
+        },
+        "required": [
+          "need_id",
+          "patient_id",
+          "patient_display_name",
+          "kind",
+          "priority",
+          "evidence",
+          "created_at",
+          "due_at",
+          "owner_id"
+        ],
+        "title": "QueueItemRead",
+        "type": "object"
+      },
+      "SafetySignalRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "rule_code": {
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rule_code",
+          "severity",
+          "status",
+          "evidence",
+          "created_at"
+        ],
+        "title": "SafetySignalRead",
+        "type": "object"
+      },
+      "SubmissionRead": {
+        "properties": {
+          "free_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Text"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          }
+        },
+        "required": [
+          "id",
+          "submitted_at",
+          "items",
+          "free_text",
+          "provenance"
+        ],
+        "title": "SubmissionRead",
+        "type": "object"
+      },
+      "UserRole": {
+        "enum": [
+          "administrator",
+          "navigator",
+          "supporting_actor"
+        ],
+        "title": "UserRole",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Synthetic demonstration API contract. It is not for patient care and does not accept real PHI.",
+    "title": "Oncology Journey Command Center API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/v1/demo/session/{role}": {
+      "post": {
+        "operationId": "create_demo_session_v1_demo_session__role__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UserRole"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Demo Session",
+        "tags": [
+          "demo-sessions"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/outcome-preview": {
+      "get": {
+        "operationId": "get_outcome_preview_v1_navigator_needs__need_id__outcome_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomePreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Outcome Preview",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/outcomes": {
+      "post": {
+        "operationId": "post_outcome_v1_navigator_needs__need_id__outcomes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeCommandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Outcome",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/patients/{patient_id}/case": {
+      "get": {
+        "operationId": "get_navigator_case_v1_navigator_patients__patient_id__case_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "patient_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Patient Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatientCaseRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Navigator Case",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/queue": {
+      "get": {
+        "operationId": "get_navigator_queue_v1_navigator_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigatorQueueRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Navigator Queue",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/patient/check-ins/current": {
+      "get": {
+        "operationId": "get_current_check_in_v1_patient_check_ins_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckInDefinitionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Current Check In",
+        "tags": [
+          "patient-check-ins"
+        ]
+      }
+    },
+    "/v1/patient/check-ins/{definition_id}/submissions": {
+      "post": {
+        "operationId": "submit_check_in_v1_patient_check_ins__definition_id__submissions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "definition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Definition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckInSubmissionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckInSubmissionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Check In",
+        "tags": [
+          "patient-check-ins"
+        ]
+      }
+    },
+    "/v1/patient/check-ins/{submission_id}/fhir": {
+      "get": {
+        "operationId": "export_submission_as_synthetic_fhir_v1_patient_check_ins__submission_id__fhir_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "submission_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Submission Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Export Submission As Synthetic Fhir V1 Patient Check Ins  Submission Id  Fhir Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Submission As Synthetic Fhir",
+        "tags": [
+          "patient-check-ins"
+        ]
+      }
+    }
+  }
+}
