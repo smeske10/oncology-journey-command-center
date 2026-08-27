@@ -27,8 +27,6 @@ class SubmissionSource(str, Enum):
 class NeedStatus(str, Enum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
 
 
 class SafetySignalStatus(str, Enum):
@@ -45,9 +43,14 @@ class SafetySeverity(str, Enum):
 
 class NavigationTaskStatus(str, Enum):
     OPEN = "open"
+    ASSIGNED = "assigned"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+class TaskCancellationReason(str, Enum):
+    NEED_CLOSED = "need_closed"
 
 
 class ApprovalStatus(str, Enum):
@@ -69,6 +72,6 @@ class AgentRunStatus(str, Enum):
     MANUAL_REVIEW = "manual_review"
 
 
-class OutcomeStatus(str, Enum):
+class OutcomeDisposition(str, Enum):
     RESOLVED = "resolved"
     CLOSED_UNRESOLVED = "closed_unresolved"

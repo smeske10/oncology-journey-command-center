@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import require_role
@@ -23,7 +23,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.domain.enums import NavigationTaskStatus, NeedStatus
-from app.domain.needs import NeedKind
+from app.domain.needs import NeedKind, effective_need_state
 from app.domain.prioritization import OperationalPriorityWeights, PriorityResult, rank_need
 
 router = APIRouter(prefix="/v1/navigator", tags=["navigator"])
@@ -75,7 +75,7 @@ class SafetySignalRead(BaseModel):
 
 class NavigationTaskRead(BaseModel):
     id: UUID
-    reported_need_id: UUID | None
+    reported_need_id: UUID
     title: str
     status: str
     due_at: datetime | None
@@ -117,9 +117,19 @@ def get_navigator_queue(
     priority_policy: OperationalPriorityWeights = Depends(get_navigator_priority_policy),
 ) -> NavigatorQueueRead:
     needs = session.scalars(
-        select(ReportedNeed).where(
+        select(ReportedNeed)
+        .join(
+            effective_need_state,
+            and_(
+                effective_need_state.c.organization_id == ReportedNeed.organization_id,
+                effective_need_state.c.id == ReportedNeed.id,
+            ),
+        )
+        .where(
             ReportedNeed.organization_id == actor.organization_id,
-            ReportedNeed.status.in_([NeedStatus.OPEN, NeedStatus.IN_PROGRESS]),
+            effective_need_state.c.effective_state.in_(
+                [NeedStatus.OPEN.value, NeedStatus.IN_PROGRESS.value]
+            ),
         )
     ).all()
     items = [
@@ -154,10 +164,20 @@ def get_navigator_case(
         .order_by(CheckInSubmission.submitted_at.desc())
     ).all()
     needs = session.scalars(
-        select(ReportedNeed).where(
+        select(ReportedNeed)
+        .join(
+            effective_need_state,
+            and_(
+                effective_need_state.c.organization_id == ReportedNeed.organization_id,
+                effective_need_state.c.id == ReportedNeed.id,
+            ),
+        )
+        .where(
             ReportedNeed.organization_id == actor.organization_id,
             ReportedNeed.patient_id == patient_id,
-            ReportedNeed.status.in_([NeedStatus.OPEN, NeedStatus.IN_PROGRESS]),
+            effective_need_state.c.effective_state.in_(
+                [NeedStatus.OPEN.value, NeedStatus.IN_PROGRESS.value]
+            ),
         )
     ).all()
     signals = session.scalars(
@@ -218,7 +238,11 @@ def _queue_item_for_need(
             NavigationTask.reported_need_id == need.id,
             NavigationTask.patient_id == need.patient_id,
             NavigationTask.status.in_(
-                [NavigationTaskStatus.OPEN, NavigationTaskStatus.IN_PROGRESS]
+                [
+                    NavigationTaskStatus.OPEN,
+                    NavigationTaskStatus.ASSIGNED,
+                    NavigationTaskStatus.IN_PROGRESS,
+                ]
             ),
         )
     ).all()

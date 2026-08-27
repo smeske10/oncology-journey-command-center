@@ -1,9 +1,10 @@
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
 from app.db.base import Base
 from app.db.models import ReportedNeed
+from app.domain.enums import NavigationTaskStatus, NeedStatus
 
 
 def test_core_domain_metadata_uses_postgresql_jsonb_and_tenant_first_indexes() -> None:
@@ -83,16 +84,23 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
             "ck_check_in_submission_ck_check_in_submission_provenance",
             "ck_check_in_submission_ck_check_in_submission_status_state",
         },
-        "reported_need": {"ck_reported_need_ck_reported_need_status_state"},
+        "reported_need": {
+            "ck_reported_need_ck_reported_need_origin",
+            "ck_reported_need_ck_reported_need_status_state",
+        },
         "safety_signal": {
             "ck_safety_signal_ck_safety_signal_severity_state",
             "ck_safety_signal_ck_safety_signal_status_state",
         },
-        "navigation_task": {"ck_navigation_task_ck_navigation_task_status_state"},
+        "navigation_task": {
+            "ck_navigation_task_ck_navigation_task_assignment_shape",
+            "ck_navigation_task_ck_navigation_task_cancellation_shape",
+            "ck_navigation_task_ck_navigation_task_status_state",
+        },
         "approval_decision": {"ck_approval_decision_ck_approval_decision_status_state"},
         "knowledge_document": {"ck_knowledge_document_ck_knowledge_document_status_state"},
         "agent_run": {"ck_agent_run_ck_agent_run_status_state"},
-        "outcome": {"ck_outcome_ck_outcome_status_state"},
+        "outcome": {"ck_outcome_ck_outcome_disposition_state"},
     }
 
     actual_names = {
@@ -105,3 +113,95 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
     }
 
     assert actual_names == expected_names
+
+
+def test_need_task_outcome_metadata_matches_the_authorizing_record_contract() -> None:
+    submission = Base.metadata.tables["check_in_submission"]
+    need = Base.metadata.tables["reported_need"]
+    task = Base.metadata.tables["navigation_task"]
+    outcome = Base.metadata.tables["outcome"]
+
+    assert [member.value for member in NeedStatus] == ["open", "in_progress"]
+    assert [member.value for member in NavigationTaskStatus] == [
+        "open",
+        "assigned",
+        "in_progress",
+        "completed",
+        "cancelled",
+    ]
+    assert "care_episode_id" in need.c
+    assert need.c.care_episode_id.nullable is False
+    assert need.c.source_submission_id.nullable is True
+    assert need.c.reopened_from_need_id.nullable is True
+    assert "resolved_at" not in need.c
+    assert "outcome_id" not in need.c
+    assert task.c.reported_need_id.nullable is False
+    assert {
+        "cancelled_by_user_id",
+        "cancelled_at",
+        "cancellation_reason",
+    } <= set(task.c.keys())
+    assert {
+        "recorded_by_user_id",
+        "recorded_at",
+        "disposition",
+        "note",
+        "idempotency_key",
+    } <= set(outcome.c.keys())
+    assert "status" not in outcome.c
+    assert "reason" not in outcome.c
+    assert "created_at" not in outcome.c
+
+    submission_unique_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in submission.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    need_unique_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in need.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    outcome_unique_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in outcome.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("organization_id", "patient_id", "care_episode_id", "id") in submission_unique_keys
+    assert ("organization_id", "patient_id", "care_episode_id", "id") in need_unique_keys
+    assert ("organization_id", "patient_id", "id") in need_unique_keys
+    assert ("reopened_from_need_id",) in need_unique_keys
+    assert ("reported_need_id",) in outcome_unique_keys
+    assert ("organization_id", "idempotency_key") in outcome_unique_keys
+
+    need_foreign_keys = {
+        tuple(constraint.column_keys): tuple(element.column.name for element in constraint.elements)
+        for constraint in need.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    }
+    task_foreign_keys = {
+        tuple(constraint.column_keys): tuple(element.column.name for element in constraint.elements)
+        for constraint in task.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    }
+    outcome_foreign_keys = {
+        tuple(constraint.column_keys): tuple(element.column.name for element in constraint.elements)
+        for constraint in outcome.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    }
+    assert need_foreign_keys[
+        ("organization_id", "patient_id", "care_episode_id", "source_submission_id")
+    ] == ("organization_id", "patient_id", "care_episode_id", "id")
+    assert need_foreign_keys[
+        ("organization_id", "patient_id", "care_episode_id", "reopened_from_need_id")
+    ] == ("organization_id", "patient_id", "care_episode_id", "id")
+    assert task_foreign_keys[("organization_id", "patient_id", "reported_need_id")] == (
+        "organization_id",
+        "patient_id",
+        "id",
+    )
+    assert outcome_foreign_keys[("organization_id", "patient_id", "reported_need_id")] == (
+        "organization_id",
+        "patient_id",
+        "id",
+    )

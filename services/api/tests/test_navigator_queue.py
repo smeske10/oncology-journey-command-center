@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -50,6 +50,7 @@ class NavigatorSession:
     needs: list[PersistedNeed]
     signals: list[SafetySignal]
     tasks: list[NavigationTask]
+    closed_need_ids: set[UUID] = field(default_factory=set)
 
     def scalars(self, statement: Any) -> ScalarRows:
         entity = statement.column_descriptions[0]["entity"]
@@ -67,6 +68,8 @@ class NavigatorSession:
             values = self.submissions
         elif entity is PersistedNeed:
             values = self.needs
+            if "effective_need_state" in str(statement):
+                values = [value for value in values if value.id not in self.closed_need_ids]
         elif entity is SafetySignal:
             values = self.signals
         elif entity is NavigationTask:
@@ -418,3 +421,34 @@ def test_queue_sort_uses_uuid_as_a_stable_final_tiebreaker() -> None:
         earlier.need_id,
         later.need_id,
     ]
+
+
+def test_queue_and_case_use_effective_need_state_to_hide_outcome_closed_needs(
+    navigator_context: tuple[NavigatorSession, CurrentActor, SyntheticPatient],
+) -> None:
+    """A raw active state cannot keep a need visible after its Outcome exists."""
+    session, actor, patient = navigator_context
+    closed_need = PersistedNeed(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=patient.id,
+        source_submission_id=session.submissions[0].id,
+        kind="transportation",
+        status=NeedStatus.OPEN,
+        created_at=datetime.now(UTC),
+        evidence=[{"field": "transportation", "text": "yes"}],
+    )
+    session.needs.append(closed_need)
+    session.closed_need_ids.add(closed_need.id)
+
+    queue_response = get("/v1/navigator/queue")
+    case_response = get(f"/v1/navigator/patients/{patient.id}/case")
+
+    assert queue_response.status_code == 200, queue_response.text
+    assert case_response.status_code == 200, case_response.text
+    assert str(closed_need.id) not in {
+        item["need_id"] for item in queue_response.json()["items"]
+    }
+    assert str(closed_need.id) not in {
+        item["need_id"] for item in case_response.json()["open_needs"]
+    }

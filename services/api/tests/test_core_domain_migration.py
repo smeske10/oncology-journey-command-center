@@ -49,6 +49,29 @@ def _run_alembic(database_url: str, revision: str) -> subprocess.CompletedProces
     )
 
 
+def _run_alembic_without_checking(
+    database_url: str, revision: str
+) -> subprocess.CompletedProcess[str]:
+    project_root = MIGRATION_PATH.parents[4]
+    environment = os.environ | {"DATABASE_URL": database_url}
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "services/api/alembic.ini",
+            "upgrade",
+            revision,
+        ],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
 def _validate_loopback_postgres_url(url: URL) -> None:
     if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
         raise ValueError("Migration test databases must use a loopback PostgreSQL URL")
@@ -193,6 +216,32 @@ def test_0002_installed_episode_pathway_constraint_name_matches_orm_metadata() -
     assert expected_name in installed_names
 
 
+def test_0003_installs_separate_reported_need_insert_and_update_guards() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "head")
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                installed_guards = {
+                    (row.trigger_name, row.event_manipulation)
+                    for row in connection.execute(
+                        text(
+                            "SELECT trigger_name, event_manipulation "
+                            "FROM information_schema.triggers "
+                            "WHERE event_object_schema = current_schema() "
+                            "AND event_object_table = 'reported_need'"
+                        )
+                    )
+                }
+        finally:
+            engine.dispose()
+
+    assert installed_guards == {
+        ("trg_reported_need_identity_update_guard", "UPDATE"),
+        ("trg_reported_need_reopening_guard", "INSERT"),
+    }
+
+
 def test_upgrade_from_representative_0001_rows_preserves_unambiguous_history() -> None:
     """This fails if reconciliation rejects legacy rows whose identity and provenance are explicit."""
     organization_id = uuid4()
@@ -201,6 +250,8 @@ def test_upgrade_from_representative_0001_rows_preserves_unambiguous_history() -
     episode_id = uuid4()
     definition_id = uuid4()
     submission_id = uuid4()
+    need_id = uuid4()
+    task_id = uuid4()
     created_at = datetime(2026, 8, 18, tzinfo=UTC)
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "0001_core_domain")
@@ -302,6 +353,41 @@ def test_upgrade_from_representative_0001_rows_preserves_unambiguous_history() -
             )
         engine.dispose()
 
+        _run_alembic(database_url, "0002_identity_pathway_submission")
+
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO reported_need "
+                    "(id, organization_id, patient_id, source_submission_id, kind, status, evidence) "
+                    "VALUES (:id, :organization_id, :patient_id, :submission_id, "
+                    "'transportation', 'open', '[]'::jsonb)"
+                ),
+                {
+                    "id": need_id,
+                    "organization_id": organization_id,
+                    "patient_id": patient_user_id,
+                    "submission_id": submission_id,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO navigation_task "
+                    "(id, organization_id, patient_id, reported_need_id, assignee_user_id, "
+                    "title, status) VALUES (:id, :organization_id, :patient_id, :need_id, "
+                    ":assignee_user_id, 'Representative assigned task', 'open')"
+                ),
+                {
+                    "id": task_id,
+                    "organization_id": organization_id,
+                    "patient_id": patient_user_id,
+                    "need_id": need_id,
+                    "assignee_user_id": patient_user_id,
+                },
+            )
+        engine.dispose()
+
         _run_alembic(database_url, "head")
 
         engine = create_engine(database_url)
@@ -324,4 +410,186 @@ def test_upgrade_from_representative_0001_rows_preserves_unambiguous_history() -
                 ).scalar_one()
                 == patient_user_id
             )
+            migrated_need = connection.execute(
+                text(
+                    "SELECT care_episode_id, status, effective_state "
+                    "FROM effective_need_state WHERE id = :need_id"
+                ),
+                {"need_id": need_id},
+            ).mappings().one()
+            assert migrated_need.care_episode_id == episode_id
+            assert migrated_need.status == "in_progress"
+            assert migrated_need.effective_state == "in_progress"
+            migrated_task = connection.execute(
+                text(
+                    "SELECT reported_need_id, status FROM navigation_task WHERE id = :task_id"
+                ),
+                {"task_id": task_id},
+            ).mappings().one()
+            assert migrated_task.reported_need_id == need_id
+            assert migrated_task.status == "assigned"
         engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("legacy_terminal_kind", "expected_diagnostic"),
+    [
+        (
+            "closed_need",
+            (
+                "legacy terminal need/outcome data",
+                "without a provable Outcome recorder",
+            ),
+        ),
+        (
+            "cancelled_task",
+            (
+                "legacy cancelled navigation task",
+                "without provable cancellation actor, timestamp, and reason provenance",
+            ),
+        ),
+    ],
+)
+def test_0003_fails_precisely_when_legacy_terminal_authorship_is_ambiguous(
+    legacy_terminal_kind: str,
+    expected_diagnostic: tuple[str, str],
+) -> None:
+    organization_id = uuid4()
+    user_id = uuid4()
+    patient_id = uuid4()
+    pathway_id = uuid4()
+    episode_id = uuid4()
+    definition_id = uuid4()
+    submission_id = uuid4()
+    need_id = uuid4()
+    task_id = uuid4()
+    now = datetime(2026, 8, 18, tzinfo=UTC)
+
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0002_identity_pathway_submission")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                {"id": organization_id, "name": "Terminal migration diagnostic"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO user_account "
+                    "(id, primary_organization_id, email, display_name, is_active) "
+                    "VALUES (:id, :organization_id, :email, 'Recorder unknown', true)"
+                ),
+                {
+                    "id": user_id,
+                    "organization_id": organization_id,
+                    "email": f"terminal-{uuid4()}@example.test",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO synthetic_patient "
+                    "(id, organization_id, external_ref, display_name, demographics) "
+                    "VALUES (:id, :organization_id, :external_ref, 'Synthetic patient', '{}'::jsonb)"
+                ),
+                {
+                    "id": patient_id,
+                    "organization_id": organization_id,
+                    "external_ref": f"terminal-{uuid4()}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO pathway_definition "
+                    "(id, organization_id, slug, version, name, configuration, is_active) "
+                    "VALUES (:id, :organization_id, :slug, 1, 'Pathway', '{}'::jsonb, true)"
+                ),
+                {
+                    "id": pathway_id,
+                    "organization_id": organization_id,
+                    "slug": f"terminal-{uuid4()}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO care_episode "
+                    "(id, organization_id, patient_id, status, started_at) "
+                    "VALUES (:id, :organization_id, :patient_id, 'active', :started_at)"
+                ),
+                {
+                    "id": episode_id,
+                    "organization_id": organization_id,
+                    "patient_id": patient_id,
+                    "started_at": now,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO check_in_definition "
+                    "(id, organization_id, pathway_definition_id, slug, version, title, questionnaire) "
+                    "VALUES (:id, :organization_id, :pathway_id, :slug, 1, 'Check-in', '{}'::jsonb)"
+                ),
+                {
+                    "id": definition_id,
+                    "organization_id": organization_id,
+                    "pathway_id": pathway_id,
+                    "slug": f"terminal-check-in-{uuid4()}",
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO check_in_submission "
+                    "(id, organization_id, patient_id, care_episode_id, check_in_definition_id, "
+                    "status, answers, submission_source, submitted_by_user_id, submitted_at) "
+                    "VALUES (:id, :organization_id, :patient_id, :episode_id, :definition_id, "
+                    "'submitted', '{}'::jsonb, 'patient', :user_id, :submitted_at)"
+                ),
+                {
+                    "id": submission_id,
+                    "organization_id": organization_id,
+                    "patient_id": patient_id,
+                    "episode_id": episode_id,
+                    "definition_id": definition_id,
+                    "user_id": user_id,
+                    "submitted_at": now,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO reported_need "
+                    "(id, organization_id, patient_id, source_submission_id, kind, status, evidence, resolved_at) "
+                    "VALUES (:id, :organization_id, :patient_id, :submission_id, "
+                    "'symptom_change', :status, '[]'::jsonb, :resolved_at)"
+                ),
+                {
+                    "id": need_id,
+                    "organization_id": organization_id,
+                    "patient_id": patient_id,
+                    "submission_id": submission_id,
+                    "status": "closed" if legacy_terminal_kind == "closed_need" else "open",
+                    "resolved_at": now if legacy_terminal_kind == "closed_need" else None,
+                },
+            )
+            if legacy_terminal_kind == "cancelled_task":
+                connection.execute(
+                    text(
+                        "INSERT INTO navigation_task "
+                        "(id, organization_id, patient_id, reported_need_id, title, status) "
+                        "VALUES (:id, :organization_id, :patient_id, :need_id, "
+                        "'Legacy cancelled task', 'cancelled')"
+                    ),
+                    {
+                        "id": task_id,
+                        "organization_id": organization_id,
+                        "patient_id": patient_id,
+                        "need_id": need_id,
+                    },
+                )
+        engine.dispose()
+
+        result = _run_alembic_without_checking(database_url, "0003_need_task_outcome_lifecycle")
+
+    assert result.returncode != 0
+    diagnostic = result.stdout + result.stderr
+    assert expected_diagnostic[0] in diagnostic
+    assert expected_diagnostic[1] in diagnostic
+    assert "reset the synthetic demo database" in diagnostic

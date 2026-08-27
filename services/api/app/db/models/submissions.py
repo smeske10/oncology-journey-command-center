@@ -4,7 +4,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Uuid
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -27,6 +35,13 @@ class CheckInSubmission(Base):
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],
             name="fk_check_in_submission_organization_patient",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "patient_id",
+            "care_episode_id",
+            "id",
+            name="uq_check_in_submission_org_patient_episode_id",
         ),
         ForeignKeyConstraint(
             ["organization_id", "patient_id", "care_episode_id"],

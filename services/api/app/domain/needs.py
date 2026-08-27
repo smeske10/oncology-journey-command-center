@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 from uuid import UUID
 
-from app.db.models import CheckInSubmission
+from sqlalchemy import String, Uuid, column, select, table
+from sqlalchemy.orm import Session
+
+from app.db.models import CheckInSubmission, Outcome
+from app.db.models import ReportedNeed as PersistedNeed
+from app.domain.enums import NeedStatus
 
 NeedKind = Literal[
     "symptom_change",
@@ -17,6 +23,23 @@ NeedKind = Literal[
     "financial_support",
     "other",
 ]
+
+effective_need_state = table(
+    "effective_need_state",
+    column("id", Uuid),
+    column("organization_id", Uuid),
+    column("patient_id", Uuid),
+    column("care_episode_id", Uuid),
+    column("effective_state", String),
+)
+
+
+class NeedLifecycleConflict(ValueError):
+    """The requested immutable need lifecycle transition is no longer legal."""
+
+
+class NeedNotFound(LookupError):
+    """No need exists in the explicitly selected organization."""
 
 
 class FrozenList(tuple):
@@ -118,6 +141,53 @@ class NeedFactory:
         if value is True or (isinstance(value, str) and value.casefold() in {"yes", "true"}):
             return True
         return isinstance(value, list) and any(cls._is_affirmative(item) for item in value)
+
+
+def reopen_need(
+    session: Session,
+    *,
+    organization_id: UUID,
+    predecessor_need_id: UUID,
+) -> PersistedNeed:
+    """Create one new active need from a closed predecessor without copying its tasks."""
+    predecessor = session.scalar(
+        select(PersistedNeed)
+        .where(
+            PersistedNeed.organization_id == organization_id,
+            PersistedNeed.id == predecessor_need_id,
+        )
+        .with_for_update()
+    )
+    if predecessor is None:
+        raise NeedNotFound("Reported need not found")
+    if session.scalar(
+        select(Outcome.id).where(
+            Outcome.organization_id == organization_id,
+            Outcome.reported_need_id == predecessor_need_id,
+        )
+    ) is None:
+        raise NeedLifecycleConflict("An active reported need cannot be reopened")
+    if session.scalar(
+        select(PersistedNeed.id).where(
+            PersistedNeed.organization_id == organization_id,
+            PersistedNeed.reopened_from_need_id == predecessor_need_id,
+        )
+    ) is not None:
+        raise NeedLifecycleConflict("The reported need has already been reopened")
+
+    reopened = PersistedNeed(
+        organization_id=predecessor.organization_id,
+        patient_id=predecessor.patient_id,
+        care_episode_id=predecessor.care_episode_id,
+        source_submission_id=None,
+        reopened_from_need_id=predecessor.id,
+        kind=predecessor.kind,
+        status=NeedStatus.OPEN,
+        evidence=deepcopy(predecessor.evidence),
+    )
+    session.add(reopened)
+    session.flush()
+    return reopened
 
 
 def _freeze_json(value: object) -> FrozenJson:

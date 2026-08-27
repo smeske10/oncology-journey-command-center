@@ -206,16 +206,9 @@
             "title": "Owner Id"
           },
           "reported_need_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reported Need Id"
+            "format": "uuid",
+            "title": "Reported Need Id",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -252,6 +245,141 @@
           "items"
         ],
         "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "OutcomeCommandCreate": {
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "disposition"
+        ],
+        "title": "OutcomeCommandCreate",
+        "type": "object"
+      },
+      "OutcomeCommandRead": {
+        "properties": {
+          "cancelled_task_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Cancelled Task Ids",
+            "type": "array"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome_id": {
+            "format": "uuid",
+            "title": "Outcome Id",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by_user_id": {
+            "format": "uuid",
+            "title": "Recorded By User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome_id",
+          "need_id",
+          "disposition",
+          "note",
+          "recorded_by_user_id",
+          "recorded_at",
+          "cancelled_task_ids"
+        ],
+        "title": "OutcomeCommandRead",
+        "type": "object"
+      },
+      "OutcomeDisposition": {
+        "enum": [
+          "resolved",
+          "closed_unresolved"
+        ],
+        "title": "OutcomeDisposition",
+        "type": "string"
+      },
+      "OutcomePreviewRead": {
+        "properties": {
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/OutcomePreviewTaskRead"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "need_id",
+          "tasks"
+        ],
+        "title": "OutcomePreviewRead",
+        "type": "object"
+      },
+      "OutcomePreviewTaskRead": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "title": "OutcomePreviewTaskRead",
         "type": "object"
       },
       "PatientCaseRead": {
@@ -633,6 +761,113 @@
         "summary": "Create Demo Session",
         "tags": [
           "demo-sessions"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/outcome-preview": {
+      "get": {
+        "operationId": "get_outcome_preview_v1_navigator_needs__need_id__outcome_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomePreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Outcome Preview",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/outcomes": {
+      "post": {
+        "operationId": "post_outcome_v1_navigator_needs__need_id__outcomes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 255,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeCommandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Outcome",
+        "tags": [
+          "navigator"
         ]
       }
     },

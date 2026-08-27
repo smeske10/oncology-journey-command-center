@@ -38,6 +38,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/needs/{need_id}/outcome-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Outcome Preview */
+        get: operations["get_outcome_preview_v1_navigator_needs__need_id__outcome_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/needs/{need_id}/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Outcome */
+        post: operations["post_outcome_v1_navigator_needs__need_id__outcomes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/navigator/patients/{patient_id}/case": {
         parameters: {
             query?: never;
@@ -201,8 +235,11 @@ export interface components {
             id: string;
             /** Owner Id */
             owner_id: string | null;
-            /** Reported Need Id */
-            reported_need_id: string | null;
+            /**
+             * Reported Need Id
+             * Format: uuid
+             */
+            reported_need_id: string;
             /** Status */
             status: string;
             /** Title */
@@ -212,6 +249,67 @@ export interface components {
         NavigatorQueueRead: {
             /** Items */
             items: components["schemas"]["QueueItemRead"][];
+        };
+        /** OutcomeCommandCreate */
+        OutcomeCommandCreate: {
+            disposition: components["schemas"]["OutcomeDisposition"];
+            /** Note */
+            note?: string | null;
+        };
+        /** OutcomeCommandRead */
+        OutcomeCommandRead: {
+            /** Cancelled Task Ids */
+            cancelled_task_ids: string[];
+            disposition: components["schemas"]["OutcomeDisposition"];
+            /**
+             * Need Id
+             * Format: uuid
+             */
+            need_id: string;
+            /** Note */
+            note: string | null;
+            /**
+             * Outcome Id
+             * Format: uuid
+             */
+            outcome_id: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /**
+             * Recorded By User Id
+             * Format: uuid
+             */
+            recorded_by_user_id: string;
+        };
+        /**
+         * OutcomeDisposition
+         * @enum {string}
+         */
+        OutcomeDisposition: "resolved" | "closed_unresolved";
+        /** OutcomePreviewRead */
+        OutcomePreviewRead: {
+            /**
+             * Need Id
+             * Format: uuid
+             */
+            need_id: string;
+            /** Tasks */
+            tasks: components["schemas"]["OutcomePreviewTaskRead"][];
+        };
+        /** OutcomePreviewTaskRead */
+        OutcomePreviewTaskRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
         };
         /** PatientCaseRead */
         PatientCaseRead: {
@@ -383,6 +481,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_outcome_preview_v1_navigator_needs__need_id__outcome_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                need_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomePreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_outcome_v1_navigator_needs__need_id__outcomes_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                need_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutcomeCommandCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutcomeCommandRead"];
+                };
             };
             /** @description Validation Error */
             422: {

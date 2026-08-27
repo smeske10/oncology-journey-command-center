@@ -125,6 +125,7 @@ def test_need_lifecycle_is_independent_of_submission(
     need = ReportedNeed(
         organization_id=organization.id,
         patient_id=synthetic_patient.id,
+        care_episode_id=episode.id,
         source_submission=submission,
         kind="symptom_change",
         status="open",
