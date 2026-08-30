@@ -50,7 +50,7 @@ def test_tenant_owned_relationships_use_organization_aware_foreign_keys() -> Non
         "reported_need": {"synthetic_patient", "check_in_submission"},
         "safety_signal": {"synthetic_patient", "check_in_submission"},
         "navigation_task": {"synthetic_patient", "reported_need"},
-        "approval_decision": {"navigation_task"},
+        "approval_decision": {"proposed_change", "role_assignment"},
         "knowledge_document": {"resource"},
         "agent_run": {"synthetic_patient", "check_in_submission", "reported_need"},
         "outcome": {"synthetic_patient", "reported_need"},
@@ -89,7 +89,13 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
             "ck_reported_need_ck_reported_need_status_state",
         },
         "safety_signal": {
-            "ck_safety_signal_ck_safety_signal_severity_state",
+            "ck_safety_signal_ck_safety_signal_acknowledgement_shape",
+            "ck_safety_signal_ck_safety_signal_deterministic_level_state",
+            "ck_safety_signal_ck_safety_signal_dismissal_change_type",
+            "ck_safety_signal_ck_safety_signal_effective_level_state",
+            "ck_safety_signal_ck_safety_signal_escalation_not_self",
+            "ck_safety_signal_ck_safety_signal_origin",
+            "ck_safety_signal_ck_safety_signal_override_change_type",
             "ck_safety_signal_ck_safety_signal_status_state",
         },
         "navigation_task": {
@@ -97,7 +103,11 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
             "ck_navigation_task_ck_navigation_task_cancellation_shape",
             "ck_navigation_task_ck_navigation_task_status_state",
         },
-        "approval_decision": {"ck_approval_decision_ck_approval_decision_status_state"},
+        "approval_decision": {
+            "ck_approval_decision_ck_approval_decision_decision_state",
+            "ck_approval_decision_ck_approval_decision_decline_reason",
+            "ck_approval_decision_ck_approval_decision_qualifying_ro_7502",
+        },
         "knowledge_document": {"ck_knowledge_document_ck_knowledge_document_status_state"},
         "agent_run": {"ck_agent_run_ck_agent_run_status_state"},
         "outcome": {"ck_outcome_ck_outcome_disposition_state"},
@@ -205,3 +215,118 @@ def test_need_task_outcome_metadata_matches_the_authorizing_record_contract() ->
         "patient_id",
         "id",
     )
+
+
+def test_safety_and_approval_metadata_matches_the_authorizing_record_contract() -> None:
+    expected_tables = {
+        "signal_rule",
+        "safety_signal_resolution",
+        "approval_policy",
+        "proposed_value_schema",
+        "proposed_change",
+        "patient_message",
+    }
+    assert expected_tables <= set(Base.metadata.tables)
+
+    signal = Base.metadata.tables["safety_signal"]
+    signal_rule = Base.metadata.tables["signal_rule"]
+    policy = Base.metadata.tables["approval_policy"]
+    value_schema = Base.metadata.tables["proposed_value_schema"]
+    proposal = Base.metadata.tables["proposed_change"]
+    decision = Base.metadata.tables["approval_decision"]
+    resolution = Base.metadata.tables["safety_signal_resolution"]
+
+    assert {
+        "care_episode_id",
+        "escalated_from_signal_id",
+        "signal_rule_id",
+        "signal_rule_version",
+        "deterministic_level",
+        "effective_level",
+        "acknowledged_by_user_id",
+        "acknowledged_at",
+        "dismissal_proposed_change_id",
+        "current_severity_override_proposed_change_id",
+    } <= set(signal.c.keys())
+    assert "severity" not in signal.c
+    assert "rule_code" not in signal.c
+    assert "resolved_at" not in signal.c
+    assert resolution.c.safety_signal_id.nullable is False
+    signal_checks = {
+        str(constraint.sqltext)
+        for constraint in signal.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert any("escalated_from_signal_id <> id" in expression for expression in signal_checks)
+    assert {"rule_code", "version", "rule_kind", "name"} <= set(signal_rule.c.keys())
+
+    policy_checks = {
+        str(constraint.sqltext)
+        for constraint in policy.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert any(
+        "change_type" in expression
+        and "dismiss_signal" in expression
+        and "deterministic_severity_threshold IS NOT NULL" in expression
+        for expression in policy_checks
+    )
+    assert tuple(value_schema.primary_key.columns.keys()) == (
+        "change_type",
+        "value_schema_id",
+        "value_schema_version",
+    )
+
+    assert {
+        "safety_signal_id",
+        "navigation_task_id",
+        "patient_message_id",
+        "proposed_by_user_id",
+        "proposed_by_agent_run_id",
+        "approval_policy_id",
+        "approval_policy_version",
+        "deterministic_severity_threshold_snapshot",
+        "allow_self_approval_snapshot",
+        "required_approval_count_snapshot",
+        "required_approver_role_snapshot",
+    } <= set(proposal.c.keys())
+    assert {
+        "proposed_change_id",
+        "authorized_by_user_id",
+        "qualifying_role_assignment_id",
+        "qualifying_role_snapshot",
+        "decision",
+        "authorized_at",
+    } <= set(decision.c.keys())
+    assert "proposed_value" not in decision.c
+    assert "final_value" not in decision.c
+    assert "navigation_task_id" not in decision.c
+
+    proposal_unique_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in proposal.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    decision_unique_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in decision.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert (
+        "id",
+        "safety_signal_id",
+        "organization_id",
+        "change_type",
+    ) in proposal_unique_keys
+    assert ("supersedes_proposed_change_id",) in proposal_unique_keys
+    assert ("proposed_change_id", "authorized_by_user_id") in decision_unique_keys
+    proposal_foreign_keys = {
+        tuple(constraint.columns.keys())
+        for constraint in proposal.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    }
+    assert (
+        "change_type",
+        "value_schema_id",
+        "value_schema_version",
+    ) in proposal_foreign_keys

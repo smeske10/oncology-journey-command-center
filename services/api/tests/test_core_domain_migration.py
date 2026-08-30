@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import URL, Connection, make_url
 
 from app.config import settings
 from app.db.base import Base
@@ -63,6 +64,52 @@ def _run_alembic_without_checking(
             "services/api/alembic.ini",
             "upgrade",
             revision,
+        ],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def _render_alembic_sql(
+    database_url: str,
+    command: str,
+    revision_range: str,
+) -> subprocess.CompletedProcess[str]:
+    project_root = MIGRATION_PATH.parents[4]
+    environment = os.environ | {"DATABASE_URL": database_url}
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "services/api/alembic.ini",
+            command,
+            revision_range,
+            "--sql",
+        ],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def _run_alembic_check(database_url: str) -> subprocess.CompletedProcess[str]:
+    project_root = MIGRATION_PATH.parents[4]
+    environment = os.environ | {"DATABASE_URL": database_url}
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "services/api/alembic.ini",
+            "check",
         ],
         cwd=project_root,
         check=False,
@@ -593,3 +640,469 @@ def test_0003_fails_precisely_when_legacy_terminal_authorship_is_ambiguous(
     assert expected_diagnostic[0] in diagnostic
     assert expected_diagnostic[1] in diagnostic
     assert "reset the synthetic demo database" in diagnostic
+
+
+def test_0004_executes_value_schema_seed_with_json_literals() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
+
+        result = _run_alembic_without_checking(
+            database_url, "0004_safety_approval_lifecycle"
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                schema_document = connection.scalar(
+                    text(
+                        "SELECT schema_document FROM proposed_value_schema "
+                        "WHERE value_schema_id = 'ojcc.authorize-navigation-task'"
+                    )
+                )
+        finally:
+            engine.dispose()
+
+    assert schema_document == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["title"],
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 255}
+        },
+    }
+
+
+def test_0004_upgrade_matches_current_orm_metadata() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "head")
+
+        result = _run_alembic_check(database_url)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "No new upgrade operations detected." in result.stdout
+
+
+def test_0004_upgrades_empty_database_and_installs_safety_approval_contract() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "head")
+        engine = create_engine(database_url)
+        try:
+            inspector = inspect(engine)
+            assert {
+                "signal_rule",
+                "safety_signal_resolution",
+                "approval_policy",
+                "proposed_value_schema",
+                "proposed_change",
+                "patient_message",
+            } <= set(inspector.get_table_names())
+            assert {
+                "effective_safety_signal_state",
+                "effective_proposed_change_state",
+            } <= set(inspector.get_view_names())
+            with engine.connect() as connection:
+                triggers = {
+                    row.tgname
+                    for row in connection.execute(
+                        text(
+                            "SELECT tgname FROM pg_trigger "
+                            "WHERE NOT tgisinternal AND tgrelid IN "
+                            "('safety_signal'::regclass, 'safety_signal_resolution'::regclass, "
+                            "'signal_rule'::regclass, 'approval_policy'::regclass, "
+                            "'proposed_value_schema'::regclass, 'role_assignment'::regclass, "
+                            "'proposed_change'::regclass, 'approval_decision'::regclass)"
+                        )
+                    )
+                }
+                value_schema_keys = set(
+                    connection.execute(
+                        text(
+                            "SELECT change_type::text, value_schema_id, value_schema_version "
+                            "FROM proposed_value_schema"
+                        )
+                    ).tuples()
+                )
+            assert {
+                "trg_safety_signal_lifecycle_guard",
+                "trg_safety_signal_resolution_guard",
+                "trg_signal_rule_immutable",
+                "trg_approval_policy_immutable",
+                "trg_proposed_value_schema_immutable",
+                "trg_role_assignment_approval_history_guard",
+                "trg_proposed_change_revision_guard",
+                "trg_approval_decision_guard",
+                "trg_approval_decision_apply",
+            } <= triggers
+            assert value_schema_keys == {
+                ("dismiss_signal", "ojcc.dismiss-signal", 1),
+                ("override_signal_severity", "ojcc.override-signal-severity", 1),
+                ("authorize_navigation_task", "ojcc.authorize-navigation-task", 1),
+                ("authorize_patient_message", "ojcc.authorize-patient-message", 1),
+            }
+        finally:
+            engine.dispose()
+
+
+def test_0004_migrates_derivable_active_signal_with_rule_and_episode_provenance() -> None:
+    organization_id = uuid4()
+    user_id = uuid4()
+    patient_id = uuid4()
+    pathway_id = uuid4()
+    episode_id = uuid4()
+    definition_id = uuid4()
+    submission_id = uuid4()
+    signal_id = uuid4()
+    now = datetime(2026, 8, 18, tzinfo=UTC)
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO organization (id, name) VALUES (:id, '0004 populated')"),
+                {"id": organization_id},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO user_account (id, email, display_name, is_active) "
+                    "VALUES (:id, :email, 'Patient', true)"
+                ),
+                {"id": user_id, "email": f"0004-{uuid4()}@example.test"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO synthetic_patient "
+                    "(id, organization_id, external_ref, display_name, demographics) "
+                    "VALUES (:id, :organization_id, :ref, 'Patient', '{}'::jsonb)"
+                ),
+                {"id": patient_id, "organization_id": organization_id, "ref": str(uuid4())},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO pathway_definition "
+                    "(id, organization_id, slug, version, name, configuration, is_active) "
+                    "VALUES (:id, :organization_id, :slug, 1, 'Pathway', '{}'::jsonb, true)"
+                ),
+                {"id": pathway_id, "organization_id": organization_id, "slug": str(uuid4())},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO care_episode "
+                    "(id, organization_id, patient_id, status, started_at) "
+                    "VALUES (:id, :organization_id, :patient_id, 'active', :now)"
+                ),
+                {"id": episode_id, "organization_id": organization_id,
+                 "patient_id": patient_id, "now": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO check_in_definition "
+                    "(id, organization_id, pathway_definition_id, slug, version, title, questionnaire) "
+                    "VALUES (:id, :organization_id, :pathway, :slug, 1, 'Check-in', '{}'::jsonb)"
+                ),
+                {"id": definition_id, "organization_id": organization_id,
+                 "pathway": pathway_id, "slug": str(uuid4())},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO check_in_submission "
+                    "(id, organization_id, patient_id, care_episode_id, check_in_definition_id, "
+                    "status, answers, submission_source, submitted_by_user_id, submitted_at) "
+                    "VALUES (:id, :organization_id, :patient_id, :episode_id, :definition, "
+                    "'submitted', '{}'::jsonb, 'patient', :user_id, :now)"
+                ),
+                {"id": submission_id, "organization_id": organization_id,
+                 "patient_id": patient_id, "episode_id": episode_id,
+                 "definition": definition_id, "user_id": user_id, "now": now},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO safety_signal "
+                    "(id, organization_id, patient_id, source_submission_id, rule_code, severity, "
+                    "status, evidence) VALUES (:id, :organization_id, :patient_id, :submission_id, "
+                    "'urgent-language', 'urgent', 'active', '[]'::jsonb)"
+                ),
+                {"id": signal_id, "organization_id": organization_id,
+                 "patient_id": patient_id, "submission_id": submission_id},
+            )
+        engine.dispose()
+        _run_alembic(database_url, "head")
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT signal.care_episode_id, signal.deterministic_level, "
+                        "signal.effective_level, signal.status, rule.rule_code, rule.version, "
+                        "rule.rule_kind FROM safety_signal signal JOIN signal_rule rule "
+                        "ON rule.id = signal.signal_rule_id WHERE signal.id = :signal_id"
+                    ),
+                    {"signal_id": signal_id},
+                ).mappings().one()
+            assert row == {
+                "care_episode_id": episode_id,
+                "deterministic_level": "urgent",
+                "effective_level": "urgent",
+                "status": "open",
+                "rule_code": "urgent-language",
+                "version": 1,
+                "rule_kind": "deterministic",
+            }
+        finally:
+            engine.dispose()
+
+
+@pytest.mark.parametrize("legacy_kind", ["terminal_signal", "approval"])
+def test_0004_fails_precisely_when_authorization_provenance_would_be_invented(
+    legacy_kind: str,
+) -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            if legacy_kind == "terminal_signal":
+                ids = {name: uuid4() for name in (
+                    "organization", "user", "patient", "pathway", "episode", "definition",
+                    "submission", "signal",
+                )}
+                now = datetime(2026, 8, 18, tzinfo=UTC)
+                connection.execute(text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                                   {"id": ids["organization"], "name": str(uuid4())})
+                connection.execute(text(
+                    "INSERT INTO user_account (id, email, display_name, is_active) "
+                    "VALUES (:id, :email, 'Patient', true)"),
+                    {"id": ids["user"], "email": f"{uuid4()}@example.test"})
+                connection.execute(text(
+                    "INSERT INTO synthetic_patient (id, organization_id, external_ref, "
+                    "display_name, demographics) VALUES (:id, :organization_id, :ref, "
+                    "'Patient', '{}'::jsonb)"), {"id": ids["patient"],
+                    "organization_id": ids["organization"], "ref": str(uuid4())})
+                connection.execute(text(
+                    "INSERT INTO pathway_definition (id, organization_id, slug, version, name, "
+                    "configuration, is_active) VALUES (:id, :organization_id, :slug, 1, "
+                    "'Path', '{}'::jsonb, true)"), {"id": ids["pathway"],
+                    "organization_id": ids["organization"], "slug": str(uuid4())})
+                connection.execute(text(
+                    "INSERT INTO care_episode (id, organization_id, patient_id, status, started_at) "
+                    "VALUES (:id, :organization_id, :patient_id, 'active', :now)"),
+                    {"id": ids["episode"], "organization_id": ids["organization"],
+                    "patient_id": ids["patient"], "now": now})
+                connection.execute(text(
+                    "INSERT INTO check_in_definition (id, organization_id, pathway_definition_id, "
+                    "slug, version, title, questionnaire) VALUES (:id, :organization_id, "
+                    ":pathway, :slug, 1, 'Check-in', '{}'::jsonb)"),
+                    {"id": ids["definition"], "organization_id": ids["organization"],
+                    "pathway": ids["pathway"], "slug": str(uuid4())})
+                connection.execute(text(
+                    "INSERT INTO check_in_submission (id, organization_id, patient_id, "
+                    "care_episode_id, check_in_definition_id, status, answers, submission_source, "
+                    "submitted_by_user_id, submitted_at) VALUES (:id, :organization_id, "
+                    ":patient_id, :episode_id, :definition, 'submitted', '{}'::jsonb, 'patient', "
+                    ":user_id, :now)"), {"id": ids["submission"],
+                    "organization_id": ids["organization"], "patient_id": ids["patient"],
+                    "episode_id": ids["episode"], "definition": ids["definition"],
+                    "user_id": ids["user"], "now": now})
+                connection.execute(text(
+                    "INSERT INTO safety_signal (id, organization_id, patient_id, "
+                    "source_submission_id, rule_code, severity, status, evidence) VALUES "
+                    "(:id, :organization_id, :patient_id, :submission_id, 'legacy', 'urgent', "
+                    "'acknowledged', '[]'::jsonb)"), {"id": ids["signal"],
+                    "organization_id": ids["organization"], "patient_id": ids["patient"],
+                    "submission_id": ids["submission"]})
+            else:
+                ids = {name: uuid4() for name in (
+                    "organization", "user", "patient", "need", "task",
+                )}
+                connection.execute(text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                                   {"id": ids["organization"], "name": str(uuid4())})
+                connection.execute(text(
+                    "INSERT INTO user_account (id, email, display_name, is_active) VALUES "
+                    "(:id, :email, 'Approver', true)"),
+                    {"id": ids["user"], "email": f"{uuid4()}@example.test"})
+                # A legacy approval row can be inserted only with a complete legacy task graph;
+                # disabling triggers/constraints here models imported synthetic legacy data.
+                connection.execute(text("SET session_replication_role = replica"))
+                connection.execute(text(
+                    "INSERT INTO approval_decision (id, organization_id, navigation_task_id, "
+                    "authorized_user_id, status, proposed_value, final_value) VALUES "
+                    "(:id, :organization_id, :task_id, :user_id, 'approved', '{}'::jsonb, "
+                    "'{}'::jsonb)"), {"id": uuid4(), "organization_id": ids["organization"],
+                    "task_id": ids["task"], "user_id": ids["user"]})
+                connection.execute(text("SET session_replication_role = origin"))
+        engine.dispose()
+        result = _run_alembic_without_checking(database_url, "head")
+
+    assert result.returncode != 0
+    diagnostic = result.stdout + result.stderr
+    if legacy_kind == "terminal_signal":
+        assert "resolver or acknowledgement provenance" in diagnostic
+    else:
+        assert "proposal, policy, or qualifying-role provenance" in diagnostic
+    assert "reset the synthetic demo database" in diagnostic
+
+
+def _seed_offline_0004_ambiguity(connection: Connection, legacy_kind: str):
+    execute = connection.execute
+    organization_id = uuid4()
+    offending_id = uuid4()
+    execute(
+        text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+        {"id": organization_id, "name": f"Offline 0004 {uuid4()}"},
+    )
+    execute(text("SET session_replication_role = replica"))
+    if legacy_kind == "approval":
+        execute(
+            text(
+                "INSERT INTO approval_decision "
+                "(id, organization_id, navigation_task_id, authorized_user_id, status, "
+                "proposed_value, final_value) VALUES "
+                "(:id, :organization_id, :task_id, :user_id, 'approved', '{}'::jsonb, "
+                "'{}'::jsonb)"
+            ),
+            {
+                "id": offending_id,
+                "organization_id": organization_id,
+                "task_id": uuid4(),
+                "user_id": uuid4(),
+            },
+        )
+    elif legacy_kind == "terminal_signal":
+        execute(
+            text(
+                "INSERT INTO safety_signal "
+                "(id, organization_id, patient_id, source_submission_id, rule_code, severity, "
+                "status, evidence) VALUES (:id, :organization_id, :patient_id, :submission_id, "
+                "'legacy-terminal', 'urgent', 'acknowledged', '[]'::jsonb)"
+            ),
+            {
+                "id": offending_id,
+                "organization_id": organization_id,
+                "patient_id": uuid4(),
+                "submission_id": uuid4(),
+            },
+        )
+    else:
+        signal_patient_id = uuid4()
+        submission_patient_id = uuid4()
+        submission_id = uuid4()
+        execute(
+            text(
+                "INSERT INTO check_in_submission "
+                "(id, organization_id, patient_id, care_episode_id, check_in_definition_id, "
+                "status, answers, submission_source, submitted_by_user_id, submitted_at) "
+                "VALUES (:id, :organization_id, :patient_id, :episode_id, :definition_id, "
+                "'submitted', '{}'::jsonb, 'patient', :user_id, :submitted_at)"
+            ),
+            {
+                "id": submission_id,
+                "organization_id": organization_id,
+                "patient_id": submission_patient_id,
+                "episode_id": uuid4(),
+                "definition_id": uuid4(),
+                "user_id": uuid4(),
+                "submitted_at": datetime(2026, 8, 18, tzinfo=UTC),
+            },
+        )
+        execute(
+            text(
+                "INSERT INTO safety_signal "
+                "(id, organization_id, patient_id, source_submission_id, rule_code, severity, "
+                "status, evidence) VALUES (:id, :organization_id, :patient_id, :submission_id, "
+                "'legacy-mismatch', 'urgent', 'active', '[]'::jsonb)"
+            ),
+            {
+                "id": offending_id,
+                "organization_id": organization_id,
+                "patient_id": signal_patient_id,
+                "submission_id": submission_id,
+            },
+        )
+    execute(text("SET session_replication_role = origin"))
+    return offending_id
+
+
+def test_0004_fails_precisely_for_non_derivable_origin_provenance() -> None:
+    """A patient/source mismatch must name the signal and require synthetic reset."""
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            offending_id = _seed_offline_0004_ambiguity(connection, "non_derivable_signal")
+        engine.dispose()
+        result = _run_alembic_without_checking(database_url, "head")
+
+    assert result.returncode != 0
+    diagnostic = result.stdout + result.stderr
+    assert str(offending_id) in diagnostic
+    assert "without derivable tenant-, patient-, episode-, severity-, and rule provenance" in diagnostic
+    assert "reset the synthetic demo database" in diagnostic
+
+
+@pytest.mark.parametrize(
+    ("legacy_kind", "expected_diagnostic"),
+    [
+        ("approval", "proposal, policy, or qualifying-role provenance"),
+        ("terminal_signal", "resolver or acknowledgement provenance"),
+        (
+            "non_derivable_signal",
+            "without derivable tenant-, patient-, episode-, severity-, and rule provenance",
+        ),
+    ],
+)
+def test_0004_offline_upgrade_artifact_guards_ambiguous_rows_before_destructive_ddl(
+    legacy_kind: str,
+    expected_diagnostic: str,
+) -> None:
+    """Executing offline SQL must fail precisely before legacy rows or schema are discarded."""
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            offending_id = _seed_offline_0004_ambiguity(connection, legacy_kind)
+        artifact = _render_alembic_sql(
+            database_url,
+            "upgrade",
+            "0003_need_task_outcome_lifecycle:0004_safety_approval_lifecycle",
+        )
+        assert artifact.returncode == 0, artifact.stderr
+        sql = artifact.stdout
+        assert expected_diagnostic in sql
+        first_destructive_ddl = (
+            "ALTER TABLE safety_signal "
+            "DROP CONSTRAINT fk_safety_signal_organization_submission;"
+        )
+        assert sql.index(expected_diagnostic) < sql.index(first_destructive_ddl)
+        assert sql.index(expected_diagnostic) < sql.index("DROP TABLE approval_decision")
+
+        raw_connection = engine.raw_connection()
+        try:
+            with pytest.raises(psycopg.errors.RaiseException) as raised:
+                raw_connection.cursor().execute(sql)
+            raw_connection.rollback()
+        finally:
+            raw_connection.close()
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT to_regclass('public.approval_decision') IS NOT NULL")
+            ) is True
+        engine.dispose()
+
+    assert str(offending_id) in str(raised.value)
+    assert expected_diagnostic in str(raised.value)
+    assert "reset the synthetic demo database" in str(raised.value)
+
+
+def test_0004_offline_downgrade_refuses_before_emitting_partial_teardown() -> None:
+    """An irreversible downgrade must emit no trigger, view, or function teardown."""
+    result = _render_alembic_sql(
+        settings.database_url,
+        "downgrade",
+        "0004_safety_approval_lifecycle:0003_need_task_outcome_lifecycle",
+    )
+
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "reset the synthetic demo database instead" in output
+    assert "DROP TRIGGER" not in result.stdout
+    assert "DROP VIEW" not in result.stdout
+    assert "DROP FUNCTION" not in result.stdout

@@ -13,7 +13,7 @@ from app.db.models import (
     workflow,
 )
 
-EXPECTED_TASK_FIVE_TABLES = {
+EXPECTED_RECONCILED_TABLES_THROUGH_TASK_FOUR = {
     "organization",
     "user_account",
     "role_assignment",
@@ -28,17 +28,23 @@ EXPECTED_TASK_FIVE_TABLES = {
     "safety_signal",
     "navigation_task",
     "approval_decision",
+    "approval_policy",
+    "proposed_value_schema",
+    "patient_message",
+    "proposed_change",
     "resource",
     "knowledge_document",
     "agent_run",
     "outcome",
     "audit_event",
+    "safety_signal_resolution",
+    "signal_rule",
 }
 
 
-def test_model_package_preserves_task_five_table_set() -> None:
+def test_model_package_includes_reconciled_tables_through_task_four() -> None:
     assert hasattr(models, "__path__")
-    assert set(models.Base.metadata.tables) == EXPECTED_TASK_FIVE_TABLES
+    assert set(models.Base.metadata.tables) == EXPECTED_RECONCILED_TABLES_THROUGH_TASK_FOUR
     assert models.Organization.__tablename__ == "organization"
     assert models.SafetySignal.__tablename__ == "safety_signal"
 

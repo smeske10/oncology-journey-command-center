@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/proposed-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Proposed Change */
+        post: operations["post_proposed_change_v1_navigator_proposed_changes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/proposed-changes/{proposed_change_id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Approval Decision */
+        post: operations["post_approval_decision_v1_navigator_proposed_changes__proposed_change_id__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/navigator/queue": {
         parameters: {
             query?: never;
@@ -100,6 +134,40 @@ export interface paths {
         get: operations["get_navigator_queue_v1_navigator_queue_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/safety-signals/{signal_id}/acknowledgements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Acknowledgement */
+        post: operations["post_acknowledgement_v1_navigator_safety_signals__signal_id__acknowledgements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/safety-signals/{signal_id}/resolutions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Resolution */
+        post: operations["post_resolution_v1_navigator_safety_signals__signal_id__resolutions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -161,6 +229,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcknowledgementCreate */
+        AcknowledgementCreate: Record<string, never>;
+        /** AcknowledgementRead */
+        AcknowledgementRead: {
+            /**
+             * Acknowledged At
+             * Format: date-time
+             */
+            acknowledged_at: string;
+            /**
+             * Acknowledged By User Id
+             * Format: uuid
+             */
+            acknowledged_by_user_id: string;
+            /** Effective State */
+            effective_state: string;
+            /**
+             * Signal Id
+             * Format: uuid
+             */
+            signal_id: string;
+        };
         /** AnswerInput */
         AnswerInput: {
             /** Link Id */
@@ -168,6 +258,63 @@ export interface components {
             /** Value */
             value: string | number | boolean | string[];
         };
+        /**
+         * ApprovalChangeType
+         * @enum {string}
+         */
+        ApprovalChangeType: "dismiss_signal" | "override_signal_severity" | "authorize_navigation_task" | "authorize_patient_message";
+        /** ApprovalDecisionCreate */
+        ApprovalDecisionCreate: {
+            decision: components["schemas"]["ApprovalDecisionValue"];
+            /**
+             * Qualifying Role Assignment Id
+             * Format: uuid
+             */
+            qualifying_role_assignment_id: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ApprovalDecisionRead */
+        ApprovalDecisionRead: {
+            /** Applied */
+            applied: boolean;
+            /**
+             * Authorized At
+             * Format: date-time
+             */
+            authorized_at: string;
+            /**
+             * Authorized By User Id
+             * Format: uuid
+             */
+            authorized_by_user_id: string;
+            decision: components["schemas"]["ApprovalDecisionValue"];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Proposal State */
+            proposal_state: string;
+            /**
+             * Proposed Change Id
+             * Format: uuid
+             */
+            proposed_change_id: string;
+            /**
+             * Qualifying Role Assignment Id
+             * Format: uuid
+             */
+            qualifying_role_assignment_id: string;
+            qualifying_role_snapshot: components["schemas"]["UserRole"];
+            /** Reason */
+            reason: string | null;
+        };
+        /**
+         * ApprovalDecisionValue
+         * @enum {string}
+         */
+        ApprovalDecisionValue: "approved" | "declined";
         /** CheckInDefinitionResponse */
         CheckInDefinitionResponse: {
             /**
@@ -342,6 +489,82 @@ export interface components {
             /** Score */
             score: number;
         };
+        /** ProposedChangeCreate */
+        ProposedChangeCreate: {
+            change_type: components["schemas"]["ApprovalChangeType"];
+            /** Navigation Task Id */
+            navigation_task_id?: string | null;
+            /** Patient Message Id */
+            patient_message_id?: string | null;
+            /** Proposed Value */
+            proposed_value: {
+                [key: string]: unknown;
+            };
+            /** Rationale */
+            rationale: string;
+            /** Safety Signal Id */
+            safety_signal_id?: string | null;
+            /** Supersedes Proposed Change Id */
+            supersedes_proposed_change_id?: string | null;
+            /** Value Schema Id */
+            value_schema_id: string;
+            /** Value Schema Version */
+            value_schema_version: number;
+        };
+        /** ProposedChangeRead */
+        ProposedChangeRead: {
+            /** Allow Self Approval Snapshot */
+            allow_self_approval_snapshot: boolean;
+            /**
+             * Approval Policy Id
+             * Format: uuid
+             */
+            approval_policy_id: string;
+            /** Approval Policy Version */
+            approval_policy_version: number;
+            change_type: components["schemas"]["ApprovalChangeType"];
+            deterministic_severity_threshold_snapshot: components["schemas"]["SafetySeverity"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Navigation Task Id */
+            navigation_task_id: string | null;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Patient Message Id */
+            patient_message_id: string | null;
+            /**
+             * Proposed At
+             * Format: date-time
+             */
+            proposed_at: string;
+            /** Proposed By User Id */
+            proposed_by_user_id: string | null;
+            /** Proposed Value */
+            proposed_value: {
+                [key: string]: unknown;
+            };
+            /** Rationale */
+            rationale: string;
+            /** Required Approval Count Snapshot */
+            required_approval_count_snapshot: number;
+            required_approver_role_snapshot: components["schemas"]["UserRole"];
+            /** Safety Signal Id */
+            safety_signal_id: string | null;
+            /** State */
+            state: string;
+            /** Supersedes Proposed Change Id */
+            supersedes_proposed_change_id: string | null;
+            /** Value Schema Id */
+            value_schema_id: string;
+            /** Value Schema Version */
+            value_schema_version: number;
+        };
         /** QueueItemRead */
         QueueItemRead: {
             /**
@@ -374,6 +597,43 @@ export interface components {
             patient_id: string;
             priority: components["schemas"]["PriorityResultRead"];
         };
+        /** ResolutionCreate */
+        ResolutionCreate: {
+            /** Resolution Reason */
+            resolution_reason: string;
+        };
+        /** ResolutionRead */
+        ResolutionRead: {
+            /** Effective State */
+            effective_state: string;
+            /**
+             * Resolution Id
+             * Format: uuid
+             */
+            resolution_id: string;
+            /** Resolution Reason */
+            resolution_reason: string;
+            /**
+             * Resolved At
+             * Format: date-time
+             */
+            resolved_at: string;
+            /**
+             * Resolved By User Id
+             * Format: uuid
+             */
+            resolved_by_user_id: string;
+            /**
+             * Signal Id
+             * Format: uuid
+             */
+            signal_id: string;
+        };
+        /**
+         * SafetySeverity
+         * @enum {string}
+         */
+        SafetySeverity: "routine" | "urgent" | "emergent";
         /** SafetySignalRead */
         SafetySignalRead: {
             /**
@@ -592,6 +852,74 @@ export interface operations {
             };
         };
     };
+    post_proposed_change_v1_navigator_proposed_changes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProposedChangeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposedChangeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_approval_decision_v1_navigator_proposed_changes__proposed_change_id__decisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposed_change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_navigator_queue_v1_navigator_queue_get: {
         parameters: {
             query?: never;
@@ -608,6 +936,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NavigatorQueueRead"];
+                };
+            };
+        };
+    };
+    post_acknowledgement_v1_navigator_safety_signals__signal_id__acknowledgements_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                signal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgementCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcknowledgementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_resolution_v1_navigator_safety_signals__signal_id__resolutions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                signal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolutionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolutionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

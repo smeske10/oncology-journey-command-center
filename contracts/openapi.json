@@ -1,6 +1,43 @@
 {
   "components": {
     "schemas": {
+      "AcknowledgementCreate": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "AcknowledgementCreate",
+        "type": "object"
+      },
+      "AcknowledgementRead": {
+        "properties": {
+          "acknowledged_at": {
+            "format": "date-time",
+            "title": "Acknowledged At",
+            "type": "string"
+          },
+          "acknowledged_by_user_id": {
+            "format": "uuid",
+            "title": "Acknowledged By User Id",
+            "type": "string"
+          },
+          "effective_state": {
+            "title": "Effective State",
+            "type": "string"
+          },
+          "signal_id": {
+            "format": "uuid",
+            "title": "Signal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal_id",
+          "acknowledged_by_user_id",
+          "acknowledged_at",
+          "effective_state"
+        ],
+        "title": "AcknowledgementRead",
+        "type": "object"
+      },
       "AnswerInput": {
         "additionalProperties": false,
         "properties": {
@@ -37,6 +74,123 @@
         ],
         "title": "AnswerInput",
         "type": "object"
+      },
+      "ApprovalChangeType": {
+        "enum": [
+          "dismiss_signal",
+          "override_signal_severity",
+          "authorize_navigation_task",
+          "authorize_patient_message"
+        ],
+        "title": "ApprovalChangeType",
+        "type": "string"
+      },
+      "ApprovalDecisionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecisionValue"
+          },
+          "qualifying_role_assignment_id": {
+            "format": "uuid",
+            "title": "Qualifying Role Assignment Id",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "decision",
+          "qualifying_role_assignment_id"
+        ],
+        "title": "ApprovalDecisionCreate",
+        "type": "object"
+      },
+      "ApprovalDecisionRead": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "authorized_at": {
+            "format": "date-time",
+            "title": "Authorized At",
+            "type": "string"
+          },
+          "authorized_by_user_id": {
+            "format": "uuid",
+            "title": "Authorized By User Id",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecisionValue"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "proposal_state": {
+            "title": "Proposal State",
+            "type": "string"
+          },
+          "proposed_change_id": {
+            "format": "uuid",
+            "title": "Proposed Change Id",
+            "type": "string"
+          },
+          "qualifying_role_assignment_id": {
+            "format": "uuid",
+            "title": "Qualifying Role Assignment Id",
+            "type": "string"
+          },
+          "qualifying_role_snapshot": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "proposed_change_id",
+          "authorized_by_user_id",
+          "qualifying_role_assignment_id",
+          "qualifying_role_snapshot",
+          "decision",
+          "authorized_at",
+          "reason",
+          "proposal_state",
+          "applied"
+        ],
+        "title": "ApprovalDecisionRead",
+        "type": "object"
+      },
+      "ApprovalDecisionValue": {
+        "enum": [
+          "approved",
+          "declined"
+        ],
+        "title": "ApprovalDecisionValue",
+        "type": "string"
       },
       "CheckInDefinitionResponse": {
         "properties": {
@@ -472,6 +626,250 @@
         "title": "PriorityResultRead",
         "type": "object"
       },
+      "ProposedChangeCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "change_type": {
+            "$ref": "#/components/schemas/ApprovalChangeType"
+          },
+          "navigation_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation Task Id"
+          },
+          "patient_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Message Id"
+          },
+          "proposed_value": {
+            "additionalProperties": true,
+            "title": "Proposed Value",
+            "type": "object"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "safety_signal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Signal Id"
+          },
+          "supersedes_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Proposed Change Id"
+          },
+          "value_schema_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Value Schema Id",
+            "type": "string"
+          },
+          "value_schema_version": {
+            "minimum": 1.0,
+            "title": "Value Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "change_type",
+          "proposed_value",
+          "rationale",
+          "value_schema_id",
+          "value_schema_version"
+        ],
+        "title": "ProposedChangeCreate",
+        "type": "object"
+      },
+      "ProposedChangeRead": {
+        "properties": {
+          "allow_self_approval_snapshot": {
+            "title": "Allow Self Approval Snapshot",
+            "type": "boolean"
+          },
+          "approval_policy_id": {
+            "format": "uuid",
+            "title": "Approval Policy Id",
+            "type": "string"
+          },
+          "approval_policy_version": {
+            "title": "Approval Policy Version",
+            "type": "integer"
+          },
+          "change_type": {
+            "$ref": "#/components/schemas/ApprovalChangeType"
+          },
+          "deterministic_severity_threshold_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SafetySeverity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "navigation_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation Task Id"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "patient_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Message Id"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed By User Id"
+          },
+          "proposed_value": {
+            "additionalProperties": true,
+            "title": "Proposed Value",
+            "type": "object"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "required_approval_count_snapshot": {
+            "title": "Required Approval Count Snapshot",
+            "type": "integer"
+          },
+          "required_approver_role_snapshot": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "safety_signal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Signal Id"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "supersedes_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Proposed Change Id"
+          },
+          "value_schema_id": {
+            "title": "Value Schema Id",
+            "type": "string"
+          },
+          "value_schema_version": {
+            "title": "Value Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "proposed_by_user_id",
+          "proposed_at",
+          "change_type",
+          "proposed_value",
+          "rationale",
+          "value_schema_id",
+          "value_schema_version",
+          "supersedes_proposed_change_id",
+          "safety_signal_id",
+          "navigation_task_id",
+          "patient_message_id",
+          "approval_policy_id",
+          "approval_policy_version",
+          "deterministic_severity_threshold_snapshot",
+          "allow_self_approval_snapshot",
+          "required_approval_count_snapshot",
+          "required_approver_role_snapshot",
+          "state"
+        ],
+        "title": "ProposedChangeRead",
+        "type": "object"
+      },
       "QueueItemRead": {
         "properties": {
           "created_at": {
@@ -552,6 +950,73 @@
         ],
         "title": "QueueItemRead",
         "type": "object"
+      },
+      "ResolutionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "resolution_reason": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Resolution Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution_reason"
+        ],
+        "title": "ResolutionCreate",
+        "type": "object"
+      },
+      "ResolutionRead": {
+        "properties": {
+          "effective_state": {
+            "title": "Effective State",
+            "type": "string"
+          },
+          "resolution_id": {
+            "format": "uuid",
+            "title": "Resolution Id",
+            "type": "string"
+          },
+          "resolution_reason": {
+            "title": "Resolution Reason",
+            "type": "string"
+          },
+          "resolved_at": {
+            "format": "date-time",
+            "title": "Resolved At",
+            "type": "string"
+          },
+          "resolved_by_user_id": {
+            "format": "uuid",
+            "title": "Resolved By User Id",
+            "type": "string"
+          },
+          "signal_id": {
+            "format": "uuid",
+            "title": "Signal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution_id",
+          "signal_id",
+          "resolved_by_user_id",
+          "resolved_at",
+          "resolution_reason",
+          "effective_state"
+        ],
+        "title": "ResolutionRead",
+        "type": "object"
+      },
+      "SafetySeverity": {
+        "enum": [
+          "routine",
+          "urgent",
+          "emergent"
+        ],
+        "title": "SafetySeverity",
+        "type": "string"
       },
       "SafetySignalRead": {
         "properties": {
@@ -914,6 +1379,100 @@
         ]
       }
     },
+    "/v1/navigator/proposed-changes": {
+      "post": {
+        "operationId": "post_proposed_change_v1_navigator_proposed_changes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposedChangeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposedChangeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Proposed Change",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/proposed-changes/{proposed_change_id}/decisions": {
+      "post": {
+        "operationId": "post_approval_decision_v1_navigator_proposed_changes__proposed_change_id__decisions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposed_change_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposed Change Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDecisionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Approval Decision",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
     "/v1/navigator/queue": {
       "get": {
         "operationId": "get_navigator_queue_v1_navigator_queue_get",
@@ -930,6 +1489,112 @@
           }
         },
         "summary": "Get Navigator Queue",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/safety-signals/{signal_id}/acknowledgements": {
+      "post": {
+        "operationId": "post_acknowledgement_v1_navigator_safety_signals__signal_id__acknowledgements_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Signal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcknowledgementCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcknowledgementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Acknowledgement",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/safety-signals/{signal_id}/resolutions": {
+      "post": {
+        "operationId": "post_resolution_v1_navigator_safety_signals__signal_id__resolutions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "signal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Signal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolutionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolutionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Resolution",
         "tags": [
           "navigator"
         ]
