@@ -685,7 +685,7 @@ def test_0004_upgrade_matches_current_orm_metadata() -> None:
 
 def test_0004_upgrades_empty_database_and_installs_safety_approval_contract() -> None:
     with _disposable_migration_database() as database_url:
-        _run_alembic(database_url, "head")
+        _run_alembic(database_url, "0004_safety_approval_lifecycle")
         engine = create_engine(database_url)
         try:
             inspector = inspect(engine)

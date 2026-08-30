@@ -108,8 +108,11 @@ def test_check_constraint_names_match_the_immutable_task_five_contract() -> None
             "ck_approval_decision_ck_approval_decision_decline_reason",
             "ck_approval_decision_ck_approval_decision_qualifying_ro_7502",
         },
-        "knowledge_document": {"ck_knowledge_document_ck_knowledge_document_status_state"},
-        "agent_run": {"ck_agent_run_ck_agent_run_status_state"},
+        "knowledge_document": set(),
+        "agent_run": {
+            "ck_agent_run_ck_agent_run_status_state",
+            "ck_agent_run_ck_agent_run_workflow_lineage_shape",
+        },
         "outcome": {"ck_outcome_ck_outcome_disposition_state"},
     }
 

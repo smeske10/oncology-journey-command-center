@@ -799,6 +799,8 @@ def _create_committed_aggregate(engine: Engine) -> AggregateIds:
 
 def _delete_committed_aggregate(engine: Engine, ids: AggregateIds) -> None:
     with engine.begin() as connection:
+        # Test-only teardown intentionally bypasses immutable lifecycle triggers.
+        connection.execute(text("SET LOCAL session_replication_role = replica"))
         parameters = {"organization_id": ids.organization_id}
         for statement in (
             "DELETE FROM audit_event WHERE organization_id = :organization_id",
@@ -819,6 +821,7 @@ def _delete_committed_aggregate(engine: Engine, ids: AggregateIds) -> None:
             "DELETE FROM organization WHERE id = :organization_id",
         ):
             connection.execute(text(statement), parameters)
+        connection.execute(text("SET LOCAL session_replication_role = origin"))
 
 
 @pytest.mark.parametrize("task_action", ["create", "assign", "start"])

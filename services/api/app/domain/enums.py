@@ -100,6 +100,19 @@ class AgentRunStatus(str, Enum):
     MANUAL_REVIEW = "manual_review"
 
 
+class ManualReviewTaskState(str, Enum):
+    OPEN = "open"
+    ASSIGNED = "assigned"
+    RESOLVED = "resolved"
+
+
+class AuditActorType(str, Enum):
+    USER = "user"
+    AGENT = "agent"
+    POLICY = "policy"
+    SYSTEM = "system"
+
+
 class OutcomeDisposition(str, Enum):
     RESOLVED = "resolved"
     CLOSED_UNRESOLVED = "closed_unresolved"
