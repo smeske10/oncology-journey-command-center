@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -300,6 +300,42 @@ def test_materialized_workflow_state_cannot_change_without_an_event(
             )
 
 
+@pytest.mark.parametrize(
+    ("column_name", "replacement"),
+    [
+        ("id", uuid4),
+        ("organization_id", uuid4),
+        ("patient_id", uuid4),
+        ("care_episode_id", uuid4),
+        ("source_submission_id", uuid4),
+        ("reported_need_id", uuid4),
+        ("trace_id", lambda: str(uuid4())),
+        ("initial_state", lambda: "rewritten"),
+        ("started_at", lambda: datetime(2026, 8, 19, tzinfo=UTC)),
+    ],
+)
+def test_workflow_owner_cannot_mutate_any_durable_identity_field(
+    connection: Connection,
+    column_name: str,
+    replacement: Callable[[], object],
+) -> None:
+    """Production break: one durable WorkflowRun identity field is rewritable by its owner."""
+    _require_task5_schema(connection)
+    ids = _seed_workflow_source(connection)
+    workflow_id = _insert_workflow(connection, ids)
+    replacement_value = replacement()
+
+    with pytest.raises(DBAPIError, match="identity and source are immutable"):
+        with connection.begin_nested():
+            connection.execute(
+                text(
+                    f"UPDATE workflow_run SET {column_name} = :replacement "
+                    "WHERE id = :workflow_id"
+                ),
+                {"replacement": replacement_value, "workflow_id": workflow_id},
+            )
+
+
 def test_one_transition_can_own_multiple_agent_runs_and_operational_review(
     connection: Connection,
 ) -> None:
@@ -389,3 +425,196 @@ def test_one_transition_can_own_multiple_agent_runs_and_operational_review(
         ),
         {"organization_id": ids["organization"]},
     ) == 0
+
+
+def test_live_postgresql_rejects_cross_tenant_workflow_edges(
+    connection: Connection,
+) -> None:
+    """Production break: a Task 5 workflow child crosses a composite tenant boundary."""
+    _require_task5_schema(connection)
+    first = _seed_workflow_source(connection)
+    second = _seed_workflow_source(connection)
+    first_workflow = _insert_workflow(connection, first)
+    second_workflow = _insert_workflow(connection, second)
+    first_transition = uuid4()
+    second_transition = uuid4()
+    for ids, workflow_id, transition_id in (
+        (first, first_workflow, first_transition),
+        (second, second_workflow, second_transition),
+    ):
+        connection.execute(
+            text(
+                "INSERT INTO workflow_transition_event "
+                "(id, organization_id, workflow_run_id, sequence_number, from_state, "
+                "to_state, actor_type, actor_system_component, actor_system_version, "
+                "reason, transitioned_at) VALUES (:id, :organization_id, :workflow_id, "
+                "1, 'pending', 'running', 'system', 'test', '1', 'started', :at)"
+            ),
+            {
+                "id": transition_id,
+                "organization_id": ids["organization"],
+                "workflow_id": workflow_id,
+                "at": datetime(2026, 8, 18, 0, 1, tzinfo=UTC),
+            },
+        )
+    first_agent = uuid4()
+    second_agent = uuid4()
+    for ids, workflow_id, transition_id, agent_id in (
+        (first, first_workflow, first_transition, first_agent),
+        (second, second_workflow, second_transition, second_agent),
+    ):
+        connection.execute(
+            text(
+                "INSERT INTO agent_run "
+                "(id, organization_id, trace_id, agent_name, status, input_payload, "
+                "output_payload, validation, created_at, workflow_run_id, "
+                "workflow_transition_event_id) VALUES (:id, :organization_id, :trace_id, "
+                "'worker', 'failed', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, :at, "
+                ":workflow_id, :transition_id)"
+            ),
+            {
+                "id": agent_id,
+                "organization_id": ids["organization"],
+                "trace_id": str(uuid4()),
+                "at": datetime(2026, 8, 18, 0, 1, tzinfo=UTC),
+                "workflow_id": workflow_id,
+                "transition_id": transition_id,
+            },
+        )
+    second_need = uuid4()
+    connection.execute(
+        text(
+            "INSERT INTO reported_need "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "kind, status, evidence, created_at) VALUES (:id, :organization_id, "
+            ":patient_id, :episode_id, :submission_id, 'transportation', 'open', "
+            "'[]'::jsonb, :at)"
+        ),
+        {
+            "id": second_need,
+            "organization_id": second["organization"],
+            "patient_id": second["patient"],
+            "episode_id": second["episode"],
+            "submission_id": second["submission"],
+            "at": datetime(2026, 8, 18, tzinfo=UTC),
+        },
+    )
+
+    cases = (
+        (
+            "workflow_run",
+            "INSERT INTO workflow_run "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "trace_id, initial_state, current_state, started_at) VALUES (:id, :org, "
+            ":patient, :episode, :submission, :trace, 'pending', 'pending', :at)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "patient": second["patient"],
+                "episode": second["episode"],
+                "submission": second["submission"],
+                "trace": str(uuid4()),
+                "at": datetime(2026, 8, 18, tzinfo=UTC),
+            },
+        ),
+        (
+            "workflow_run",
+            "INSERT INTO workflow_run "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "trace_id, initial_state, current_state, started_at) VALUES (:id, :org, "
+            ":patient, :episode, :submission, :trace, 'pending', 'pending', :at)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "patient": first["patient"],
+                "episode": first["episode"],
+                "submission": second["submission"],
+                "trace": str(uuid4()),
+                "at": datetime(2026, 8, 18, tzinfo=UTC),
+            },
+        ),
+        (
+            "workflow_run",
+            "INSERT INTO workflow_run "
+            "(id, organization_id, patient_id, care_episode_id, reported_need_id, trace_id, "
+            "initial_state, current_state, started_at) VALUES (:id, :org, :patient, "
+            ":episode, :need, :trace, 'pending', 'pending', :at)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "patient": first["patient"],
+                "episode": first["episode"],
+                "need": second_need,
+                "trace": str(uuid4()),
+                "at": datetime(2026, 8, 18, tzinfo=UTC),
+            },
+        ),
+        (
+            "workflow_transition_event",
+            "INSERT INTO workflow_transition_event "
+            "(id, organization_id, workflow_run_id, sequence_number, from_state, to_state, "
+            "actor_type, actor_system_component, actor_system_version, reason, transitioned_at) "
+            "VALUES (:id, :org, :workflow, 2, 'running', 'done', 'system', 'test', '1', "
+            "'cross tenant', :at)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "workflow": second_workflow,
+                "at": datetime(2026, 8, 18, 0, 2, tzinfo=UTC),
+            },
+        ),
+        (
+            "workflow_transition_event",
+            "INSERT INTO workflow_transition_event "
+            "(id, organization_id, workflow_run_id, sequence_number, from_state, to_state, "
+            "actor_type, actor_agent_run_id, reason, transitioned_at) VALUES (:id, :org, "
+            ":workflow, 2, 'running', 'done', 'agent', :agent, 'cross tenant', :at)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "workflow": first_workflow,
+                "agent": second_agent,
+                "at": datetime(2026, 8, 18, 0, 2, tzinfo=UTC),
+            },
+        ),
+        (
+            "agent_run",
+            "INSERT INTO agent_run "
+            "(id, organization_id, trace_id, agent_name, status, input_payload, "
+            "output_payload, validation, workflow_run_id, workflow_transition_event_id) "
+            "VALUES (:id, :org, :trace, 'worker', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
+            "'{}'::jsonb, :workflow, :transition)",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "trace": str(uuid4()),
+                "workflow": first_workflow,
+                "transition": second_transition,
+            },
+        ),
+        (
+            "manual_review_task",
+            "INSERT INTO manual_review_task "
+            "(id, organization_id, workflow_run_id, agent_run_id, failure_reason, "
+            "retry_context, state) VALUES (:id, :org, :workflow, :agent, 'failed', "
+            "'{}'::jsonb, 'open')",
+            {
+                "id": uuid4(),
+                "org": first["organization"],
+                "workflow": first_workflow,
+                "agent": second_agent,
+            },
+        ),
+    )
+    disabled_tables: set[str] = set()
+    try:
+        for table_name, statement, parameters in cases:
+            if table_name not in disabled_tables:
+                connection.execute(text(f"ALTER TABLE {table_name} DISABLE TRIGGER USER"))
+                disabled_tables.add(table_name)
+            with pytest.raises(DBAPIError, match="foreign key"):
+                with connection.begin_nested():
+                    connection.execute(text(statement), parameters)
+    finally:
+        for table_name in disabled_tables:
+            connection.execute(text(f"ALTER TABLE {table_name} ENABLE TRIGGER USER"))

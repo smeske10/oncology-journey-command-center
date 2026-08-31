@@ -5,7 +5,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -35,6 +35,16 @@ TASK5_TABLES = {
     "organization_knowledge_approval",
     "agent_run_citation",
 }
+PRIVILEGED_TRIGGER_FUNCTIONS = (
+    "append_workflow_transition_event",
+    "guard_approval_decision",
+    "apply_final_approval_decision",
+    "apply_navigation_resource_approval",
+    "guard_proposed_change_revision",
+    "guard_navigation_task_resource_proposal",
+    "guard_safety_signal_resolution",
+    "close_reported_need_from_outcome",
+)
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DISPOSABLE_PREFIX = "ojcc_task5_migration_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -425,6 +435,19 @@ def test_application_role_has_insert_read_but_no_mutation_privileges(
     """Production break: ojcc_app receives UPDATE/DELETE on an append-only table."""
     _require_task5_schema(connection)
     ids = _seed_append_only_rows(connection)
+    assert connection.scalar(
+        text("SELECT has_schema_privilege('ojcc_app', 'public', 'CREATE')")
+    ) is False
+    for function_name in PRIVILEGED_TRIGGER_FUNCTIONS:
+        assert connection.execute(
+            text(
+                "SELECT p.prosecdef, p.proconfig "
+                "FROM pg_proc AS p JOIN pg_namespace AS n ON n.oid = p.pronamespace "
+                "WHERE n.nspname = 'public' AND p.proname = :function_name "
+                "AND p.pronargs = 0"
+            ),
+            {"function_name": function_name},
+        ).one() == (True, ["search_path=pg_catalog, public"])
     for table in APPEND_ONLY_TABLES:
         assert connection.scalar(
             text("SELECT has_table_privilege('ojcc_app', :table, 'SELECT')"),
@@ -455,6 +478,385 @@ def test_application_role_has_insert_read_but_no_mutation_privileges(
                         connection.execute(text(statement), {"id": ids[table]})
     finally:
         connection.execute(text("RESET ROLE"))
+
+
+def _seed_application_role_operation(connection: Connection) -> dict[str, object]:
+    """Create valid aggregate roots before exercising the deliberately narrow group role."""
+    ids = {
+        name: uuid4()
+        for name in (
+            "organization",
+            "user",
+            "patient",
+            "pathway",
+            "episode",
+            "definition",
+            "submission",
+            "workflow",
+            "signal",
+            "need",
+            "task",
+            "role_assignment",
+            "policy",
+            "resource",
+            "proposal",
+            "task_resource",
+        )
+    }
+    started_at = datetime(2026, 8, 18, tzinfo=UTC)
+    connection.execute(
+        text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+        {"id": ids["organization"], "name": f"Application role {uuid4()}"},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO user_account (id, primary_organization_id, email, display_name, "
+            "is_active) VALUES (:id, :organization_id, :email, 'Navigator', true)"
+        ),
+        {
+            "id": ids["user"],
+            "organization_id": ids["organization"],
+            "email": f"{uuid4()}@example.test",
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO synthetic_patient "
+            "(id, organization_id, external_ref, display_name, demographics) "
+            "VALUES (:id, :organization_id, :external_ref, 'Patient', '{}'::jsonb)"
+        ),
+        {
+            "id": ids["patient"],
+            "organization_id": ids["organization"],
+            "external_ref": str(uuid4()),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO pathway_definition "
+            "(id, organization_id, slug, version, name, configuration, is_active) "
+            "VALUES (:id, :organization_id, :slug, 1, 'Pathway', '{}'::jsonb, true)"
+        ),
+        {
+            "id": ids["pathway"],
+            "organization_id": ids["organization"],
+            "slug": str(uuid4()),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO care_episode "
+            "(id, organization_id, patient_id, status, started_at) "
+            "VALUES (:id, :organization_id, :patient_id, 'active', :started_at)"
+        ),
+        {
+            "id": ids["episode"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "started_at": started_at,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO check_in_definition "
+            "(id, organization_id, pathway_definition_id, slug, version, title, questionnaire) "
+            "VALUES (:id, :organization_id, :pathway_id, :slug, 1, 'Check-in', '{}'::jsonb)"
+        ),
+        {
+            "id": ids["definition"],
+            "organization_id": ids["organization"],
+            "pathway_id": ids["pathway"],
+            "slug": str(uuid4()),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO check_in_submission "
+            "(id, organization_id, patient_id, care_episode_id, check_in_definition_id, "
+            "status, answers, submission_source, submitted_by_user_id, submitted_at) "
+            "VALUES (:id, :organization_id, :patient_id, :episode_id, :definition_id, "
+            "'submitted', '{}'::jsonb, 'patient', :user_id, :submitted_at)"
+        ),
+        {
+            "id": ids["submission"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "episode_id": ids["episode"],
+            "definition_id": ids["definition"],
+            "user_id": ids["user"],
+            "submitted_at": started_at,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO workflow_run "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "trace_id, initial_state, current_state, started_at) "
+            "VALUES (:id, :organization_id, :patient_id, :episode_id, :submission_id, "
+            ":trace_id, 'pending', 'pending', :started_at)"
+        ),
+        {
+            "id": ids["workflow"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "episode_id": ids["episode"],
+            "submission_id": ids["submission"],
+            "trace_id": str(uuid4()),
+            "started_at": started_at,
+        },
+    )
+    connection.execute(text("SET LOCAL session_replication_role = replica"))
+    connection.execute(
+        text(
+            "INSERT INTO reported_need "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "kind, status, evidence, created_at) VALUES (:id, :organization_id, "
+            ":patient_id, :episode_id, :submission_id, 'transportation', 'open', "
+            "'[]'::jsonb, :detected_at)"
+        ),
+        {
+            "id": ids["need"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "episode_id": ids["episode"],
+            "submission_id": ids["submission"],
+            "detected_at": started_at,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO navigation_task "
+            "(id, organization_id, patient_id, reported_need_id, title, status) "
+            "VALUES (:id, :organization_id, :patient_id, :need_id, 'Arrange ride', 'open')"
+        ),
+        {
+            "id": ids["task"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "need_id": ids["need"],
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO safety_signal "
+            "(id, organization_id, patient_id, care_episode_id, source_submission_id, "
+            "signal_rule_id, signal_rule_version, deterministic_level, effective_level, "
+            "status, evidence, acknowledged_by_user_id, acknowledged_at, created_at) "
+            "VALUES (:id, :organization_id, :patient_id, :episode_id, :submission_id, "
+            ":rule_id, 1, 'urgent', 'urgent', 'acknowledged', '[]'::jsonb, :user_id, :at, :at)"
+        ),
+        {
+            "id": ids["signal"],
+            "organization_id": ids["organization"],
+            "patient_id": ids["patient"],
+            "episode_id": ids["episode"],
+            "submission_id": ids["submission"],
+            "rule_id": uuid4(),
+            "user_id": ids["user"],
+            "at": started_at,
+        },
+    )
+    connection.execute(text("SET LOCAL session_replication_role = origin"))
+    connection.execute(
+        text(
+            "INSERT INTO role_assignment "
+            "(id, organization_id, user_id, role, granted_at) "
+            "VALUES (:id, :organization_id, :user_id, 'navigator', :granted_at)"
+        ),
+        {
+            "id": ids["role_assignment"],
+            "organization_id": ids["organization"],
+            "user_id": ids["user"],
+            "granted_at": started_at - timedelta(days=1),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO approval_policy "
+            "(id, organization_id, change_type, version, effective_from, "
+            "allow_self_approval, required_approval_count, required_approver_role) "
+            "VALUES (:id, :organization_id, 'authorize_navigation_task', 1, "
+            ":effective_from, true, 1, 'navigator')"
+        ),
+        {
+            "id": ids["policy"],
+            "organization_id": ids["organization"],
+            "effective_from": started_at - timedelta(days=1),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO resource "
+            "(id, organization_id, name, category, is_active, metadata) "
+            "VALUES (:id, :organization_id, 'Ride Service', 'transportation', true, "
+            "'{}'::jsonb)"
+        ),
+        {"id": ids["resource"], "organization_id": ids["organization"]},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO proposed_change "
+            "(id, organization_id, proposed_by_user_id, proposed_at, change_type, "
+            "proposed_value, rationale, value_schema_id, value_schema_version, "
+            "navigation_task_id, approval_policy_id, approval_policy_version, "
+            "allow_self_approval_snapshot, required_approval_count_snapshot, "
+            "required_approver_role_snapshot) VALUES (:id, :organization_id, :user_id, :at, "
+            "'authorize_navigation_task', jsonb_build_object('title', 'Arrange ride', "
+            "'resources', jsonb_build_array(jsonb_build_object('resource_id', "
+            "CAST(:resource_id AS text), 'name', 'Ride Service', 'category', "
+            "'transportation', 'url', NULL, 'metadata', '{}'::jsonb, 'match_rationale', "
+            "'Matches need'))), 'Patient requested transport', "
+            "'ojcc.authorize-navigation-task', 2, :task_id, :policy_id, 1, true, 1, "
+            "'navigator')"
+        ),
+        {
+            "id": ids["proposal"],
+            "organization_id": ids["organization"],
+            "user_id": ids["user"],
+            "at": started_at,
+            "resource_id": ids["resource"],
+            "task_id": ids["task"],
+            "policy_id": ids["policy"],
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO navigation_task_resource "
+            "(id, organization_id, navigation_task_id, resource_id, proposed_change_id, "
+            "resource_name_snapshot, resource_category_snapshot, resource_metadata_snapshot, "
+            "match_rationale_snapshot, proposed_at) VALUES (:id, :organization_id, :task_id, "
+            ":resource_id, :proposal_id, 'Ride Service', 'transportation', '{}'::jsonb, "
+            "'Matches need', :at)"
+        ),
+        {
+            "id": ids["task_resource"],
+            "organization_id": ids["organization"],
+            "task_id": ids["task"],
+            "resource_id": ids["resource"],
+            "proposal_id": ids["proposal"],
+            "at": started_at,
+        },
+    )
+    ids["started_at"] = started_at
+    return ids
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["transition", "approval", "submission", "resolution", "outcome"],
+)
+def test_application_role_can_execute_valid_triggered_inserts(
+    connection: Connection,
+    operation: str,
+) -> None:
+    """Production break: an invoker trigger reads or writes tables unavailable to ojcc_app."""
+    _require_task5_schema(connection)
+    ids = _seed_application_role_operation(connection)
+    started_at = ids["started_at"]
+    statements: dict[str, tuple[str, dict[str, object]]] = {
+        "transition": (
+            "INSERT INTO workflow_transition_event "
+            "(id, organization_id, workflow_run_id, sequence_number, from_state, to_state, "
+            "actor_type, actor_system_component, actor_system_version, reason, transitioned_at) "
+            "VALUES (:id, :organization_id, :workflow_id, 1, 'pending', 'running', "
+            "'system', 'workflow-coordinator', '1', 'started', :at)",
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "workflow_id": ids["workflow"],
+                "at": started_at + timedelta(minutes=1),
+            },
+        ),
+        "approval": (
+            "INSERT INTO approval_decision "
+            "(id, organization_id, proposed_change_id, authorized_by_user_id, "
+            "qualifying_role_assignment_id, qualifying_role_snapshot, decision, authorized_at) "
+            "VALUES (:id, :organization_id, :proposal_id, :user_id, :assignment_id, "
+            "'navigator', 'approved', :at)",
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "proposal_id": ids["proposal"],
+                "user_id": ids["user"],
+                "assignment_id": ids["role_assignment"],
+                "at": started_at + timedelta(minutes=1),
+            },
+        ),
+        "submission": (
+            "INSERT INTO check_in_submission "
+            "(id, organization_id, patient_id, care_episode_id, check_in_definition_id, "
+            "status, answers, submission_source, submitted_by_user_id, submitted_at) "
+            "VALUES (:id, :organization_id, :patient_id, :episode_id, :definition_id, "
+            "'submitted', '{}'::jsonb, 'patient', :user_id, :at)",
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "patient_id": ids["patient"],
+                "episode_id": ids["episode"],
+                "definition_id": ids["definition"],
+                "user_id": ids["user"],
+                "at": started_at + timedelta(minutes=1),
+            },
+        ),
+        "resolution": (
+            "INSERT INTO safety_signal_resolution "
+            "(id, organization_id, safety_signal_id, resolved_by_user_id, resolved_at, "
+            "resolution_reason) VALUES (:id, :organization_id, :signal_id, :user_id, :at, "
+            "'Navigator resolved')",
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "signal_id": ids["signal"],
+                "user_id": ids["user"],
+                "at": started_at + timedelta(minutes=1),
+            },
+        ),
+        "outcome": (
+            "INSERT INTO outcome "
+            "(id, organization_id, patient_id, reported_need_id, recorded_by_user_id, "
+            "disposition, idempotency_key, recorded_at) VALUES (:id, :organization_id, "
+            ":patient_id, :need_id, :user_id, 'resolved', :key, :at)",
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "patient_id": ids["patient"],
+                "need_id": ids["need"],
+                "user_id": ids["user"],
+                "key": str(uuid4()),
+                "at": started_at + timedelta(minutes=1),
+            },
+        ),
+    }
+    statement, parameters = statements[operation]
+    connection.execute(text("SET LOCAL ROLE ojcc_app"))
+    try:
+        with connection.begin_nested():
+            connection.execute(text(statement), parameters)
+    finally:
+        connection.execute(text("RESET ROLE"))
+
+    if operation == "transition":
+        assert connection.scalar(
+            text("SELECT current_state FROM workflow_run WHERE id = :id"),
+            {"id": ids["workflow"]},
+        ) == "running"
+    elif operation == "approval":
+        assert connection.scalar(
+            text("SELECT approved_at FROM navigation_task_resource WHERE id = :id"),
+            {"id": ids["task_resource"]},
+        ) == started_at + timedelta(minutes=1)
+    elif operation == "outcome":
+        assert connection.scalar(
+            text("SELECT status FROM navigation_task WHERE id = :id"),
+            {"id": ids["task"]},
+        ) == "cancelled"
+        assert connection.scalar(
+            text(
+                "SELECT count(*) FROM audit_event WHERE entity_id = :task_id "
+                "AND event_type = 'task_cancelled_by_closure'"
+            ),
+            {"task_id": ids["task"]},
+        ) == 1
 
 
 def _validate_local_url(url: URL) -> None:

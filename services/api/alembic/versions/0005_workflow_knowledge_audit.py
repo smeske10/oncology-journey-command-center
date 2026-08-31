@@ -397,10 +397,12 @@ def _create_knowledge_governance() -> None:
         sa.Column("knowledge_document_id", sa.Uuid(), nullable=False),
         sa.Column("knowledge_document_version", sa.String(length=64), nullable=False),
         sa.Column("approved_by_user_id", sa.Uuid(), nullable=False),
+        sa.Column("approved_by_role_assignment_id", sa.Uuid(), nullable=False),
         sa.Column("approved_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("effective_from", sa.DateTime(timezone=True), nullable=False),
         sa.Column("withdrawn_at", sa.DateTime(timezone=True)),
         sa.Column("withdrawn_by_user_id", sa.Uuid()),
+        sa.Column("withdrawn_by_role_assignment_id", sa.Uuid()),
         sa.Column("withdrawal_reason", sa.Text()),
         sa.Column(
             "created_at",
@@ -426,8 +428,10 @@ def _create_knowledge_governance() -> None:
         ),
         sa.CheckConstraint(
             "(withdrawn_at IS NULL AND withdrawn_by_user_id IS NULL "
+            "AND withdrawn_by_role_assignment_id IS NULL "
             "AND withdrawal_reason IS NULL) OR "
             "(withdrawn_at IS NOT NULL AND withdrawn_by_user_id IS NOT NULL "
+            "AND withdrawn_by_role_assignment_id IS NOT NULL "
             "AND NULLIF(trim(withdrawal_reason), '') IS NOT NULL "
             "AND effective_from < withdrawn_at)",
             name=op.f("ck_organization_knowledge_approval_ck_organization_know_da80"),
@@ -438,16 +442,6 @@ def _create_knowledge_governance() -> None:
             name="fk_organization_knowledge_approval_organization_id_organization",
         ),
         sa.ForeignKeyConstraint(
-            ["approved_by_user_id"],
-            ["user_account.id"],
-            name="fk_organization_knowledge_approval_approved_by_user",
-        ),
-        sa.ForeignKeyConstraint(
-            ["withdrawn_by_user_id"],
-            ["user_account.id"],
-            name="fk_organization_knowledge_approval_withdrawn_by_user",
-        ),
-        sa.ForeignKeyConstraint(
             ["organization_id", "knowledge_document_id", "knowledge_document_version"],
             [
                 "knowledge_document.organization_id",
@@ -455,6 +449,32 @@ def _create_knowledge_governance() -> None:
                 "knowledge_document.version",
             ],
             name="fk_organization_knowledge_approval_document_version",
+        ),
+        sa.ForeignKeyConstraint(
+            [
+                "organization_id",
+                "approved_by_user_id",
+                "approved_by_role_assignment_id",
+            ],
+            [
+                "role_assignment.organization_id",
+                "role_assignment.user_id",
+                "role_assignment.id",
+            ],
+            name="fk_knowledge_approval_approved_role",
+        ),
+        sa.ForeignKeyConstraint(
+            [
+                "organization_id",
+                "withdrawn_by_user_id",
+                "withdrawn_by_role_assignment_id",
+            ],
+            [
+                "role_assignment.organization_id",
+                "role_assignment.user_id",
+                "role_assignment.id",
+            ],
+            name="fk_knowledge_approval_withdrawn_role",
         ),
     )
     op.create_index(
@@ -625,7 +645,8 @@ def _create_workflow_guards() -> None:
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'Workflow runs are durable lineage records';
             END IF;
-            IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+            IF NEW.id IS DISTINCT FROM OLD.id
+               OR NEW.organization_id IS DISTINCT FROM OLD.organization_id
                OR NEW.patient_id IS DISTINCT FROM OLD.patient_id
                OR NEW.care_episode_id IS DISTINCT FROM OLD.care_episode_id
                OR NEW.source_submission_id IS DISTINCT FROM OLD.source_submission_id
@@ -772,25 +793,89 @@ def _create_knowledge_guards() -> None:
         RETURNS trigger
         LANGUAGE plpgsql
         AS $$
+        DECLARE approved_assignment role_assignment%ROWTYPE;
+        DECLARE withdrawal_assignment role_assignment%ROWTYPE;
         BEGIN
+            IF TG_OP = 'INSERT' THEN
+                IF NEW.withdrawn_at IS NOT NULL
+                   OR NEW.withdrawn_by_user_id IS NOT NULL
+                   OR NEW.withdrawn_by_role_assignment_id IS NOT NULL
+                   OR NEW.withdrawal_reason IS NOT NULL THEN
+                    RAISE EXCEPTION
+                        'Knowledge approval must be inserted before withdrawal';
+                END IF;
+                SELECT * INTO approved_assignment
+                FROM role_assignment
+                WHERE organization_id = NEW.organization_id
+                  AND user_id = NEW.approved_by_user_id
+                  AND id = NEW.approved_by_role_assignment_id
+                FOR UPDATE;
+                IF approved_assignment.id IS NULL
+                   OR NEW.approved_at < approved_assignment.granted_at
+                   OR (
+                        approved_assignment.revoked_at IS NOT NULL
+                        AND NEW.approved_at >= approved_assignment.revoked_at
+                   ) THEN
+                    RAISE EXCEPTION
+                        'Approval RoleAssignment was not active at approval time';
+                END IF;
+                RETURN NEW;
+            END IF;
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'Knowledge approval history is immutable';
             END IF;
-            IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+            IF NEW.id IS DISTINCT FROM OLD.id
+               OR NEW.organization_id IS DISTINCT FROM OLD.organization_id
                OR NEW.knowledge_document_id IS DISTINCT FROM OLD.knowledge_document_id
                OR NEW.knowledge_document_version IS DISTINCT FROM OLD.knowledge_document_version
                OR NEW.approved_by_user_id IS DISTINCT FROM OLD.approved_by_user_id
+               OR NEW.approved_by_role_assignment_id IS DISTINCT FROM
+                    OLD.approved_by_role_assignment_id
                OR NEW.approved_at IS DISTINCT FROM OLD.approved_at
                OR NEW.effective_from IS DISTINCT FROM OLD.effective_from
+               OR NEW.created_at IS DISTINCT FROM OLD.created_at
                OR OLD.withdrawn_at IS NOT NULL
                OR (
                     NEW.withdrawn_at IS NULL
                     AND (
                         NEW.withdrawn_by_user_id IS DISTINCT FROM OLD.withdrawn_by_user_id
+                        OR NEW.withdrawn_by_role_assignment_id IS DISTINCT FROM
+                            OLD.withdrawn_by_role_assignment_id
                         OR NEW.withdrawal_reason IS DISTINCT FROM OLD.withdrawal_reason
                     )
                ) THEN
                 RAISE EXCEPTION 'Knowledge approval history is immutable except withdrawal';
+            END IF;
+            IF OLD.withdrawn_at IS NULL
+               AND NEW.withdrawn_at IS NOT NULL THEN
+                SELECT * INTO withdrawal_assignment
+                FROM role_assignment
+                WHERE organization_id = NEW.organization_id
+                  AND user_id = NEW.withdrawn_by_user_id
+                  AND id = NEW.withdrawn_by_role_assignment_id
+                FOR UPDATE;
+                IF withdrawal_assignment.id IS NULL
+                   OR NEW.withdrawn_at < withdrawal_assignment.granted_at
+                   OR (
+                        withdrawal_assignment.revoked_at IS NOT NULL
+                        AND NEW.withdrawn_at >= withdrawal_assignment.revoked_at
+                   ) THEN
+                    RAISE EXCEPTION
+                        'Withdrawal RoleAssignment was not active at withdrawal time';
+                END IF;
+            END IF;
+            IF OLD.withdrawn_at IS NULL
+               AND NEW.withdrawn_at IS NOT NULL
+               AND EXISTS (
+                    SELECT 1
+                    FROM agent_run_citation AS citation
+                    WHERE citation.organization_id = NEW.organization_id
+                      AND citation.knowledge_document_id = NEW.knowledge_document_id
+                      AND citation.knowledge_document_version =
+                          NEW.knowledge_document_version
+                      AND citation.cited_at >= NEW.withdrawn_at
+               ) THEN
+                RAISE EXCEPTION 'Withdrawal cannot precede an existing citation';
             END IF;
             RETURN NEW;
         END;
@@ -800,9 +885,73 @@ def _create_knowledge_guards() -> None:
     op.execute(
         """
         CREATE TRIGGER trg_knowledge_approval_history
-        BEFORE UPDATE OR DELETE ON organization_knowledge_approval
+        BEFORE INSERT OR UPDATE OR DELETE ON organization_knowledge_approval
         FOR EACH ROW
         EXECUTE FUNCTION guard_knowledge_approval_history()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION guard_role_assignment_knowledge_history()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM organization_knowledge_approval AS approval
+                WHERE (
+                    approval.organization_id = OLD.organization_id
+                    AND approval.approved_by_user_id = OLD.user_id
+                    AND approval.approved_by_role_assignment_id = OLD.id
+                    AND (
+                        TG_OP = 'DELETE'
+                        OR NEW.organization_id IS DISTINCT FROM approval.organization_id
+                        OR NEW.user_id IS DISTINCT FROM approval.approved_by_user_id
+                        OR NEW.id IS DISTINCT FROM approval.approved_by_role_assignment_id
+                        OR NEW.role IS DISTINCT FROM OLD.role
+                        OR approval.approved_at < NEW.granted_at
+                        OR (
+                            NEW.revoked_at IS NOT NULL
+                            AND approval.approved_at >= NEW.revoked_at
+                        )
+                    )
+                )
+                OR (
+                    approval.organization_id = OLD.organization_id
+                    AND approval.withdrawn_by_user_id = OLD.user_id
+                    AND approval.withdrawn_by_role_assignment_id = OLD.id
+                    AND (
+                        TG_OP = 'DELETE'
+                        OR NEW.organization_id IS DISTINCT FROM approval.organization_id
+                        OR NEW.user_id IS DISTINCT FROM approval.withdrawn_by_user_id
+                        OR NEW.id IS DISTINCT FROM approval.withdrawn_by_role_assignment_id
+                        OR NEW.role IS DISTINCT FROM OLD.role
+                        OR approval.withdrawn_at < NEW.granted_at
+                        OR (
+                            NEW.revoked_at IS NOT NULL
+                            AND approval.withdrawn_at >= NEW.revoked_at
+                        )
+                    )
+                )
+            ) THEN
+                RAISE EXCEPTION
+                    'Role assignment mutation would invalidate knowledge approval history';
+            END IF;
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_role_assignment_knowledge_history_guard
+        BEFORE UPDATE OR DELETE ON role_assignment
+        FOR EACH ROW
+        EXECUTE FUNCTION guard_role_assignment_knowledge_history()
         """
     )
     op.execute(
@@ -812,18 +961,30 @@ def _create_knowledge_guards() -> None:
         LANGUAGE plpgsql
         AS $$
         DECLARE approved boolean;
+        DECLARE run_created_at timestamptz;
         BEGIN
+            SELECT created_at INTO run_created_at
+            FROM agent_run
+            WHERE organization_id = NEW.organization_id
+              AND id = NEW.agent_run_id
+            FOR KEY SHARE;
+            IF run_created_at IS NULL
+               OR NEW.cited_at IS DISTINCT FROM run_created_at THEN
+                RAISE EXCEPTION
+                    'Citation timestamp must equal AgentRun creation time';
+            END IF;
             SELECT true INTO approved
             FROM organization_knowledge_approval
             WHERE organization_id = NEW.organization_id
               AND knowledge_document_id = NEW.knowledge_document_id
               AND knowledge_document_version = NEW.knowledge_document_version
-              AND effective_from <= NEW.cited_at
-              AND (withdrawn_at IS NULL OR NEW.cited_at < withdrawn_at)
-            FOR KEY SHARE;
+              AND effective_from <= run_created_at
+              AND (withdrawn_at IS NULL OR run_created_at < withdrawn_at)
+            FOR UPDATE;
             IF NOT coalesce(approved, false) THEN
                 RAISE EXCEPTION
-                    'Knowledge document version is not approved for citation at this time';
+                    'Knowledge document version is not approved for citation at this time '
+                    '(AgentRun creation)';
             END IF;
             RETURN NEW;
         END;
@@ -1053,6 +1214,12 @@ def _replace_proposal_guards() -> None:
             EXCEPTION WHEN invalid_text_representation THEN
                 RAISE EXCEPTION 'Proposed value does not match its registered resource schema';
             END;
+            SELECT count(*) <> count(DISTINCT (value->>'resource_id')::uuid)
+            INTO invalid_resource
+            FROM jsonb_array_elements(NEW.proposed_value->'resources') AS value;
+            IF invalid_resource THEN
+                RAISE EXCEPTION 'Proposal resource IDs must be unique';
+            END IF;
 
             IF NEW.supersedes_proposed_change_id IS NULL THEN
                 RETURN NEW;
@@ -1263,7 +1430,25 @@ def _create_application_role_surface() -> None:
         "ALTER ROLE ojcc_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
         "NOREPLICATION NOBYPASSRLS"
     )
+    op.execute("REVOKE CREATE ON SCHEMA public FROM ojcc_app")
     op.execute("GRANT USAGE ON SCHEMA public TO ojcc_app")
+    for function_name in (
+        "append_workflow_transition_event",
+        "guard_approval_decision",
+        "apply_final_approval_decision",
+        "apply_navigation_resource_approval",
+        "guard_proposed_change_revision",
+        "guard_navigation_task_resource_proposal",
+        "guard_safety_signal_resolution",
+        "close_reported_need_from_outcome",
+    ):
+        op.execute(f"ALTER FUNCTION public.{function_name}() SECURITY DEFINER")
+        op.execute(
+            f"ALTER FUNCTION public.{function_name}() "
+            "SET search_path = pg_catalog, public"
+        )
+        op.execute(f"REVOKE ALL ON FUNCTION public.{function_name}() FROM PUBLIC")
+        op.execute(f"GRANT EXECUTE ON FUNCTION public.{function_name}() TO ojcc_app")
     for table_name in (
         "check_in_submission",
         "proposed_change",

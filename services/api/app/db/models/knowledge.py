@@ -90,8 +90,10 @@ class OrganizationKnowledgeApproval(Base):
         ),
         CheckConstraint(
             "(withdrawn_at IS NULL AND withdrawn_by_user_id IS NULL "
+            "AND withdrawn_by_role_assignment_id IS NULL "
             "AND withdrawal_reason IS NULL) OR "
             "(withdrawn_at IS NOT NULL AND withdrawn_by_user_id IS NOT NULL "
+            "AND withdrawn_by_role_assignment_id IS NOT NULL "
             "AND NULLIF(trim(withdrawal_reason), '') IS NOT NULL "
             "AND effective_from < withdrawn_at)",
             name=conv("ck_organization_knowledge_approval_ck_organization_know_da80"),
@@ -105,6 +107,32 @@ class OrganizationKnowledgeApproval(Base):
             ],
             name="fk_organization_knowledge_approval_document_version",
         ),
+        ForeignKeyConstraint(
+            [
+                "organization_id",
+                "approved_by_user_id",
+                "approved_by_role_assignment_id",
+            ],
+            [
+                "role_assignment.organization_id",
+                "role_assignment.user_id",
+                "role_assignment.id",
+            ],
+            name="fk_knowledge_approval_approved_role",
+        ),
+        ForeignKeyConstraint(
+            [
+                "organization_id",
+                "withdrawn_by_user_id",
+                "withdrawn_by_role_assignment_id",
+            ],
+            [
+                "role_assignment.organization_id",
+                "role_assignment.user_id",
+                "role_assignment.id",
+            ],
+            name="fk_knowledge_approval_withdrawn_role",
+        ),
         Index(
             "ix_organization_knowledge_approval_org_effective",
             "organization_id",
@@ -116,16 +144,13 @@ class OrganizationKnowledgeApproval(Base):
     organization_id: Mapped[UUID] = mapped_column(ForeignKey("organization.id"), nullable=False)
     knowledge_document_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     knowledge_document_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    approved_by_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("user_account.id", name="fk_organization_knowledge_approval_approved_by_user"),
-        nullable=False,
-    )
+    approved_by_user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    approved_by_role_assignment_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     approved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    withdrawn_by_user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("user_account.id", name="fk_organization_knowledge_approval_withdrawn_by_user")
-    )
+    withdrawn_by_user_id: Mapped[UUID | None] = mapped_column(Uuid)
+    withdrawn_by_role_assignment_id: Mapped[UUID | None] = mapped_column(Uuid)
     withdrawal_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
