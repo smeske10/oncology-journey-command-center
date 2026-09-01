@@ -447,7 +447,7 @@ def test_application_role_has_insert_read_but_no_mutation_privileges(
                 "AND p.pronargs = 0"
             ),
             {"function_name": function_name},
-        ).one() == (True, ["search_path=pg_catalog, public"])
+        ).one() == (True, ["search_path=pg_catalog, public, pg_temp"])
     for table in APPEND_ONLY_TABLES:
         assert connection.scalar(
             text("SELECT has_table_privilege('ojcc_app', :table, 'SELECT')"),
@@ -857,6 +857,65 @@ def test_application_role_can_execute_valid_triggered_inserts(
             ),
             {"task_id": ids["task"]},
         ) == 1
+
+
+def test_security_definer_trigger_ignores_pg_temp_relation_shadow(
+    connection: Connection,
+) -> None:
+    """Production break: pg_temp shadows a governed relation in a definer trigger."""
+    _require_task5_schema(connection)
+    ids = _seed_application_role_operation(connection)
+    transitioned_at = ids["started_at"] + timedelta(minutes=1)
+
+    connection.execute(text("SET LOCAL ROLE ojcc_app"))
+    try:
+        connection.execute(
+            text(
+                "CREATE TEMP TABLE workflow_run ("
+                "id uuid PRIMARY KEY, organization_id uuid NOT NULL, "
+                "current_state text NOT NULL, started_at timestamptz NOT NULL, "
+                "updated_at timestamptz) ON COMMIT DROP"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO pg_temp.workflow_run "
+                "(id, organization_id, current_state, started_at) "
+                "VALUES (:id, :organization_id, 'pending', :started_at)"
+            ),
+            {
+                "id": ids["workflow"],
+                "organization_id": ids["organization"],
+                "started_at": ids["started_at"],
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO public.workflow_transition_event "
+                "(id, organization_id, workflow_run_id, sequence_number, from_state, "
+                "to_state, actor_type, actor_system_component, actor_system_version, "
+                "reason, transitioned_at) VALUES (:id, :organization_id, :workflow_id, "
+                "1, 'pending', 'running', 'system', 'workflow-coordinator', '1', "
+                "'started', :transitioned_at)"
+            ),
+            {
+                "id": uuid4(),
+                "organization_id": ids["organization"],
+                "workflow_id": ids["workflow"],
+                "transitioned_at": transitioned_at,
+            },
+        )
+    finally:
+        connection.execute(text("RESET ROLE"))
+
+    assert connection.execute(
+        text(
+            "SELECT "
+            "(SELECT current_state FROM public.workflow_run WHERE id = :id), "
+            "(SELECT current_state FROM pg_temp.workflow_run WHERE id = :id)"
+        ),
+        {"id": ids["workflow"]},
+    ).one() == ("running", "pending")
 
 
 def _validate_local_url(url: URL) -> None:

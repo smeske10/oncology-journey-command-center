@@ -1445,7 +1445,7 @@ def _create_application_role_surface() -> None:
         op.execute(f"ALTER FUNCTION public.{function_name}() SECURITY DEFINER")
         op.execute(
             f"ALTER FUNCTION public.{function_name}() "
-            "SET search_path = pg_catalog, public"
+            "SET search_path = pg_catalog, public, pg_temp"
         )
         op.execute(f"REVOKE ALL ON FUNCTION public.{function_name}() FROM PUBLIC")
         op.execute(f"GRANT EXECUTE ON FUNCTION public.{function_name}() TO ojcc_app")
