@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.db.models import Base
+from app.domain import enums
 
 TASK5_KNOWLEDGE_TABLES = {
     "navigation_task_resource",
@@ -107,25 +108,24 @@ def _insert_agent_run(
     connection: Connection,
     *,
     organization_id: UUID,
-    created_at: datetime,
-) -> UUID:
+) -> tuple[UUID, datetime]:
     agent_run_id = uuid4()
-    connection.execute(
+    created_at = connection.scalar(
         text(
             "INSERT INTO agent_run "
             "(id, organization_id, trace_id, agent_name, status, input_payload, "
-            "output_payload, validation, created_at) VALUES (:id, :organization_id, "
+            "output_payload, validation) VALUES (:id, :organization_id, "
             ":trace_id, 'knowledge-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
-            "'{}'::jsonb, :created_at)"
+            "'{}'::jsonb) RETURNING created_at"
         ),
         {
             "id": agent_run_id,
             "organization_id": organization_id,
             "trace_id": str(uuid4()),
-            "created_at": created_at,
         },
     )
-    return agent_run_id
+    assert created_at is not None
+    return agent_run_id, created_at
 
 
 def test_knowledge_metadata_preserves_exact_versions_and_proposal_authority() -> None:
@@ -219,6 +219,11 @@ def test_knowledge_metadata_preserves_exact_versions_and_proposal_authority() ->
         "organization_id",
         "proposed_change_id",
     )
+
+
+def test_stale_knowledge_document_status_enum_is_removed() -> None:
+    """Production break: code can still model superseded mutable document statuses."""
+    assert not hasattr(enums, "KnowledgeDocumentStatus")
 
 
 def test_knowledge_approval_rejects_cross_tenant_role_provenance(
@@ -680,22 +685,10 @@ def test_withdrawal_blocks_new_citations_but_preserves_historical_evidence(
         },
     )
 
-    first_run = uuid4()
     citation_id = uuid4()
-    connection.execute(
-        text(
-            "INSERT INTO agent_run "
-            "(id, organization_id, trace_id, agent_name, status, input_payload, "
-            "output_payload, validation, created_at) VALUES (:id, :organization_id, "
-            ":trace_id, 'knowledge-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
-            "'{}'::jsonb, :created_at)"
-        ),
-        {
-            "id": first_run,
-            "organization_id": ids["organization"],
-            "trace_id": str(uuid4()),
-            "created_at": approved_at + timedelta(minutes=1),
-        },
+    first_run, first_run_created_at = _insert_agent_run(
+        connection,
+        organization_id=ids["organization"],
     )
     connection.execute(
         text(
@@ -710,11 +703,12 @@ def test_withdrawal_blocks_new_citations_but_preserves_historical_evidence(
             "organization_id": ids["organization"],
             "agent_run_id": first_run,
             "document_id": ids["document"],
-            "cited_at": approved_at + timedelta(minutes=1),
+            "cited_at": first_run_created_at,
         },
     )
 
-    withdrawn_at = approved_at + timedelta(minutes=2)
+    withdrawn_at = connection.scalar(text("SELECT clock_timestamp()"))
+    assert withdrawn_at is not None
     connection.execute(
         text(
             "UPDATE organization_knowledge_approval SET withdrawn_at = :withdrawn_at, "
@@ -745,21 +739,9 @@ def test_withdrawal_blocks_new_citations_but_preserves_historical_evidence(
         "Call the transportation desk.",
     )
 
-    second_run = uuid4()
-    connection.execute(
-        text(
-            "INSERT INTO agent_run "
-            "(id, organization_id, trace_id, agent_name, status, input_payload, "
-            "output_payload, validation, created_at) VALUES (:id, :organization_id, "
-            ":trace_id, 'knowledge-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
-            "'{}'::jsonb, :created_at)"
-        ),
-        {
-            "id": second_run,
-            "organization_id": ids["organization"],
-            "trace_id": str(uuid4()),
-            "created_at": withdrawn_at + timedelta(minutes=1),
-        },
+    second_run, second_run_created_at = _insert_agent_run(
+        connection,
+        organization_id=ids["organization"],
     )
     with pytest.raises(DBAPIError, match="not approved for citation at this time"):
         with connection.begin_nested():
@@ -776,7 +758,7 @@ def test_withdrawal_blocks_new_citations_but_preserves_historical_evidence(
                     "organization_id": ids["organization"],
                     "agent_run_id": second_run,
                     "document_id": ids["document"],
-                    "cited_at": withdrawn_at + timedelta(minutes=1),
+                    "cited_at": second_run_created_at,
                 },
             )
 
@@ -795,11 +777,9 @@ def test_citation_time_must_equal_trustworthy_agent_run_creation(
     _require_task5_schema(connection)
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     ids = _seed_approved_document(connection, approved_at=approved_at)
-    run_created_at = approved_at + timedelta(hours=2)
-    agent_run_id = _insert_agent_run(
+    agent_run_id, _ = _insert_agent_run(
         connection,
         organization_id=ids["organization"],
-        created_at=run_created_at,
     )
 
     with pytest.raises(DBAPIError, match="Citation timestamp must equal AgentRun creation"):
@@ -822,16 +802,93 @@ def test_citation_time_must_equal_trustworthy_agent_run_creation(
             )
 
 
+def test_post_withdrawal_agent_run_cannot_cite_by_backdating_creation(
+    connection: Connection,
+) -> None:
+    """Production break: caller-backdated AgentRun creation bypasses withdrawal."""
+    _require_task5_schema(connection)
+    approved_at = datetime(2026, 8, 18, tzinfo=UTC)
+    withdrawn_at = approved_at + timedelta(hours=2)
+    ids = _seed_approved_document(connection, approved_at=approved_at)
+    connection.execute(
+        text(
+            "UPDATE organization_knowledge_approval "
+            "SET withdrawn_at = :withdrawn_at, withdrawn_by_user_id = :user_id, "
+            "withdrawn_by_role_assignment_id = :assignment_id, "
+            "withdrawal_reason = 'Superseded source' WHERE id = :approval_id"
+        ),
+        {
+            "withdrawn_at": withdrawn_at,
+            "user_id": ids["user"],
+            "assignment_id": ids["role_assignment"],
+            "approval_id": ids["approval"],
+        },
+    )
+    agent_run_id = uuid4()
+    persisted_created_at = connection.scalar(
+        text(
+            "INSERT INTO agent_run "
+            "(id, organization_id, trace_id, agent_name, status, input_payload, "
+            "output_payload, validation, created_at) VALUES (:id, :organization_id, "
+            ":trace_id, 'knowledge-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
+            "'{}'::jsonb, :caller_created_at) RETURNING created_at"
+        ),
+        {
+            "id": agent_run_id,
+            "organization_id": ids["organization"],
+            "trace_id": str(uuid4()),
+            "caller_created_at": approved_at + timedelta(hours=1),
+        },
+    )
+
+    with pytest.raises(DBAPIError, match="not approved for citation at this time"):
+        with connection.begin_nested():
+            connection.execute(
+                text(
+                    "INSERT INTO agent_run_citation "
+                    "(id, organization_id, agent_run_id, knowledge_document_id, "
+                    "knowledge_document_version, passage, cited_at) "
+                    "VALUES (:id, :organization_id, :agent_run_id, :document_id, '1', "
+                    "'Backdated run passage', :cited_at)"
+                ),
+                {
+                    "id": uuid4(),
+                    "organization_id": ids["organization"],
+                    "agent_run_id": agent_run_id,
+                    "document_id": ids["document"],
+                    "cited_at": persisted_created_at,
+                },
+            )
+
+
+def test_agent_run_creation_time_cannot_be_rewritten(connection: Connection) -> None:
+    """Production break: a persisted AgentRun is backdated before knowledge withdrawal."""
+    _require_task5_schema(connection)
+    ids = _seed_organization_user(connection)
+    agent_run_id, persisted_created_at = _insert_agent_run(
+        connection,
+        organization_id=ids["organization"],
+    )
+
+    with pytest.raises(DBAPIError, match="creation time is database-owned and immutable"):
+        with connection.begin_nested():
+            connection.execute(
+                text("UPDATE agent_run SET created_at = :replacement WHERE id = :id"),
+                {
+                    "replacement": persisted_created_at - timedelta(days=1),
+                    "id": agent_run_id,
+                },
+            )
+
+
 def test_withdrawal_cannot_precede_existing_citation(connection: Connection) -> None:
     """Production break: withdrawal is backdated across already-recorded knowledge use."""
     _require_task5_schema(connection)
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     ids = _seed_approved_document(connection, approved_at=approved_at)
-    cited_at = approved_at + timedelta(hours=2)
-    agent_run_id = _insert_agent_run(
+    agent_run_id, cited_at = _insert_agent_run(
         connection,
         organization_id=ids["organization"],
-        created_at=cited_at,
     )
     connection.execute(
         text(
@@ -872,14 +929,12 @@ def test_citation_and_withdrawal_take_conflicting_approval_locks() -> None:
     """Production break: citation and withdrawal can commit without serializing."""
     engine = create_engine(settings.database_url)
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
-    cited_at = approved_at + timedelta(hours=1)
     with engine.begin() as seed_connection:
         _require_task5_schema(seed_connection)
         ids = _seed_approved_document(seed_connection, approved_at=approved_at)
-        agent_run_id = _insert_agent_run(
+        agent_run_id, cited_at = _insert_agent_run(
             seed_connection,
             organization_id=ids["organization"],
-            created_at=cited_at,
         )
 
     citation_inserted = Event()
@@ -1129,6 +1184,67 @@ def test_navigation_resource_match_is_proposal_authorized_before_later_delivery(
     ).one() == (authorized_at, delivered_at, ids["user"])
 
 
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "DELETE FROM navigation_task_resource WHERE id = :id",
+        "UPDATE navigation_task_resource SET id = :replacement WHERE id = :id",
+    ),
+    ids=("delete", "rekey"),
+)
+def test_approved_navigation_resource_evidence_cannot_delete_or_rekey(
+    connection: Connection,
+    statement: str,
+) -> None:
+    """Production break: approved resource evidence is deleted or given a new identity."""
+    _require_task5_schema(connection)
+    ids = _seed_navigation_authorization(connection)
+    match_id = uuid4()
+    connection.execute(
+        text(
+            "INSERT INTO navigation_task_resource "
+            "(id, organization_id, navigation_task_id, resource_id, proposed_change_id, "
+            "resource_name_snapshot, resource_category_snapshot, resource_url_snapshot, "
+            "resource_metadata_snapshot, match_rationale_snapshot, proposed_at) "
+            "VALUES (:id, :organization_id, :task_id, :resource_id, :proposal_id, "
+            "'Ride Service', 'transportation', 'https://example.test/rides', "
+            "'{\"hours\":\"9-5\"}'::jsonb, 'Matches transportation need', :proposed_at)"
+        ),
+        {
+            "id": match_id,
+            "organization_id": ids["organization"],
+            "task_id": ids["task"],
+            "resource_id": ids["resource"],
+            "proposal_id": ids["proposal"],
+            "proposed_at": datetime(2026, 8, 18, tzinfo=UTC),
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO approval_decision "
+            "(id, organization_id, proposed_change_id, authorized_by_user_id, "
+            "qualifying_role_assignment_id, qualifying_role_snapshot, decision, "
+            "authorized_at) VALUES (:id, :organization_id, :proposal_id, :user_id, "
+            ":assignment_id, 'navigator', 'approved', :authorized_at)"
+        ),
+        {
+            "id": uuid4(),
+            "organization_id": ids["organization"],
+            "proposal_id": ids["proposal"],
+            "user_id": ids["user"],
+            "assignment_id": ids["role_assignment"],
+            "authorized_at": datetime(2026, 8, 18, 0, 1, tzinfo=UTC),
+        },
+    )
+
+    with pytest.raises(DBAPIError, match="Proposed resource-match history is immutable"):
+        with connection.begin_nested():
+            connection.execute(
+                text(statement),
+                {"id": match_id, "replacement": uuid4()},
+            )
+
+
 def test_navigation_task_cannot_be_approved_with_unmaterialized_resource_links(
     connection: Connection,
 ) -> None:
@@ -1246,15 +1362,13 @@ def test_live_postgresql_rejects_cross_tenant_knowledge_and_resource_edges(
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     first_knowledge = _seed_approved_document(connection, approved_at=approved_at)
     second_knowledge = _seed_approved_document(connection, approved_at=approved_at)
-    first_agent = _insert_agent_run(
+    first_agent, _ = _insert_agent_run(
         connection,
         organization_id=first_knowledge["organization"],
-        created_at=approved_at,
     )
-    second_agent = _insert_agent_run(
+    second_agent, _ = _insert_agent_run(
         connection,
         organization_id=second_knowledge["organization"],
-        created_at=approved_at,
     )
     first_navigation = _seed_navigation_authorization(connection)
     second_navigation = _seed_navigation_authorization(connection)

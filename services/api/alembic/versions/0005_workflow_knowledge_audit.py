@@ -642,6 +642,12 @@ def _create_workflow_guards() -> None:
         LANGUAGE plpgsql
         AS $$
         BEGIN
+            IF TG_OP = 'INSERT' THEN
+                IF NEW.current_state IS DISTINCT FROM NEW.initial_state THEN
+                    RAISE EXCEPTION 'Workflow run must begin in its initial state';
+                END IF;
+                RETURN NEW;
+            END IF;
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'Workflow runs are durable lineage records';
             END IF;
@@ -672,7 +678,7 @@ def _create_workflow_guards() -> None:
     op.execute(
         """
         CREATE TRIGGER trg_workflow_run_lineage_guard
-        BEFORE UPDATE OR DELETE ON workflow_run
+        BEFORE INSERT OR UPDATE OR DELETE ON workflow_run
         FOR EACH ROW
         EXECUTE FUNCTION guard_workflow_run_lineage()
         """
@@ -732,6 +738,33 @@ def _create_workflow_guards() -> None:
         BEFORE INSERT ON workflow_transition_event
         FOR EACH ROW
         EXECUTE FUNCTION append_workflow_transition_event()
+        """
+    )
+    op.execute(
+        """
+        CREATE FUNCTION guard_agent_run_created_at()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            IF TG_OP = 'INSERT' THEN
+                NEW.created_at := statement_timestamp();
+                RETURN NEW;
+            END IF;
+            IF NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+                RAISE EXCEPTION 'AgentRun creation time is database-owned and immutable';
+            END IF;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_agent_run_created_at_guard
+        BEFORE INSERT OR UPDATE ON agent_run
+        FOR EACH ROW
+        EXECUTE FUNCTION guard_agent_run_created_at()
         """
     )
     op.execute(
@@ -1030,6 +1063,9 @@ def _create_knowledge_guards() -> None:
         DECLARE proposed_resource jsonb;
         DECLARE final_approval_at timestamptz;
         BEGIN
+            IF TG_OP = 'DELETE' THEN
+                RAISE EXCEPTION 'Proposed resource-match history is immutable';
+            END IF;
             SELECT * INTO proposal
             FROM proposed_change
             WHERE organization_id = NEW.organization_id
@@ -1073,7 +1109,8 @@ def _create_knowledge_guards() -> None:
                 RETURN NEW;
             END IF;
 
-            IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+            IF NEW.id IS DISTINCT FROM OLD.id
+               OR NEW.organization_id IS DISTINCT FROM OLD.organization_id
                OR NEW.navigation_task_id IS DISTINCT FROM OLD.navigation_task_id
                OR NEW.resource_id IS DISTINCT FROM OLD.resource_id
                OR NEW.proposed_change_id IS DISTINCT FROM OLD.proposed_change_id
@@ -1117,7 +1154,7 @@ def _create_knowledge_guards() -> None:
     op.execute(
         """
         CREATE TRIGGER trg_navigation_task_resource_guard
-        BEFORE INSERT OR UPDATE ON navigation_task_resource
+        BEFORE INSERT OR UPDATE OR DELETE ON navigation_task_resource
         FOR EACH ROW
         EXECUTE FUNCTION guard_navigation_task_resource()
         """

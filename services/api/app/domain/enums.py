@@ -87,12 +87,6 @@ class EffectiveSafetySignalState(str, Enum):
     OPEN = "open"
 
 
-class KnowledgeDocumentStatus(str, Enum):
-    DRAFT = "draft"
-    APPROVED = "approved"
-    RETIRED = "retired"
-
-
 class AgentRunStatus(str, Enum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"

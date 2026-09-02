@@ -300,6 +300,35 @@ def test_materialized_workflow_state_cannot_change_without_an_event(
             )
 
 
+def test_workflow_insert_starts_at_its_declared_initial_state(
+    connection: Connection,
+) -> None:
+    """Production break: a new run materializes a later state without lineage events."""
+    _require_task5_schema(connection)
+    ids = _seed_workflow_source(connection)
+
+    with pytest.raises(DBAPIError, match="must begin in its initial state"):
+        with connection.begin_nested():
+            connection.execute(
+                text(
+                    "INSERT INTO workflow_run "
+                    "(id, organization_id, patient_id, care_episode_id, "
+                    "source_submission_id, trace_id, initial_state, current_state, "
+                    "started_at) VALUES (:id, :organization_id, :patient_id, :episode_id, "
+                    ":submission_id, :trace_id, 'pending', 'completed', :started_at)"
+                ),
+                {
+                    "id": uuid4(),
+                    "organization_id": ids["organization"],
+                    "patient_id": ids["patient"],
+                    "episode_id": ids["episode"],
+                    "submission_id": ids["submission"],
+                    "trace_id": str(uuid4()),
+                    "started_at": datetime(2026, 8, 18, tzinfo=UTC),
+                },
+            )
+
+
 @pytest.mark.parametrize(
     ("column_name", "replacement"),
     [

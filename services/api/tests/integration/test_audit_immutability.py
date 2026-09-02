@@ -984,6 +984,27 @@ def _alembic_check(database_url: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _alembic_downgrade(
+    database_url: str, revision: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "services/api/alembic.ini",
+            "downgrade",
+            revision,
+        ],
+        cwd=PROJECT_ROOT,
+        env=os.environ | {"DATABASE_URL": database_url},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_empty_upgrade_reaches_0005_with_metadata_parity() -> None:
     """Production break: a fresh database misses Task 5 DDL or Alembic/ORM parity."""
     with _disposable_database() as database_url:
@@ -1091,3 +1112,59 @@ def test_populated_upgrade_refuses_ambiguous_audit_actor_without_inventing_prove
     assert str(event_id) in diagnostic
     assert "cannot infer audit actor provenance" in diagnostic
     assert "reset the synthetic demo database" in diagnostic
+
+
+def test_populated_upgrade_refuses_non_draft_knowledge_without_inventing_provenance() -> None:
+    """Production break: legacy approved knowledge is reset without approval provenance."""
+    with _disposable_database() as database_url:
+        _alembic(database_url, "0004_safety_approval_lifecycle")
+        organization_id = uuid4()
+        document_id = uuid4()
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                {"id": organization_id, "name": f"Non-draft knowledge {uuid4()}"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO knowledge_document "
+                    "(id, organization_id, title, version, status, content, citations) "
+                    "VALUES (:id, :organization_id, 'Legacy approved guide', '1', "
+                    "'approved', 'Approved content', '[]'::jsonb)"
+                ),
+                {"id": document_id, "organization_id": organization_id},
+            )
+        engine.dispose()
+        result = _alembic(database_url, "head", check=False)
+
+    assert result.returncode != 0
+    diagnostic = result.stdout + result.stderr
+    assert str(document_id) in diagnostic
+    assert "cannot infer approval or withdrawal provenance" in diagnostic
+    assert "reset the synthetic demo database" in diagnostic
+
+
+def test_0005_downgrade_refuses_before_any_teardown_ddl() -> None:
+    """Production break: irreversible downgrade drops Task 5 lineage before refusing."""
+    with _disposable_database() as database_url:
+        _alembic(database_url, "head")
+        result = _alembic_downgrade(database_url, "0004_safety_approval_lifecycle")
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                tables_after_refusal = set(inspect(connection).get_table_names())
+                revision_after_refusal = connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                )
+        finally:
+            engine.dispose()
+
+    assert result.returncode != 0
+    diagnostic = result.stdout + result.stderr
+    assert "Downgrading 0005 would discard workflow, knowledge, resource, and audit lineage" in (
+        diagnostic
+    )
+    assert "reset the synthetic demo database instead" in diagnostic
+    assert TASK5_TABLES <= tables_after_refusal
+    assert revision_after_refusal == "0005_workflow_knowledge_audit"
