@@ -60,9 +60,30 @@ def _guard_populated_upgrade() -> None:
     op.execute(
         """
         DO $$
+        DECLARE legacy_agent_run_ids text;
         DECLARE ambiguous_audit_ids text;
         DECLARE ambiguous_document_ids text;
         BEGIN
+            LOCK TABLE agent_run, audit_event, knowledge_document
+            IN SHARE ROW EXCLUSIVE MODE;
+
+            SELECT string_agg(id::text, ', ' ORDER BY id::text)
+            INTO legacy_agent_run_ids
+            FROM (
+                SELECT id
+                FROM agent_run
+                ORDER BY id
+                LIMIT 10
+            ) AS legacy_agent_run;
+            IF legacy_agent_run_ids IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'Task 5 cannot trust legacy AgentRun creation time; representative '
+                    'AgentRun id(s): %. Existing rows predate database-owned timestamps. '
+                    'Reset the synthetic demo database or migrate them with independently '
+                    'verified creation provenance before retrying.',
+                    legacy_agent_run_ids;
+            END IF;
+
             SELECT string_agg(id::text, ', ' ORDER BY id::text)
             INTO ambiguous_audit_ids
             FROM audit_event

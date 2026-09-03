@@ -4,9 +4,11 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import monotonic, sleep
 from uuid import UUID, uuid4
 
 import pytest
@@ -1112,6 +1114,137 @@ def test_populated_upgrade_refuses_ambiguous_audit_actor_without_inventing_prove
     assert str(event_id) in diagnostic
     assert "cannot infer audit actor provenance" in diagnostic
     assert "reset the synthetic demo database" in diagnostic
+
+
+def test_populated_upgrade_refuses_legacy_agent_run_creation_time_before_task5_ddl() -> None:
+    """Production break: 0005 trusts a caller-timestamped legacy AgentRun for citation."""
+    with _disposable_database() as database_url:
+        _alembic(database_url, "0004_safety_approval_lifecycle")
+        organization_id = uuid4()
+        agent_run_id = uuid4()
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                {"id": organization_id, "name": f"Legacy AgentRun {uuid4()}"},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_run "
+                    "(id, organization_id, trace_id, agent_name, status, input_payload, "
+                    "output_payload, validation, created_at) VALUES (:id, :organization_id, "
+                    ":trace_id, 'legacy-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
+                    "'{}'::jsonb, :backdated_at)"
+                ),
+                {
+                    "id": agent_run_id,
+                    "organization_id": organization_id,
+                    "trace_id": str(uuid4()),
+                    "backdated_at": datetime(2020, 1, 1, tzinfo=UTC),
+                },
+            )
+        engine.dispose()
+        result = _alembic(database_url, "head", check=False)
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                tables_after_attempt = set(inspect(connection).get_table_names())
+                revision_after_attempt = connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                )
+        finally:
+            engine.dispose()
+
+    assert result.returncode != 0, "0005 accepted a caller-timestamped legacy AgentRun"
+    diagnostic = result.stdout + result.stderr
+    assert str(agent_run_id) in diagnostic
+    assert "cannot trust legacy AgentRun creation time" in diagnostic
+    assert (
+        "Reset the synthetic demo database or migrate them with independently verified "
+        "creation provenance" in diagnostic
+    )
+    assert revision_after_attempt == "0004_safety_approval_lifecycle"
+    assert TASK5_TABLES.isdisjoint(tables_after_attempt)
+
+
+def test_populated_upgrade_serializes_legacy_agent_run_check_with_concurrent_insert() -> None:
+    """Production break: a concurrent legacy AgentRun crosses the 0005 preflight."""
+    with _disposable_database() as database_url:
+        _alembic(database_url, "0004_safety_approval_lifecycle")
+        organization_id = uuid4()
+        agent_run_id = uuid4()
+        engine = create_engine(database_url)
+        with engine.begin() as connection:
+            connection.execute(
+                text("INSERT INTO organization (id, name) VALUES (:id, :name)"),
+                {"id": organization_id, "name": f"Concurrent AgentRun {uuid4()}"},
+            )
+
+        writer = engine.connect()
+        writer_transaction = writer.begin()
+        try:
+            writer.execute(
+                text(
+                    "INSERT INTO agent_run "
+                    "(id, organization_id, trace_id, agent_name, status, input_payload, "
+                    "output_payload, validation, created_at) VALUES (:id, :organization_id, "
+                    ":trace_id, 'legacy-retriever', 'succeeded', '{}'::jsonb, '{}'::jsonb, "
+                    "'{}'::jsonb, :backdated_at)"
+                ),
+                {
+                    "id": agent_run_id,
+                    "organization_id": organization_id,
+                    "trace_id": str(uuid4()),
+                    "backdated_at": datetime(2020, 1, 1, tzinfo=UTC),
+                },
+            )
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                migration = executor.submit(_alembic, database_url, "head", check=False)
+                deadline = monotonic() + 10
+                migration_waited_for_writer = False
+                with engine.connect().execution_options(
+                    isolation_level="AUTOCOMMIT"
+                ) as observer:
+                    while monotonic() < deadline:
+                        migration_waited_for_writer = bool(
+                            observer.scalar(
+                                text(
+                                    "SELECT EXISTS ("
+                                    "SELECT 1 FROM pg_stat_activity "
+                                    "WHERE datname = current_database() "
+                                    "AND pid <> pg_backend_pid() "
+                                    "AND wait_event_type = 'Lock' "
+                                    "AND query ILIKE '%agent_run%'"
+                                    ")"
+                                )
+                            )
+                        )
+                        if migration_waited_for_writer:
+                            break
+                        sleep(0.05)
+                writer_transaction.commit()
+                result = migration.result(timeout=20)
+        finally:
+            if writer_transaction.is_active:
+                writer_transaction.rollback()
+            writer.close()
+
+        try:
+            with engine.connect() as connection:
+                tables_after_attempt = set(inspect(connection).get_table_names())
+                revision_after_attempt = connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                )
+        finally:
+            engine.dispose()
+
+    assert migration_waited_for_writer, "0005 never serialized with the concurrent writer"
+    assert result.returncode != 0, "0005 let a concurrent legacy AgentRun cross its preflight"
+    diagnostic = result.stdout + result.stderr
+    assert str(agent_run_id) in diagnostic
+    assert "cannot trust legacy AgentRun creation time" in diagnostic
+    assert revision_after_attempt == "0004_safety_approval_lifecycle"
+    assert TASK5_TABLES.isdisjoint(tables_after_attempt)
 
 
 def test_populated_upgrade_refuses_non_draft_knowledge_without_inventing_provenance() -> None:
