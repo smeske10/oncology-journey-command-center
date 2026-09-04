@@ -15,6 +15,7 @@ from app.db.models import (
     CheckInSubmission,
     NavigationTask,
     SafetySignal,
+    SignalRule,
     SyntheticPatient,
 )
 from app.db.models import (
@@ -158,15 +159,27 @@ def navigator_context(
         status=NavigationTaskStatus.OPEN,
         due_at=datetime.now(UTC) + timedelta(hours=4),
     )
+    rule = SignalRule(
+        id=uuid4(),
+        organization_id=organization_id,
+        rule_code="demo-review-required",
+        version=1,
+        rule_kind="deterministic",
+        name="Demo review required",
+    )
     signal = SafetySignal(
         id=uuid4(),
         organization_id=organization_id,
         patient_id=patient.id,
+        care_episode_id=uuid4(),
         source_submission_id=submission.id,
-        rule_code="demo-review-required",
-        severity=SafetySeverity.ROUTINE,
-        status=SafetySignalStatus.ACTIVE,
+        signal_rule_id=rule.id,
+        signal_rule_version=rule.version,
+        deterministic_level=SafetySeverity.ROUTINE,
+        effective_level=SafetySeverity.ROUTINE,
+        status=SafetySignalStatus.OPEN,
         evidence=[{"field": "nausea_change", "text": "worse"}],
+        rule=rule,
     )
     session = NavigatorSession(
         organization_id=organization_id,

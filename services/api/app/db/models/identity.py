@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     String,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -50,6 +51,13 @@ class User(Base):
 class RoleAssignment(Base):
     __tablename__ = "role_assignment"
     __table_args__ = (
+        tenant_identity_constraint("role_assignment"),
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "id",
+            name="uq_role_assignment_organization_user_id",
+        ),
         state_constraint("role_assignment", "role", UserRole),
         CheckConstraint(
             "revoked_at IS NULL OR granted_at <= revoked_at",

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
@@ -51,7 +52,8 @@ def db_session(database_url: str) -> Iterator[Session]:
         yield session
     finally:
         session.close()
-        transaction.rollback()
+        if transaction.is_active:
+            transaction.rollback()
         connection.close()
         engine.dispose()
 
@@ -132,6 +134,8 @@ def test_need_lifecycle_is_independent_of_submission(
     )
     db_session.add_all([submission, need])
     db_session.commit()
-    submission.status = "processed"
-    db_session.commit()
     assert need.status == "open"
+    submission.status = "processed"
+    with pytest.raises(DBAPIError, match="check_in_submission is append-only"):
+        db_session.commit()
+    db_session.rollback()

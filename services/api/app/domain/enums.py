@@ -30,9 +30,9 @@ class NeedStatus(str, Enum):
 
 
 class SafetySignalStatus(str, Enum):
-    ACTIVE = "active"
+    OPEN = "open"
+    ACTIVE = "open"
     ACKNOWLEDGED = "acknowledged"
-    RESOLVED = "resolved"
 
 
 class SafetySeverity(str, Enum):
@@ -53,16 +53,38 @@ class TaskCancellationReason(str, Enum):
     NEED_CLOSED = "need_closed"
 
 
-class ApprovalStatus(str, Enum):
+class ApprovalDecisionValue(str, Enum):
     APPROVED = "approved"
-    EDITED = "edited"
     DECLINED = "declined"
 
 
-class KnowledgeDocumentStatus(str, Enum):
-    DRAFT = "draft"
+ApprovalStatus = ApprovalDecisionValue
+
+
+class SignalRuleKind(str, Enum):
+    DETERMINISTIC = "deterministic"
+    HUMAN_ESCALATION = "human_escalation"
+
+
+class ApprovalChangeType(str, Enum):
+    DISMISS_SIGNAL = "dismiss_signal"
+    OVERRIDE_SIGNAL_SEVERITY = "override_signal_severity"
+    AUTHORIZE_NAVIGATION_TASK = "authorize_navigation_task"
+    AUTHORIZE_PATIENT_MESSAGE = "authorize_patient_message"
+
+
+class EffectiveProposalState(str, Enum):
+    SUPERSEDED = "superseded"
+    DECLINED = "declined"
     APPROVED = "approved"
-    RETIRED = "retired"
+    PENDING = "pending"
+
+
+class EffectiveSafetySignalState(str, Enum):
+    DISMISSED = "dismissed"
+    RESOLVED = "resolved"
+    ACKNOWLEDGED = "acknowledged"
+    OPEN = "open"
 
 
 class AgentRunStatus(str, Enum):
@@ -70,6 +92,19 @@ class AgentRunStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     MANUAL_REVIEW = "manual_review"
+
+
+class ManualReviewTaskState(str, Enum):
+    OPEN = "open"
+    ASSIGNED = "assigned"
+    RESOLVED = "resolved"
+
+
+class AuditActorType(str, Enum):
+    USER = "user"
+    AGENT = "agent"
+    POLICY = "policy"
+    SYSTEM = "system"
 
 
 class OutcomeDisposition(str, Enum):
