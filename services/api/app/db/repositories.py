@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import Protocol, TypeVar, cast
 from uuid import UUID
 
-from sqlalchemy import String, Uuid, and_, column, or_, select, table
-from sqlalchemy.orm import Session
+from sqlalchemy import String, Uuid, and_, column, func, or_, select, table
+from sqlalchemy.orm import Session, joinedload
 
 from app.db import models
 
@@ -225,6 +225,7 @@ class SqlAlchemyFhirRepository:
                 effective_safety_signal_state.c.effective_state,
                 models.SafetySignalResolution,
             )
+            .options(joinedload(models.SafetySignal.rule))
             .join(
                 effective_safety_signal_state,
                 and_(
@@ -283,17 +284,83 @@ class SqlAlchemyFhirRepository:
     def list_approval_decisions(
         self, *, proposal_ids: list[UUID], organization_id: UUID
     ) -> dict[UUID, list[models.ApprovalDecision]]:
+        from app.domain.enums import ApprovalChangeType, ApprovalDecisionValue
+
         if not proposal_ids:
             return {}
         decisions = self._session.scalars(
-            select(models.ApprovalDecision).where(
+            select(models.ApprovalDecision)
+            .join(
+                models.ProposedChange,
+                and_(
+                    models.ProposedChange.organization_id
+                    == models.ApprovalDecision.organization_id,
+                    models.ProposedChange.id
+                    == models.ApprovalDecision.proposed_change_id,
+                ),
+            )
+            .join(
+                models.RoleAssignment,
+                and_(
+                    models.RoleAssignment.organization_id
+                    == models.ApprovalDecision.organization_id,
+                    models.RoleAssignment.user_id
+                    == models.ApprovalDecision.authorized_by_user_id,
+                    models.RoleAssignment.id
+                    == models.ApprovalDecision.qualifying_role_assignment_id,
+                    models.RoleAssignment.role
+                    == models.ProposedChange.required_approver_role_snapshot,
+                    models.ApprovalDecision.qualifying_role_snapshot
+                    == models.ProposedChange.required_approver_role_snapshot,
+                    models.ApprovalDecision.authorized_at
+                    >= models.RoleAssignment.granted_at,
+                    or_(
+                        models.RoleAssignment.revoked_at.is_(None),
+                        models.ApprovalDecision.authorized_at
+                        < models.RoleAssignment.revoked_at,
+                    ),
+                ),
+            )
+            .outerjoin(
+                models.SafetySignal,
+                and_(
+                    models.SafetySignal.organization_id
+                    == models.ProposedChange.organization_id,
+                    models.SafetySignal.id == models.ProposedChange.safety_signal_id,
+                ),
+            )
+            .where(
                 models.ApprovalDecision.organization_id == organization_id,
                 models.ApprovalDecision.proposed_change_id.in_(proposal_ids),
+                models.ApprovalDecision.decision == ApprovalDecisionValue.APPROVED,
+                or_(
+                    models.ProposedChange.proposed_by_user_id.is_(None),
+                    models.ApprovalDecision.authorized_by_user_id
+                    != models.ProposedChange.proposed_by_user_id,
+                    and_(
+                        models.ProposedChange.allow_self_approval_snapshot.is_(True),
+                        or_(
+                            models.ProposedChange.change_type
+                            != ApprovalChangeType.DISMISS_SIGNAL,
+                            and_(
+                                models.ProposedChange.deterministic_severity_threshold_snapshot.is_not(
+                                    None
+                                ),
+                                func.safety_severity_rank(
+                                    models.SafetySignal.deterministic_level
+                                )
+                                < func.safety_severity_rank(
+                                    models.ProposedChange.deterministic_severity_threshold_snapshot
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
             )
         ).all()
-        grouped = {proposal_id: [] for proposal_id in proposal_ids}
+        grouped: dict[UUID, list[models.ApprovalDecision]] = {}
         for decision in decisions:
-            grouped[decision.proposed_change_id].append(decision)
+            grouped.setdefault(decision.proposed_change_id, []).append(decision)
         return grouped
 
 class SqlAlchemyUnitOfWork:

@@ -78,6 +78,7 @@ def map_check_in_to_fhir_bundle(
     proposal_states = effective_proposal_states or {}
     decisions_by_proposal = approval_decisions or {}
     signals = list(safety_signals)
+    signals_by_id = {signal.id: signal for signal in signals}
     proposals = [
         proposal
         for proposal in applied_proposals
@@ -106,6 +107,11 @@ def map_check_in_to_fhir_bundle(
             "resource": _proposal_provenance(
                 proposal,
                 decisions_by_proposal.get(proposal.id, ()),
+                signal=(
+                    signals_by_id.get(proposal.safety_signal_id)
+                    if proposal.safety_signal_id is not None
+                    else None
+                ),
             )
         }
         for proposal in proposals
@@ -232,7 +238,10 @@ def _proposal_is_applied(
 
 
 def _proposal_provenance(
-    proposal: ProposedChange, decisions: Iterable[ApprovalDecision]
+    proposal: ProposedChange,
+    decisions: Iterable[ApprovalDecision],
+    *,
+    signal: SafetySignal | None,
 ) -> dict[str, Any]:
     agents: list[dict[str, Any]] = []
     if proposal.proposed_by_user_id is not None:
@@ -250,7 +259,11 @@ def _proposal_provenance(
             )
         )
     ordered_decisions = sorted(
-        decisions,
+        (
+            decision
+            for decision in decisions
+            if _decision_qualifies(proposal, decision, signal=signal)
+        ),
         key=lambda decision: (decision.authorized_at, str(decision.id)),
     )
     agents.extend(
@@ -288,6 +301,33 @@ def _proposal_provenance(
         "reason": [{"text": proposal.rationale}],
         "meta": {"tag": [_DEMO_TAG]},
     }
+
+
+def _decision_qualifies(
+    proposal: ProposedChange,
+    decision: ApprovalDecision,
+    *,
+    signal: SafetySignal | None,
+) -> bool:
+    if (
+        _enum_value(decision.decision) != "approved"
+        or _enum_value(decision.qualifying_role_snapshot)
+        != _enum_value(proposal.required_approver_role_snapshot)
+    ):
+        return False
+    if decision.authorized_by_user_id != proposal.proposed_by_user_id:
+        return True
+    if not proposal.allow_self_approval_snapshot:
+        return False
+    if _enum_value(proposal.change_type) != "dismiss_signal":
+        return True
+    threshold = proposal.deterministic_severity_threshold_snapshot
+    if signal is None or threshold is None:
+        return False
+    severity_rank = {"routine": 1, "urgent": 2, "emergent": 3}
+    return severity_rank[_enum_value(signal.deterministic_level)] < severity_rank[
+        _enum_value(threshold)
+    ]
 
 
 def _proposal_agent_type(role: str) -> dict[str, Any]:

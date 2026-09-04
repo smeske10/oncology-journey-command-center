@@ -283,6 +283,37 @@ def test_only_applied_proposals_export_complete_typed_authorization_provenance()
         )
         for index, authorizer_id in enumerate(authorizer_ids)
     ]
+    declined = ApprovalDecision(
+        id=uuid4(),
+        organization_id=organization_id,
+        proposed_change_id=applied.id,
+        authorized_by_user_id=uuid4(),
+        qualifying_role_assignment_id=uuid4(),
+        qualifying_role_snapshot=UserRole.NAVIGATOR,
+        decision=ApprovalDecisionValue.DECLINED,
+        authorized_at=datetime(2026, 8, 17, 13, 10, tzinfo=UTC),
+        reason="Does not authorize the change.",
+    )
+    wrong_role = ApprovalDecision(
+        id=uuid4(),
+        organization_id=organization_id,
+        proposed_change_id=applied.id,
+        authorized_by_user_id=uuid4(),
+        qualifying_role_assignment_id=uuid4(),
+        qualifying_role_snapshot=UserRole.ADMINISTRATOR,
+        decision=ApprovalDecisionValue.APPROVED,
+        authorized_at=datetime(2026, 8, 17, 13, 15, tzinfo=UTC),
+    )
+    disallowed_self_approval = ApprovalDecision(
+        id=uuid4(),
+        organization_id=organization_id,
+        proposed_change_id=applied.id,
+        authorized_by_user_id=proposer_id,
+        qualifying_role_assignment_id=uuid4(),
+        qualifying_role_snapshot=UserRole.NAVIGATOR,
+        decision=ApprovalDecisionValue.APPROVED,
+        authorized_at=datetime(2026, 8, 17, 13, 20, tzinfo=UTC),
+    )
     signal.dismissal_proposed_change_id = applied.id
 
     bundle = map_check_in_to_fhir_bundle(
@@ -291,7 +322,14 @@ def test_only_applied_proposals_export_complete_typed_authorization_provenance()
         effective_signal_states={signal.id: "dismissed"},
         applied_proposals=[applied, pending],
         effective_proposal_states={applied.id: "approved", pending.id: "pending"},
-        approval_decisions={applied.id: decisions},
+        approval_decisions={
+            applied.id: [
+                *decisions,
+                declined,
+                wrong_role,
+                disallowed_self_approval,
+            ]
+        },
     )
 
     provenances = [
