@@ -194,6 +194,18 @@
       },
       "CheckInDefinitionResponse": {
         "properties": {
+          "active_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Submission Id"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -220,7 +232,8 @@
           "id",
           "title",
           "questionnaire_version",
-          "questions"
+          "questions",
+          "active_submission_id"
         ],
         "title": "CheckInDefinitionResponse",
         "type": "object"
@@ -254,6 +267,18 @@
             "minLength": 1,
             "title": "Questionnaire Version",
             "type": "string"
+          },
+          "supersedes_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Submission Id"
           }
         },
         "required": [
@@ -281,13 +306,26 @@
           "submitted_at": {
             "title": "Submitted At",
             "type": "string"
+          },
+          "supersedes_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Submission Id"
           }
         },
         "required": [
           "id",
           "status",
           "questionnaire_version",
-          "submitted_at"
+          "submitted_at",
+          "supersedes_submission_id"
         ],
         "title": "CheckInSubmissionResponse",
         "type": "object"

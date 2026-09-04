@@ -18,11 +18,17 @@ from app.db.models import (
     CheckInSubmission,
     EpisodePathwayAssignment,
 )
-from app.db.repositories import SqlAlchemyUnitOfWork, TenantScoped
+from app.db.repositories import (
+    SqlAlchemyFhirRepository,
+    SqlAlchemyPatientRepository,
+    SqlAlchemyUnitOfWork,
+    TenantScoped,
+)
 from app.db.session import get_session
 from app.domain.check_ins import (
     CheckInDefinitionMismatchError,
     CheckInSubmissionCreate,
+    active_check_in_submission,
     create_immutable_submission,
     questionnaire_version_for,
 )
@@ -36,6 +42,7 @@ class CheckInDefinitionResponse(BaseModel):
     title: str
     questionnaire_version: str
     questions: list[dict[str, Any]]
+    active_submission_id: UUID | None
 
 
 class CheckInSubmissionResponse(BaseModel):
@@ -43,6 +50,7 @@ class CheckInSubmissionResponse(BaseModel):
     status: str
     questionnaire_version: str
     submitted_at: str
+    supersedes_submission_id: UUID | None
 
 
 def get_check_in_unit_of_work(
@@ -57,7 +65,11 @@ def get_current_check_in(
     actor: CurrentActor = Depends(require_role(Role.SUPPORTING_ACTOR)),
     session: Session = Depends(get_session),
 ) -> CheckInDefinitionResponse:
-    if actor.patient_id is None:
+    patient_id = SqlAlchemyPatientRepository(session).resolve_active_patient_id(
+        organization_id=actor.organization_id,
+        user_id=actor.user_id,
+    )
+    if patient_id is None or actor.patient_id != patient_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Patient identity link is required",
@@ -82,7 +94,7 @@ def get_current_check_in(
         )
         .where(
             CheckInDefinition.organization_id == actor.organization_id,
-            CareEpisode.patient_id == actor.patient_id,
+            CareEpisode.patient_id == patient_id,
             CareEpisode.status == "active",
             EpisodePathwayAssignment.effective_from <= now,
             EpisodePathwayAssignment.effective_to.is_(None)
@@ -92,12 +104,22 @@ def get_current_check_in(
     ).first()
     if definition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No current check-in")
+    active_submission_id = session.scalar(
+        select(active_check_in_submission.c.id)
+        .where(
+            active_check_in_submission.c.organization_id == actor.organization_id,
+            active_check_in_submission.c.patient_id == patient_id,
+            active_check_in_submission.c.check_in_definition_id == definition.id,
+        )
+        .order_by(active_check_in_submission.c.submitted_at.desc())
+    )
     questions = definition.questionnaire.get("questions", [])
     return CheckInDefinitionResponse(
         id=definition.id,
         title=definition.title,
         questionnaire_version=questionnaire_version_for(definition),
         questions=questions if isinstance(questions, list) else [],
+        active_submission_id=active_submission_id,
     )
 
 
@@ -114,6 +136,10 @@ def submit_check_in(
 ) -> CheckInSubmissionResponse:
     try:
         with unit_of_work:
+            patient_id = unit_of_work.resolve_active_patient_id(
+                organization_id=actor.organization_id,
+                user_id=actor.user_id,
+            )
             definition = cast(
                 CheckInDefinition | None,
                 unit_of_work.get(
@@ -127,12 +153,15 @@ def submit_check_in(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Check-in not found",
                 )
-            if actor.patient_id is None:
+            if patient_id is None or actor.patient_id != patient_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Patient identity link is required",
                 )
-            episode = unit_of_work.find_active_care_episode(patient_id=actor.patient_id)
+            episode = unit_of_work.find_active_care_episode(
+                patient_id=patient_id,
+                organization_id=actor.organization_id,
+            )
             if episode is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -141,16 +170,26 @@ def submit_check_in(
             if not unit_of_work.definition_matches_effective_pathway(
                 care_episode_id=episode.id,
                 check_in_definition_id=definition.id,
+                organization_id=actor.organization_id,
             ):
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="Check-in definition is not active for this care episode",
+                )
+            predecessor = None
+            if payload.supersedes_submission_id is not None:
+                predecessor = unit_of_work.find_active_submission(
+                    submission_id=payload.supersedes_submission_id,
+                    patient_id=patient_id,
+                    check_in_definition_id=definition.id,
+                    organization_id=actor.organization_id,
                 )
             submission = create_immutable_submission(
                 actor=actor,
                 definition=definition,
                 care_episode_id=episode.id,
                 payload=payload,
+                predecessor=predecessor,
             )
             unit_of_work.add(cast(TenantScoped, submission))
             unit_of_work.commit()
@@ -175,8 +214,18 @@ def export_submission_as_synthetic_fhir(
     submission_id: UUID,
     actor: CurrentActor = Depends(require_role(Role.SUPPORTING_ACTOR)),
     unit_of_work: SqlAlchemyUnitOfWork = Depends(get_check_in_unit_of_work),
+    session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     with unit_of_work:
+        patient_id = unit_of_work.resolve_active_patient_id(
+            organization_id=actor.organization_id,
+            user_id=actor.user_id,
+        )
+        if patient_id is None or actor.patient_id != patient_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Check-in submission not found",
+            )
         submission = cast(
             CheckInSubmission | None,
             unit_of_work.get(
@@ -185,12 +234,65 @@ def export_submission_as_synthetic_fhir(
                 organization_id=actor.organization_id,
             ),
         )
-        if submission is None or submission.patient_id != actor.patient_id:
+        if submission is None or submission.patient_id != patient_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Check-in submission not found",
             )
-        return map_check_in_to_fhir_bundle(submission)
+        predecessor = None
+        if submission.supersedes_submission_id is not None:
+            predecessor = cast(
+                CheckInSubmission | None,
+                unit_of_work.get(
+                    cast(type[Any], CheckInSubmission),
+                    submission.supersedes_submission_id,
+                    organization_id=actor.organization_id,
+                ),
+            )
+            if predecessor is None or predecessor.patient_id != patient_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Check-in submission predecessor not found",
+                )
+        successor = unit_of_work.find_submission_successor(
+            submission_id=submission.id,
+            patient_id=patient_id,
+            organization_id=actor.organization_id,
+        )
+        fhir_repository = SqlAlchemyFhirRepository(session)
+        signal_records = fhir_repository.list_submission_safety_signals(
+            submission_id=submission.id,
+            patient_id=patient_id,
+            organization_id=actor.organization_id,
+        )
+        proposal_records = fhir_repository.list_signal_proposals(
+            signal_ids=[record.signal.id for record in signal_records],
+            organization_id=actor.organization_id,
+        )
+        decisions = fhir_repository.list_approval_decisions(
+            proposal_ids=[record.proposal.id for record in proposal_records],
+            organization_id=actor.organization_id,
+        )
+        return map_check_in_to_fhir_bundle(
+            submission,
+            is_superseded=successor is not None,
+            predecessor_submission=predecessor,
+            safety_signals=[record.signal for record in signal_records],
+            effective_signal_states={
+                record.signal.id: record.effective_state for record in signal_records
+            },
+            signal_resolutions={
+                record.signal.id: record.resolution
+                for record in signal_records
+                if record.resolution is not None
+            },
+            applied_proposals=[record.proposal for record in proposal_records],
+            effective_proposal_states={
+                record.proposal.id: record.effective_state
+                for record in proposal_records
+            },
+            approval_decisions=decisions,
+        )
 
 
 def _submission_response(submission: CheckInSubmission) -> CheckInSubmissionResponse:
@@ -199,4 +301,5 @@ def _submission_response(submission: CheckInSubmission) -> CheckInSubmissionResp
         status=submission.status.value,
         questionnaire_version=str(submission.answers["questionnaire_version"]),
         submitted_at=submission.submitted_at.isoformat() if submission.submitted_at else "",
+        supersedes_submission_id=submission.supersedes_submission_id,
     )

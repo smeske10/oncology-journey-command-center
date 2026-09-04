@@ -1,7 +1,7 @@
 import type { components, paths } from "./api-types";
 
 type CheckInSubmissionInput = components["schemas"]["CheckInSubmissionCreate"];
-type CheckInSubmissionResponse = components["schemas"]["CheckInSubmissionResponse"];
+export type CheckInSubmissionResponse = components["schemas"]["CheckInSubmissionResponse"];
 export type CheckInDefinitionResponse = components["schemas"]["CheckInDefinitionResponse"];
 export type NavigatorQueueResponse = paths["/v1/navigator/queue"]["get"]["responses"][200]["content"]["application/json"];
 export type NavigatorPatientCaseResponse = paths["/v1/navigator/patients/{patient_id}/case"]["get"]["responses"][200]["content"]["application/json"];

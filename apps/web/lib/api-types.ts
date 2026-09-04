@@ -317,6 +317,8 @@ export interface components {
         ApprovalDecisionValue: "approved" | "declined";
         /** CheckInDefinitionResponse */
         CheckInDefinitionResponse: {
+            /** Active Submission Id */
+            active_submission_id: string | null;
             /**
              * Id
              * Format: uuid
@@ -339,6 +341,8 @@ export interface components {
             free_text?: string | null;
             /** Questionnaire Version */
             questionnaire_version: string;
+            /** Supersedes Submission Id */
+            supersedes_submission_id?: string | null;
         };
         /** CheckInSubmissionResponse */
         CheckInSubmissionResponse: {
@@ -353,6 +357,8 @@ export interface components {
             status: string;
             /** Submitted At */
             submitted_at: string;
+            /** Supersedes Submission Id */
+            supersedes_submission_id: string | null;
         };
         /** EvidenceRead */
         EvidenceRead: {

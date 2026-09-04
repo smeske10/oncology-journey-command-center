@@ -34,6 +34,7 @@ export default function PatientDemoPage() {
 
 function toPresentationDefinition(response: CheckInDefinitionResponse): PatientCheckInDefinition {
   return {
+    activeSubmissionId: response.active_submission_id,
     id: response.id,
     title: response.title,
     questionnaireVersion: response.questionnaire_version,

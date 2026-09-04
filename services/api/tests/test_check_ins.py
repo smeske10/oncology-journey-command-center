@@ -11,13 +11,26 @@ import pytest
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
 from app.db.models import (
+    ApprovalDecision,
     CareEpisode,
     CheckInDefinition,
     CheckInSubmission,
     EpisodePathwayAssignment,
+    PatientIdentityLink,
+    ProposedChange,
+    SafetySignal,
+    SafetySignalResolution,
+    SignalRule,
 )
 from app.db.session import get_session
-from app.domain.enums import CheckInStatus
+from app.domain.enums import (
+    ApprovalChangeType,
+    ApprovalDecisionValue,
+    CheckInStatus,
+    SafetySeverity,
+    SafetySignalStatus,
+    UserRole,
+)
 from app.main import app
 
 
@@ -26,16 +39,101 @@ class FakeSession:
     definition: CheckInDefinition
     episode: CareEpisode
     assignment: EpisodePathwayAssignment
+    identity_link: PatientIdentityLink
     submissions: dict[UUID, CheckInSubmission] = field(default_factory=dict)
+    signals: dict[UUID, SafetySignal] = field(default_factory=dict)
+    signal_resolutions: dict[UUID, SafetySignalResolution] = field(default_factory=dict)
+    effective_signal_states: dict[UUID, str] = field(default_factory=dict)
+    proposals: dict[UUID, ProposedChange] = field(default_factory=dict)
+    effective_proposal_states: dict[UUID, str] = field(default_factory=dict)
+    decisions: list[ApprovalDecision] = field(default_factory=list)
     committed: bool = False
     rolled_back: bool = False
 
+    def scalars(self, statement: Any) -> "ScalarRows":
+        entity = statement.column_descriptions[0].get("entity")
+        if entity is ApprovalDecision:
+            parameters = {
+                item
+                for value in statement.compile().params.values()
+                for item in (value if isinstance(value, list) else [value])
+            }
+            return ScalarRows(
+                [
+                    decision
+                    for decision in self.decisions
+                    if decision.organization_id in parameters
+                    and decision.proposed_change_id in parameters
+                ]
+            )
+        value = self.scalar(statement)
+        return ScalarRows([] if value is None else [value])
+
+    def execute(self, statement: Any) -> "ResultRows":
+        entity = statement.column_descriptions[0].get("entity")
+        parameters = {
+            item
+            for value in statement.compile().params.values()
+            for item in (value if isinstance(value, list) else [value])
+        }
+        if entity is SafetySignal:
+            return ResultRows(
+                [
+                    (
+                        signal,
+                        self.effective_signal_states.get(signal.id, signal.status.value),
+                        self.signal_resolutions.get(signal.id),
+                    )
+                    for signal in self.signals.values()
+                    if signal.organization_id in parameters
+                    and signal.patient_id in parameters
+                    and signal.source_submission_id in parameters
+                ]
+            )
+        if entity is ProposedChange:
+            return ResultRows(
+                [
+                    (
+                        proposal,
+                        self.effective_proposal_states.get(proposal.id, "pending"),
+                    )
+                    for proposal in self.proposals.values()
+                    if proposal.organization_id in parameters
+                    and proposal.safety_signal_id in parameters
+                ]
+            )
+        raise AssertionError(f"Unexpected row query: {statement}")
+
     def scalar(self, statement: Any) -> CheckInDefinition | CheckInSubmission | None:
-        entity = statement.column_descriptions[0]["entity"]
+        entity = statement.column_descriptions[0].get("entity")
+        if entity is None and "active_check_in_submission" in str(statement):
+            parameters = set(statement.compile().params.values())
+            return next(
+                (
+                    submission.id
+                    for submission in self.submissions.values()
+                    if submission.organization_id in parameters
+                    and submission.patient_id in parameters
+                    and submission.check_in_definition_id in parameters
+                    and not any(
+                        successor.supersedes_submission_id == submission.id
+                        for successor in self.submissions.values()
+                    )
+                ),
+                None,
+            )
         parameters = set(statement.compile().params.values())
         if entity is CheckInDefinition:
-            if self.definition.id in parameters and self.definition.organization_id in parameters:
+            if self.definition.organization_id in parameters:
                 return self.definition
+            return None
+        if entity is PatientIdentityLink:
+            if (
+                self.identity_link.organization_id in parameters
+                and self.identity_link.user_id in parameters
+                and self.identity_link.revoked_at is None
+            ):
+                return self.identity_link.patient_id
             return None
         if entity is CareEpisode:
             if (
@@ -56,6 +154,16 @@ class FakeSession:
                 return self.assignment.id
             return None
         if entity is CheckInSubmission:
+            if "check_in_submission.supersedes_submission_id =" in str(statement):
+                return next(
+                    (
+                        submission
+                        for submission in self.submissions.values()
+                        if submission.supersedes_submission_id in parameters
+                        and submission.organization_id in parameters
+                    ),
+                    None,
+                )
             return next(
                 (
                     submission
@@ -77,6 +185,25 @@ class FakeSession:
 
     def close(self) -> None:
         return None
+
+
+@dataclass
+class ScalarRows:
+    values: list[Any]
+
+    def first(self) -> Any | None:
+        return self.values[0] if self.values else None
+
+    def all(self) -> list[Any]:
+        return self.values
+
+
+@dataclass
+class ResultRows:
+    values: list[tuple[Any, ...]]
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return self.values
 
 
 @pytest.fixture
@@ -135,6 +262,13 @@ def client_context(
             migration_reason="test",
             authored_by_user_id=actor.user_id,
         ),
+        identity_link=PatientIdentityLink(
+            id=uuid4(),
+            organization_id=actor.organization_id,
+            user_id=actor.user_id,
+            patient_id=actor.patient_id,
+            linked_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
     )
     session.assignment.care_episode_id = session.episode.id
     app.dependency_overrides[current_actor] = lambda: actor
@@ -143,6 +277,106 @@ def client_context(
         yield session, actor
     finally:
         app.dependency_overrides.clear()
+
+
+def test_current_check_in_resolves_the_active_patient_identity_and_submission(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if current patient reads bypass identity and active-submission views."""
+    session, actor = client_context
+    predecessor = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"items": []},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    session.submissions[predecessor.id] = predecessor
+
+    async def current() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get("/v1/patient/check-ins/current")
+
+    response = asyncio.run(current())
+
+    assert response.status_code == 200, response.text
+    assert response.json()["active_submission_id"] == str(predecessor.id)
+
+
+def test_current_check_in_rejects_a_revoked_patient_identity_link(
+    patient_cookie: dict[str, str],
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if a stale session patient ID can bypass the explicit active link."""
+    session, _ = client_context
+    session.identity_link.revoked_at = datetime.now(UTC)
+
+    async def current() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get("/v1/patient/check-ins/current")
+
+    response = asyncio.run(current())
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Patient identity link is required"}
+
+
+def test_submission_correction_links_the_active_immutable_predecessor(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if a correction overwrites or loses its predecessor lineage."""
+    session, actor = client_context
+    predecessor = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"items": []},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    session.submissions[predecessor.id] = predecessor
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [{"link_id": "nausea_change", "value": "same"}],
+                    "supersedes_submission_id": str(predecessor.id),
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 201, response.text
+    assert response.json()["supersedes_submission_id"] == str(predecessor.id)
+    correction = next(
+        submission for submission in session.submissions.values() if submission.id != predecessor.id
+    )
+    assert correction.supersedes_submission_id == predecessor.id
 
 
 def test_submit_check_in_is_atomic(
@@ -371,6 +605,163 @@ def test_patient_can_export_only_own_synthetic_fhir_submission(
 
     assert response.status_code == 200
     assert response.json()["resourceType"] == "Bundle"
+
+
+def test_patient_fhir_export_reads_correction_state_from_immutable_rows(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if the route exports a correction without its canonical row lineage."""
+    session, actor = client_context
+    predecessor = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"questionnaire_canonical": "urn:test|1", "items": []},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    correction = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 13, 0, tzinfo=UTC),
+        answers={"questionnaire_canonical": "urn:test|1", "items": []},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+        supersedes_submission_id=predecessor.id,
+    )
+    session.submissions = {predecessor.id: predecessor, correction.id: correction}
+
+    async def export() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get(f"/v1/patient/check-ins/{correction.id}/fhir")
+
+    response = asyncio.run(export())
+
+    assert response.status_code == 200, response.text
+    resources = [entry["resource"] for entry in response.json()["entry"]]
+    questionnaire_response = next(
+        resource for resource in resources if resource["resourceType"] == "QuestionnaireResponse"
+    )
+    revision = next(resource for resource in resources if resource["resourceType"] == "Provenance")
+    assert questionnaire_response["status"] == "completed"
+    assert revision["entity"][0]["what"]["reference"] == (
+        f"QuestionnaireResponse/{predecessor.id}"
+    )
+
+
+def test_patient_fhir_export_reads_effective_signal_and_applied_proposal_state(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """This fails if public FHIR reads bypass either effective-state view."""
+    session, actor = client_context
+    submission = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        check_in_definition_id=check_in_definition.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        answers={"questionnaire_canonical": "urn:test|1", "items": []},
+        submission_source="patient",
+        submitted_by_user_id=actor.user_id,
+    )
+    rule = SignalRule(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        rule_code="synthetic-review",
+        version=2,
+        rule_kind="deterministic",
+        name="Synthetic review",
+    )
+    signal = SafetySignal(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=actor.patient_id,
+        care_episode_id=session.episode.id,
+        source_submission_id=submission.id,
+        signal_rule_id=rule.id,
+        signal_rule_version=rule.version,
+        deterministic_level=SafetySeverity.ROUTINE,
+        effective_level=SafetySeverity.ROUTINE,
+        status=SafetySignalStatus.ACKNOWLEDGED,
+        evidence=[],
+        rule=rule,
+    )
+    proposal = ProposedChange(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        proposed_by_user_id=actor.user_id,
+        proposed_at=datetime(2026, 8, 17, 12, 30, tzinfo=UTC),
+        change_type=ApprovalChangeType.DISMISS_SIGNAL,
+        proposed_value={"category": "false_positive"},
+        rationale="Synthetic dismissal rationale",
+        value_schema_id="ojcc.dismiss-signal",
+        value_schema_version=1,
+        safety_signal_id=signal.id,
+        approval_policy_id=uuid4(),
+        approval_policy_version=1,
+        deterministic_severity_threshold_snapshot=SafetySeverity.URGENT,
+        allow_self_approval_snapshot=True,
+        required_approval_count_snapshot=1,
+        required_approver_role_snapshot=UserRole.NAVIGATOR,
+    )
+    signal.dismissal_proposed_change_id = proposal.id
+    decision = ApprovalDecision(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        proposed_change_id=proposal.id,
+        authorized_by_user_id=uuid4(),
+        qualifying_role_assignment_id=uuid4(),
+        qualifying_role_snapshot=UserRole.NAVIGATOR,
+        decision=ApprovalDecisionValue.APPROVED,
+        authorized_at=datetime(2026, 8, 17, 13, 0, tzinfo=UTC),
+    )
+    session.submissions[submission.id] = submission
+    session.signals[signal.id] = signal
+    session.effective_signal_states[signal.id] = "dismissed"
+    session.proposals[proposal.id] = proposal
+    session.effective_proposal_states[proposal.id] = "approved"
+    session.decisions.append(decision)
+
+    async def export() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.get(f"/v1/patient/check-ins/{submission.id}/fhir")
+
+    response = asyncio.run(export())
+
+    assert response.status_code == 200, response.text
+    resources = [entry["resource"] for entry in response.json()["entry"]]
+    issue = next(resource for resource in resources if resource["resourceType"] == "DetectedIssue")
+    provenance = next(
+        resource
+        for resource in resources
+        if resource["resourceType"] == "Provenance"
+        and resource["id"] == f"proposal-{proposal.id}"
+    )
+    assert issue["status"] == "final"
+    assert [agent["type"]["coding"][0]["code"] for agent in provenance["agent"]] == [
+        "proposer",
+        "authorizer",
+    ]
 
 
 def test_patient_cannot_export_another_patients_submission(

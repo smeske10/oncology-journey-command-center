@@ -76,7 +76,10 @@ export default function NavigatorDemoPage() {
       <PatientCase
         caseData={caseData}
         error={caseError || undefined}
-        openNeeds={selected ? items.filter((item) => item.patient_id === selected.patient_id) : []}
+        openNeeds={
+          caseData?.open_needs
+          ?? (selected ? items.filter((item) => item.patient_id === selected.patient_id) : [])
+        }
         state={loadingCase ? "loading" : undefined}
       />
     </main>

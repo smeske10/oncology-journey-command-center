@@ -14,6 +14,7 @@ export type CheckInQuestion = {
 };
 
 export type PatientCheckInDefinition = {
+  activeSubmissionId?: string | null;
   id: string;
   title: string;
   questionnaireVersion: string;
@@ -54,6 +55,7 @@ export function CheckInFlow({ definition, onSubmit }: CheckInFlowProps) {
         return value ? [{ link_id: item.linkId, value }] : [];
       }),
       free_text: freeText.trim() || undefined,
+      supersedes_submission_id: definition.activeSubmissionId ?? undefined,
     }),
     [answers, definition, freeText],
   );
@@ -70,7 +72,7 @@ export function CheckInFlow({ definition, onSubmit }: CheckInFlowProps) {
     } catch (submissionError: unknown) {
       if (submissionError instanceof ApiError && submissionError.kind === "correction") {
         setError(submissionError.message);
-        setQuestionIndex(firstUnansweredIndex(definition.questions, answers));
+        setQuestionIndex(0);
         setStage("question");
       } else {
         setError("We couldn't save your check-in. Your review is still here—please try again.");
@@ -175,14 +177,22 @@ export function CheckInFlow({ definition, onSubmit }: CheckInFlowProps) {
             Edit answers
           </button>
           <button disabled={stage === "submitting"} onClick={submit} style={primaryButtonStyle} type="button">
-            {stage === "submitting" ? "Saving..." : "Submit check-in"}
+            {stage === "submitting"
+              ? "Saving..."
+              : definition.activeSubmissionId
+                ? "Submit correction"
+                : "Submit check-in"}
           </button>
         </section>
       )}
 
       {stage === "success" && (
         <section aria-labelledby="success-heading">
-          <h2 id="success-heading">Your synthetic check-in was saved</h2>
+          <h2 id="success-heading">
+            {definition.activeSubmissionId
+              ? "Your synthetic correction was saved"
+              : "Your synthetic check-in was saved"}
+          </h2>
           <p>Thank you. In this demo, any next step is reviewed by a human navigator.</p>
         </section>
       )}

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import require_role
@@ -18,12 +18,12 @@ from app.db.models import (
     CheckInSubmission,
     NavigationTask,
     ReportedNeed,
-    SafetySignal,
     SyntheticPatient,
 )
+from app.db.repositories import EffectiveSafetySignalRecord, SqlAlchemyNavigatorRepository
 from app.db.session import get_session
-from app.domain.enums import NavigationTaskStatus, NeedStatus
-from app.domain.needs import NeedKind, effective_need_state
+from app.domain.enums import NavigationTaskStatus
+from app.domain.needs import NeedKind
 from app.domain.prioritization import OperationalPriorityWeights, PriorityResult, rank_need
 
 router = APIRouter(prefix="/v1/navigator", tags=["navigator"])
@@ -116,22 +116,9 @@ def get_navigator_queue(
     session: Session = Depends(get_session),
     priority_policy: OperationalPriorityWeights = Depends(get_navigator_priority_policy),
 ) -> NavigatorQueueRead:
-    needs = session.scalars(
-        select(ReportedNeed)
-        .join(
-            effective_need_state,
-            and_(
-                effective_need_state.c.organization_id == ReportedNeed.organization_id,
-                effective_need_state.c.id == ReportedNeed.id,
-            ),
-        )
-        .where(
-            ReportedNeed.organization_id == actor.organization_id,
-            effective_need_state.c.effective_state.in_(
-                [NeedStatus.OPEN.value, NeedStatus.IN_PROGRESS.value]
-            ),
-        )
-    ).all()
+    needs = SqlAlchemyNavigatorRepository(session).list_open_needs(
+        organization_id=actor.organization_id
+    )
     items = [
         _queue_item_for_need(session, actor.organization_id, need, priority_policy=priority_policy)
         for need in needs
@@ -146,52 +133,30 @@ def get_navigator_case(
     session: Session = Depends(get_session),
     priority_policy: OperationalPriorityWeights = Depends(get_navigator_priority_policy),
 ) -> PatientCaseRead:
-    patient = session.scalars(
-        select(SyntheticPatient).where(
-            SyntheticPatient.id == patient_id,
-            SyntheticPatient.organization_id == actor.organization_id,
-        )
-    ).first()
+    repository = SqlAlchemyNavigatorRepository(session)
+    patient = repository.get_patient(
+        patient_id=patient_id,
+        organization_id=actor.organization_id,
+    )
     if patient is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient case not found")
 
-    submissions = session.scalars(
-        select(CheckInSubmission)
-        .where(
-            CheckInSubmission.organization_id == actor.organization_id,
-            CheckInSubmission.patient_id == patient_id,
-        )
-        .order_by(CheckInSubmission.submitted_at.desc())
-    ).all()
-    needs = session.scalars(
-        select(ReportedNeed)
-        .join(
-            effective_need_state,
-            and_(
-                effective_need_state.c.organization_id == ReportedNeed.organization_id,
-                effective_need_state.c.id == ReportedNeed.id,
-            ),
-        )
-        .where(
-            ReportedNeed.organization_id == actor.organization_id,
-            ReportedNeed.patient_id == patient_id,
-            effective_need_state.c.effective_state.in_(
-                [NeedStatus.OPEN.value, NeedStatus.IN_PROGRESS.value]
-            ),
-        )
-    ).all()
-    signals = session.scalars(
-        select(SafetySignal).where(
-            SafetySignal.organization_id == actor.organization_id,
-            SafetySignal.patient_id == patient_id,
-        )
-    ).all()
-    tasks = session.scalars(
-        select(NavigationTask).where(
-            NavigationTask.organization_id == actor.organization_id,
-            NavigationTask.patient_id == patient_id,
-        )
-    ).all()
+    submissions = repository.list_active_submissions(
+        patient_id=patient_id,
+        organization_id=actor.organization_id,
+    )
+    needs = repository.list_open_needs(
+        patient_id=patient_id,
+        organization_id=actor.organization_id,
+    )
+    signals = repository.list_effective_safety_signals(
+        patient_id=patient_id,
+        organization_id=actor.organization_id,
+    )
+    tasks = repository.list_navigation_tasks(
+        patient_id=patient_id,
+        organization_id=actor.organization_id,
+    )
 
     demographics = patient.demographics if isinstance(patient.demographics, dict) else {}
     return PatientCaseRead(
@@ -323,12 +288,13 @@ def _submission_read(submission: CheckInSubmission) -> SubmissionRead:
     )
 
 
-def _safety_signal_read(signal: SafetySignal) -> SafetySignalRead:
+def _safety_signal_read(record: EffectiveSafetySignalRecord) -> SafetySignalRead:
+    signal = record.signal
     return SafetySignalRead(
         id=signal.id,
         rule_code=signal.rule_code,
         severity=signal.severity.value,
-        status=signal.status.value,
+        status=record.effective_state,
         evidence=[_evidence_read(item) for item in signal.evidence if isinstance(item, dict)],
         created_at=_created_at(signal.created_at),
     )
