@@ -557,6 +557,8 @@ This section supersedes earlier diagrams, draft DDL, and simplified relationship
 
 The public environment contains synthetic, reproducible data, so its seed can be regenerated under the reconciled schema. The implementation plan must still use explicit migrations and tests; it must not preserve obsolete columns merely to avoid reseeding demo data.
 
+The reconciliation implementation ends with the restore-integrity, deterministic seed/reset, and release-evidence gate. Historical feature Tasks 6–12 remain superseded rather than resuming after that gate. Closed-loop product behavior, orchestration, retrieval, evaluation, and deployment each require a fresh bounded plan against the reconciled schema. The broad HTTP 422 correction-classification behavior remains an intentional final-review fork; the reconciliation release does not silently redefine every validation failure as a correction attempt.
+
 ## 9. Safety, privacy, and trust
 
 ### 9.1 Product boundary
