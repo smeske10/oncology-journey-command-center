@@ -22,14 +22,14 @@ function Invoke-CheckedPython {
 
 Push-Location $apiRoot
 try {
-    $validationCode = @'
+    $resetCode = @'
 import sys
-from sqlalchemy.engine import make_url
+from sqlalchemy import create_engine, text
 from scripts.seed_demo import validate_disposable_database_url
 
 try:
-    validate_disposable_database_url(sys.argv[1])
-    database_name = make_url(sys.argv[1]).database
+    validated_url = validate_disposable_database_url(sys.argv[1])
+    database_name = validated_url.database
     if database_name != sys.argv[2]:
         raise ValueError(
             f"Database confirmation does not match: expected {database_name!r}, "
@@ -38,17 +38,8 @@ try:
 except ValueError as error:
     print(error, file=sys.stderr)
     raise SystemExit(2)
-'@
-    $validationCode | python - $DatabaseUrl $ConfirmDatabaseName
-    if ($LASTEXITCODE -ne 0) {
-        exit $LASTEXITCODE
-    }
 
-    $resetCode = @'
-import sys
-from sqlalchemy import create_engine, text
-
-engine = create_engine(sys.argv[1], isolation_level="AUTOCOMMIT", pool_pre_ping=True)
+engine = create_engine(validated_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
 try:
     with engine.connect() as connection:
         connection.execute(text("DROP SCHEMA public CASCADE"))
@@ -56,7 +47,7 @@ try:
 finally:
     engine.dispose()
 '@
-    $resetCode | python - $DatabaseUrl
+    $resetCode | python - $DatabaseUrl $ConfirmDatabaseName
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

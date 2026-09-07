@@ -11,12 +11,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.integrity import inspect_integrity
+from scripts import seed_demo as seed_demo_script
 from scripts.seed_demo import DEMO_IDS, seed_demo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -130,7 +132,12 @@ def _seed_digest(session: Session) -> str:
     return hashlib.sha256("\n".join(rows).encode()).hexdigest()
 
 
-def _run_reset(database_url: str, confirmation: str) -> subprocess.CompletedProcess[str]:
+def _run_reset(
+    database_url: str,
+    confirmation: str,
+    *,
+    environment: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             "powershell",
@@ -145,6 +152,7 @@ def _run_reset(database_url: str, confirmation: str) -> subprocess.CompletedProc
             confirmation,
         ],
         cwd=PROJECT_ROOT,
+        env=environment,
         capture_output=True,
         text=True,
         check=False,
@@ -352,3 +360,84 @@ def test_reset_rejects_persistent_and_remote_database_urls_before_connecting() -
     )
     assert remote.returncode != 0
     assert "requires a loopback postgresql url" in (remote.stdout + remote.stderr).lower()
+
+
+def test_reset_rejects_query_routing_before_engine_creation(tmp_path: Path) -> None:
+    """Production break: reset validation can be bypassed by a libpq query override."""
+    sentinel = "database engine creation was attempted"
+    (tmp_path / "sitecustomize.py").write_text(
+        "import sqlalchemy\n"
+        "def blocked_create_engine(*args, **kwargs):\n"
+        f"    raise AssertionError({sentinel!r})\n"
+        "sqlalchemy.create_engine = blocked_create_engine\n",
+        encoding="utf-8",
+    )
+    python_path = str(tmp_path)
+    if existing_python_path := os.environ.get("PYTHONPATH"):
+        python_path += os.pathsep + existing_python_path
+
+    result = _run_reset(
+        "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+        "ojcc_demo_deadbeef?host=remote.example.test",
+        "ojcc_demo_deadbeef",
+        environment=os.environ | {"PYTHONPATH": python_path},
+    )
+    output = (result.stdout + result.stderr).lower()
+
+    assert result.returncode == 2, output
+    assert "must not include query parameters" in output
+    assert sentinel not in output
+
+
+@pytest.mark.parametrize(
+    "query",
+    (
+        "host=remote.example.test",
+        "port=6543",
+        "dbname=ojcc",
+        "hostaddr=192.0.2.10",
+        "service=production",
+        "servicefile=C%3A%5Csynthetic%5Cpg_service.conf",
+        "options=-csearch_path%3Dpublic",
+        "target_session_attrs=read-write",
+        "load_balance_hosts=random",
+        "host=127.0.0.1&host=remote.example.test",
+    ),
+)
+def test_disposable_target_rejects_connection_query_overrides_before_engine_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    query: str,
+) -> None:
+    """Production break: URL query options can reroute a validated destructive target."""
+
+    def unexpected_engine_creation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("database engine creation was attempted")
+
+    monkeypatch.setattr(seed_demo_script, "create_engine", unexpected_engine_creation)
+    database_url = (
+        "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+        f"ojcc_demo_deadbeef?{query}"
+    )
+
+    with pytest.raises(ValueError, match="must not include query parameters"):
+        seed_demo_script.main(["--database-url", database_url])
+
+
+def test_disposable_target_requires_explicit_local_port_before_engine_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production break: an omitted URL port can inherit an unsafe libpq route."""
+
+    def unexpected_engine_creation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("database engine creation was attempted")
+
+    monkeypatch.setattr(seed_demo_script, "create_engine", unexpected_engine_creation)
+
+    with pytest.raises(ValueError, match="requires the explicit local PostgreSQL port"):
+        seed_demo_script.main(
+            [
+                "--database-url",
+                "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1/"
+                "ojcc_demo_deadbeef",
+            ]
+        )

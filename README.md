@@ -24,7 +24,8 @@ The API health endpoint is available at `GET /health` and returns `{"status":"ok
 The reset is destructive and therefore accepts only an explicit loopback PostgreSQL URL whose
 database name is `ojcc_demo_<8-32 lowercase hex>` or `ojcc_task7_<8-32 lowercase hex>`. The
 database name must also be repeated as confirmation. It refuses the persistent `ojcc` database,
-remote hosts, unexpected ports, and confirmation mismatches before dropping any schema.
+remote hosts, omitted or unexpected ports, all URL query parameters, and confirmation mismatches
+before creating a database engine or dropping any schema.
 
 ```powershell
 $databaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"

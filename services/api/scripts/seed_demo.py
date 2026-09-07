@@ -12,7 +12,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
 from app.db.integrity import inspect_integrity
@@ -1076,17 +1076,20 @@ def seed_demo(session: Session) -> SeedSummary:
     return SeedSummary(organization_id=ids["organization"], row_counts=_row_counts(session))
 
 
-def validate_disposable_database_url(database_url: str) -> None:
+def validate_disposable_database_url(database_url: str) -> URL:
     url = make_url(database_url)
     if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
         raise ValueError("Synthetic seed requires a loopback PostgreSQL URL")
-    if url.port not in (None, 5432):
-        raise ValueError("Synthetic seed requires the local PostgreSQL port")
+    if url.query:
+        raise ValueError("Synthetic seed URL must not include query parameters")
+    if url.port != 5432:
+        raise ValueError("Synthetic seed requires the explicit local PostgreSQL port 5432")
     if url.database is None or DISPOSABLE_DATABASE_PATTERN.fullmatch(url.database) is None:
         raise ValueError(
             "Refusing to seed a non-disposable database; expected "
             "ojcc_demo_<8-32 lowercase hex> or ojcc_task7_<8-32 lowercase hex>"
         )
+    return url
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1097,8 +1100,8 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
-    validate_disposable_database_url(arguments.database_url)
-    engine = create_engine(arguments.database_url, pool_pre_ping=True)
+    validated_url = validate_disposable_database_url(arguments.database_url)
+    engine = create_engine(validated_url, pool_pre_ping=True)
     try:
         with Session(engine) as session, session.begin():
             summary = seed_demo(session)
