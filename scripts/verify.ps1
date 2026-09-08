@@ -24,6 +24,7 @@ try {
         Invoke-VerificationCommand { python -m pip install --no-deps --no-build-isolation -e . }
         Invoke-VerificationCommand { python -m ruff check . }
         Invoke-VerificationCommand { python -m pyright }
+        Invoke-VerificationCommand { python scripts/check_integrity.py }
         Invoke-VerificationCommand { python -m pytest -q }
     }
     finally {

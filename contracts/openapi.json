@@ -194,6 +194,18 @@
       },
       "CheckInDefinitionResponse": {
         "properties": {
+          "active_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Submission Id"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -220,7 +232,8 @@
           "id",
           "title",
           "questionnaire_version",
-          "questions"
+          "questions",
+          "active_submission_id"
         ],
         "title": "CheckInDefinitionResponse",
         "type": "object"
@@ -254,6 +267,18 @@
             "minLength": 1,
             "title": "Questionnaire Version",
             "type": "string"
+          },
+          "supersedes_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Submission Id"
           }
         },
         "required": [
@@ -261,6 +286,43 @@
           "answers"
         ],
         "title": "CheckInSubmissionCreate",
+        "type": "object"
+      },
+      "CheckInSubmissionErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "answers_invalid",
+              "configuration_invalid",
+              "correction_stale",
+              "definition_inactive",
+              "questionnaire_stale"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "CheckInSubmissionErrorDetail",
+        "type": "object"
+      },
+      "CheckInSubmissionErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CheckInSubmissionErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "CheckInSubmissionErrorResponse",
         "type": "object"
       },
       "CheckInSubmissionResponse": {
@@ -281,13 +343,26 @@
           "submitted_at": {
             "title": "Submitted At",
             "type": "string"
+          },
+          "supersedes_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Submission Id"
           }
         },
         "required": [
           "id",
           "status",
           "questionnaire_version",
-          "submitted_at"
+          "submitted_at",
+          "supersedes_submission_id"
         ],
         "title": "CheckInSubmissionResponse",
         "type": "object"
@@ -1661,11 +1736,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/CheckInSubmissionErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Submit Check In",

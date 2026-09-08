@@ -81,7 +81,7 @@ test("shows one question at a time and progresses through every required answer"
   expect(screen.queryByRole("heading", { name: "Review your check-in" })).not.toBeInTheDocument();
 });
 
-test("returns to a correction screen for validation errors", async () => {
+test("returns an invalid first submission to its answer screen", async () => {
   render(
     <CheckInFlow
       definition={definition}
@@ -99,6 +99,56 @@ test("returns to a correction screen for validation errors", async () => {
   expect(screen.getByRole("heading", { name: /nausea better/i })).toBeVisible();
 });
 
+test("reloads the current definition instead of entering a correction loop", async () => {
+  const onConfigurationError = vi.fn().mockResolvedValue(undefined);
+  render(
+    <CheckInFlow
+      definition={definition}
+      onConfigurationError={onConfigurationError}
+      onSubmit={vi.fn().mockRejectedValue(
+        new ApiError("This check-in changed. Reloading it now.", "configuration"),
+      )}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+
+  await waitFor(() => expect(onConfigurationError).toHaveBeenCalledOnce());
+  expect(screen.getByRole("heading", { name: "Review your check-in" })).toBeVisible();
+});
+
+test("returns to the first question when a completed multi-question review needs correction", async () => {
+  render(
+    <CheckInFlow
+      definition={{
+        ...definition,
+        questions: [
+          ...definition.questions,
+          {
+            linkId: "transportation",
+            label: "Do you need transportation support?",
+            options: [
+              { value: "yes", label: "Yes" },
+              { value: "no", label: "No" },
+            ],
+          },
+        ],
+      }}
+      onSubmit={vi.fn().mockRejectedValue(new ApiError("Please correct an answer", "correction"))}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "No" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+
+  expect(await screen.findByRole("heading", { name: /nausea better/i })).toBeVisible();
+});
+
 test("restores an answer draft from this browser", () => {
   window.localStorage.setItem(
     "ojcc-check-in:a6c304e8-8070-4a65-90cc-168a4fb6d998",
@@ -109,4 +159,30 @@ test("restores an answer draft from this browser", () => {
 
   expect(screen.getByRole("button", { name: "It is worse" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("textbox", { name: /add context/i })).toHaveValue("Saved context");
+});
+
+test("submits a correction against the canonical active submission", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+  render(
+    <CheckInFlow
+      definition={{
+        ...definition,
+        activeSubmissionId: "45c18270-f6c2-4e6a-81d6-a54535af9fd7",
+      }}
+      onSubmit={onSubmit}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "It is better" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit correction" }));
+
+  await waitFor(() => {
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        supersedes_submission_id: "45c18270-f6c2-4e6a-81d6-a54535af9fd7",
+      }),
+    );
+  });
 });

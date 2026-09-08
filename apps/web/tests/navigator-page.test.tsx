@@ -96,3 +96,29 @@ test("keeps the selected patient case when an older request resolves last", asyn
     ).not.toBeInTheDocument();
   });
 });
+
+test("renders open needs from the canonical patient case instead of the queue snapshot", async () => {
+  api.bootstrapNavigatorQueue.mockResolvedValue(queue);
+  api.getNavigatorPatientCase.mockResolvedValue({
+    ...patientCase("Patient A"),
+    open_needs: [
+      {
+        ...queue.items[0],
+        kind: "medication_question",
+        priority: {
+          level: "medium",
+          reasons: ["medication_uncertainty"],
+          score: 50,
+        },
+      },
+    ],
+  });
+
+  render(<NavigatorDemoPage />);
+
+  const caseRegion = await screen.findByRole("region", { name: "Patient case" });
+  expect(
+    await within(caseRegion).findByText(/medication_question: medication uncertainty/i),
+  ).toBeVisible();
+  expect(within(caseRegion).queryByText(/transportation:/i)).not.toBeInTheDocument();
+});

@@ -28,6 +28,7 @@ from app.domain.enums import (
     NeedStatus,
     SafetySeverity,
     SafetySignalStatus,
+    TaskCancellationReason,
 )
 from app.main import app
 
@@ -44,6 +45,14 @@ class ScalarRows:
 
 
 @dataclass
+class ResultRows:
+    values: list[tuple[Any, ...]]
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return self.values
+
+
+@dataclass
 class NavigatorSession:
     organization_id: UUID
     patients: list[SyntheticPatient]
@@ -52,6 +61,28 @@ class NavigatorSession:
     signals: list[SafetySignal]
     tasks: list[NavigationTask]
     closed_need_ids: set[UUID] = field(default_factory=set)
+    superseded_submission_ids: set[UUID] = field(default_factory=set)
+    effective_signal_states: dict[UUID, str] = field(default_factory=dict)
+
+    def execute(self, statement: Any) -> ResultRows:
+        raw_params = statement.compile().params.values()
+        params = {
+            item
+            for value in raw_params
+            for item in (value if isinstance(value, list) else [value])
+        }
+        assert self.organization_id in params, "navigator reads must include organization scope"
+        patient_ids = {
+            value for value in params if isinstance(value, UUID) and value != self.organization_id
+        }
+        return ResultRows(
+            [
+                (signal, self.effective_signal_states.get(signal.id, signal.status.value))
+                for signal in self.signals
+                if signal.organization_id == self.organization_id
+                and (not patient_ids or signal.patient_id in patient_ids)
+            ]
+        )
 
     def scalars(self, statement: Any) -> ScalarRows:
         entity = statement.column_descriptions[0]["entity"]
@@ -67,6 +98,12 @@ class NavigatorSession:
             values = self.patients
         elif entity is CheckInSubmission:
             values = self.submissions
+            if "active_check_in_submission" in str(statement):
+                values = [
+                    value
+                    for value in values
+                    if value.id not in self.superseded_submission_ids
+                ]
         elif entity is PersistedNeed:
             values = self.needs
             if "effective_need_state" in str(statement):
@@ -75,6 +112,12 @@ class NavigatorSession:
             values = self.signals
         elif entity is NavigationTask:
             values = self.tasks
+            if TaskCancellationReason.NEED_CLOSED in params:
+                values = [
+                    value
+                    for value in values
+                    if value.cancellation_reason != TaskCancellationReason.NEED_CLOSED
+                ]
         else:
             raise AssertionError(f"Unexpected entity query: {entity}")
         patient_ids = {
@@ -464,4 +507,48 @@ def test_queue_and_case_use_effective_need_state_to_hide_outcome_closed_needs(
     }
     assert str(closed_need.id) not in {
         item["need_id"] for item in case_response.json()["open_needs"]
+    }
+
+
+def test_case_uses_canonical_submission_signal_and_task_reads(
+    navigator_context: tuple[NavigatorSession, CurrentActor, SyntheticPatient],
+) -> None:
+    """This fails if reconciled case reads leak superseded or routine terminal history."""
+    session, actor, patient = navigator_context
+    active_submission = session.submissions[0]
+    superseded = CheckInSubmission(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=patient.id,
+        status=CheckInStatus.SUBMITTED,
+        submitted_at=active_submission.submitted_at - timedelta(hours=1),
+        answers={"items": [], "free_text": "Superseded context."},
+    )
+    session.submissions.append(superseded)
+    session.superseded_submission_ids.add(superseded.id)
+    signal = session.signals[0]
+    session.effective_signal_states[signal.id] = "dismissed"
+    routine_cancellation = NavigationTask(
+        id=uuid4(),
+        organization_id=actor.organization_id,
+        patient_id=patient.id,
+        reported_need_id=session.needs[0].id,
+        title="Routine closure cancellation",
+        status=NavigationTaskStatus.CANCELLED,
+        cancelled_by_user_id=actor.user_id,
+        cancelled_at=datetime.now(UTC),
+        cancellation_reason=TaskCancellationReason.NEED_CLOSED,
+    )
+    session.tasks.append(routine_cancellation)
+
+    response = get(f"/v1/navigator/patients/{patient.id}/case")
+
+    assert response.status_code == 200, response.text
+    case = response.json()
+    assert [item["id"] for item in case["longitudinal_submissions"]] == [
+        str(active_submission.id)
+    ]
+    assert case["safety_signals"][0]["status"] == "dismissed"
+    assert str(routine_cancellation.id) not in {
+        item["id"] for item in case["navigation_tasks"]
     }

@@ -317,6 +317,8 @@ export interface components {
         ApprovalDecisionValue: "approved" | "declined";
         /** CheckInDefinitionResponse */
         CheckInDefinitionResponse: {
+            /** Active Submission Id */
+            active_submission_id: string | null;
             /**
              * Id
              * Format: uuid
@@ -339,6 +341,22 @@ export interface components {
             free_text?: string | null;
             /** Questionnaire Version */
             questionnaire_version: string;
+            /** Supersedes Submission Id */
+            supersedes_submission_id?: string | null;
+        };
+        /** CheckInSubmissionErrorDetail */
+        CheckInSubmissionErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "answers_invalid" | "configuration_invalid" | "correction_stale" | "definition_inactive" | "questionnaire_stale";
+            /** Message */
+            message: string;
+        };
+        /** CheckInSubmissionErrorResponse */
+        CheckInSubmissionErrorResponse: {
+            detail: components["schemas"]["CheckInSubmissionErrorDetail"];
         };
         /** CheckInSubmissionResponse */
         CheckInSubmissionResponse: {
@@ -353,6 +371,8 @@ export interface components {
             status: string;
             /** Submitted At */
             submitted_at: string;
+            /** Supersedes Submission Id */
+            supersedes_submission_id: string | null;
         };
         /** EvidenceRead */
         EvidenceRead: {
@@ -1054,13 +1074,13 @@ export interface operations {
                     "application/json": components["schemas"]["CheckInSubmissionResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["CheckInSubmissionErrorResponse"];
                 };
             };
         };

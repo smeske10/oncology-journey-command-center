@@ -31,7 +31,15 @@ test("reports a correction error separately from a persistence failure", async (
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
-      Response.json({ detail: "Answers must use known questionnaire link IDs" }, { status: 422 }),
+      Response.json(
+        {
+          detail: {
+            code: "answers_invalid",
+            message: "Answers must use known questionnaire link IDs",
+          },
+        },
+        { status: 422 },
+      ),
     ),
   );
 
@@ -41,4 +49,42 @@ test("reports a correction error separately from a persistence failure", async (
       answers: [{ link_id: "nausea_change", value: "worse" }],
     }),
   ).rejects.toMatchObject({ kind: "correction" });
+});
+
+test.each(["questionnaire_stale", "definition_inactive", "correction_stale"])(
+  "treats %s as configuration recovery rather than an answer correction",
+  async (code) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          { detail: { code, message: "Reload the current check-in." } },
+          { status: 422 },
+        ),
+      ),
+    );
+
+    await expect(
+      submitCheckIn("a6c304e8-8070-4a65-90cc-168a4fb6d998", {
+        questionnaire_version: "breast-active-v1",
+        answers: [{ link_id: "nausea_change", value: "worse" }],
+      }),
+    ).rejects.toMatchObject({ kind: "configuration", code });
+  },
+);
+
+test("does not classify an unknown 422 response as a correctable answer", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      Response.json({ detail: [{ loc: ["path", "definition_id"], msg: "invalid" }] }, { status: 422 }),
+    ),
+  );
+
+  await expect(
+    submitCheckIn("not-a-valid-id", {
+      questionnaire_version: "breast-active-v1",
+      answers: [{ link_id: "nausea_change", value: "worse" }],
+    }),
+  ).rejects.toMatchObject({ kind: "configuration" });
 });

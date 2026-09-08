@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   CheckInFlow,
@@ -18,22 +18,39 @@ export default function PatientDemoPage() {
   const [definition, setDefinition] = useState<PatientCheckInDefinition>();
   const [error, setError] = useState("");
 
+  const loadCurrentDefinition = useCallback(
+    () =>
+      bootstrapPatientCheckIn()
+        .then((response) => {
+          setError("");
+          setDefinition(toPresentationDefinition(response));
+        })
+        .catch((requestError: unknown) => {
+          const message = requestError instanceof ApiError ? requestError.message : "Demo unavailable";
+          setError(message);
+        }),
+    [],
+  );
+
   useEffect(() => {
-    void bootstrapPatientCheckIn()
-      .then((response) => setDefinition(toPresentationDefinition(response)))
-      .catch((requestError: unknown) => {
-        const message = requestError instanceof ApiError ? requestError.message : "Demo unavailable";
-        setError(message);
-      });
-  }, []);
+    void loadCurrentDefinition();
+  }, [loadCurrentDefinition]);
 
   if (error) return <main><p role="alert">{error}</p></main>;
   if (!definition) return <main><p aria-live="polite">Loading synthetic check-in…</p></main>;
-  return <CheckInFlow definition={definition} onSubmit={(payload) => submitCheckIn(definition.id, payload)} />;
+  return (
+    <CheckInFlow
+      definition={definition}
+      key={`${definition.id}:${definition.questionnaireVersion}:${definition.activeSubmissionId ?? "first"}`}
+      onConfigurationError={loadCurrentDefinition}
+      onSubmit={(payload) => submitCheckIn(definition.id, payload)}
+    />
+  );
 }
 
 function toPresentationDefinition(response: CheckInDefinitionResponse): PatientCheckInDefinition {
   return {
+    activeSubmissionId: response.active_submission_id,
     id: response.id,
     title: response.title,
     questionnaireVersion: response.questionnaire_version,
