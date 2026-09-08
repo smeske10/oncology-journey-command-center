@@ -10,12 +10,15 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apiRoot = Join-Path $projectRoot "services/api"
 $priorDatabaseUrl = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
-$priorLibpqEnvironment = @{}
+$priorLibpqEnvironment = @()
 
 Get-ChildItem Env: | Where-Object {
     $_.Name.StartsWith("PG", [System.StringComparison]::OrdinalIgnoreCase)
 } | ForEach-Object {
-    $priorLibpqEnvironment[$_.Name] = $_.Value
+    $priorLibpqEnvironment += [PSCustomObject]@{
+        Name = $_.Name
+        Value = $_.Value
+    }
 }
 
 function Invoke-CheckedPython {
@@ -29,8 +32,8 @@ function Invoke-CheckedPython {
 
 $locationPushed = $false
 try {
-    foreach ($name in $priorLibpqEnvironment.Keys) {
-        Remove-Item -LiteralPath ("Env:{0}" -f $name)
+    foreach ($entry in $priorLibpqEnvironment) {
+        Remove-Item -LiteralPath ("Env:{0}" -f $entry.Name)
     }
     Push-Location $apiRoot
     $locationPushed = $true
@@ -76,8 +79,8 @@ finally {
     } | ForEach-Object {
         Remove-Item -LiteralPath ("Env:{0}" -f $_.Name)
     }
-    foreach ($entry in $priorLibpqEnvironment.GetEnumerator()) {
-        [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    foreach ($entry in $priorLibpqEnvironment) {
+        [System.Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, "Process")
     }
     if ($null -eq $priorDatabaseUrl) {
         [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $null, "Process")
