@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -132,6 +133,15 @@ def _seed_digest(session: Session) -> str:
     return hashlib.sha256("\n".join(rows).encode()).hexdigest()
 
 
+def _resolve_powershell_executable(
+    find_executable: Callable[[str], str | None] = shutil.which,
+) -> str:
+    for candidate in ("pwsh", "powershell"):
+        if executable := find_executable(candidate):
+            return executable
+    raise RuntimeError("Demo reset execution requires pwsh or Windows PowerShell")
+
+
 def _run_reset(
     database_url: str,
     confirmation: str,
@@ -140,7 +150,7 @@ def _run_reset(
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
-            "powershell",
+            _resolve_powershell_executable(),
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
@@ -157,6 +167,42 @@ def _run_reset(
         text=True,
         check=False,
     )
+
+
+@pytest.mark.parametrize(
+    ("available", "expected", "expected_lookups"),
+    (
+        (
+            {"pwsh": "/opt/microsoft/powershell/7/pwsh", "powershell": None},
+            "/opt/microsoft/powershell/7/pwsh",
+            ["pwsh"],
+        ),
+        (
+            {"pwsh": None, "powershell": r"C:\Windows\System32\WindowsPowerShell\powershell.exe"},
+            r"C:\Windows\System32\WindowsPowerShell\powershell.exe",
+            ["pwsh", "powershell"],
+        ),
+    ),
+)
+def test_resolve_powershell_prefers_pwsh_with_windows_fallback(
+    available: dict[str, str | None],
+    expected: str,
+    expected_lookups: list[str],
+) -> None:
+    """Hosted Linux must use pwsh while Windows retains its legacy fallback."""
+    lookups: list[str] = []
+
+    def find_executable(name: str) -> str | None:
+        lookups.append(name)
+        return available[name]
+
+    assert _resolve_powershell_executable(find_executable) == expected
+    assert lookups == expected_lookups
+
+
+def test_resolve_powershell_fails_clearly_when_no_executable_exists() -> None:
+    with pytest.raises(RuntimeError, match="requires pwsh or Windows PowerShell"):
+        _resolve_powershell_executable(lambda _name: None)
 
 
 def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
