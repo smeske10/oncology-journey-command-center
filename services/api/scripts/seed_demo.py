@@ -15,6 +15,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.integrity import inspect_integrity
@@ -1139,12 +1140,19 @@ def seed_demo(session: Session) -> SeedSummary:
     ids = DEMO_IDS
     values: dict[str, Any] = ids | TIMES
     session.execute(text("SET LOCAL session_replication_role = replica"))
-    _seed_identity_and_pathways(session, ids, values)
-    _seed_check_ins(session, ids, values)
-    _seed_signals_and_workflows(session, ids, values)
-    _seed_approvals(session, ids, values)
-    _seed_audit_events(session, ids, values)
-    session.execute(text("SET LOCAL session_replication_role = origin"))
+    restore_trigger_enforcement = True
+    try:
+        _seed_identity_and_pathways(session, ids, values)
+        _seed_check_ins(session, ids, values)
+        _seed_signals_and_workflows(session, ids, values)
+        _seed_approvals(session, ids, values)
+        _seed_audit_events(session, ids, values)
+    except SQLAlchemyError:
+        restore_trigger_enforcement = False
+        raise
+    finally:
+        if restore_trigger_enforcement:
+            session.execute(text("SET LOCAL session_replication_role = origin"))
     return SeedSummary(organization_id=ids["organization"], row_counts=_row_counts(session))
 
 

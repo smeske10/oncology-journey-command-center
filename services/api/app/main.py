@@ -37,8 +37,10 @@ async def stable_check_in_validation_error(
     )
     if is_check_in_submission:
         validation_errors = error.errors()
-        rendered_errors = " ".join(str(item) for item in validation_errors)
-        has_phi_error = "must not receive real health information" in rendered_errors
+        has_phi_error = any(
+            str(item.get("ctx", {}).get("error", "")) == PUBLIC_DEMO_PHI_WARNING
+            for item in validation_errors
+        )
         has_only_answer_content_errors = bool(validation_errors) and all(
             len(location := item.get("loc", ())) > 1
             and location[0] == "body"

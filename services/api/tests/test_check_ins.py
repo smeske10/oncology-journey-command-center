@@ -631,6 +631,16 @@ def test_first_submission_request_validation_returns_a_correctable_error_code(
             "answers": [{"link_id": "nausea_change", "value": "same"}],
             "unexpected_configuration": True,
         },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [{"link_id": "nausea_change", "value": "same"}],
+            "unexpected_configuration": "must not receive real health information",
+        },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [],
+            "unexpected_configuration": True,
+        },
     ],
 )
 def test_submission_request_validation_distinguishes_malformed_configuration(
@@ -946,7 +956,16 @@ def test_submission_rejects_explicit_contact_fields_with_a_public_demo_warning(
     response = asyncio.run(submit())
 
     assert response.status_code == 422
-    assert "must not receive real health information" in response.text
+    assert response.json() == {
+        "detail": {
+            "code": "answers_invalid",
+            "message": (
+                "This public synthetic demo must not receive real health information or contact "
+                "details. Please remove email addresses, phone numbers, and medical-record "
+                "identifiers."
+            ),
+        }
+    }
 
 
 def test_patient_check_in_router_is_registered_without_enabling_docs() -> None:
