@@ -1,0 +1,1 @@
+services/api/alembic/versions/*.py text eol=lf
