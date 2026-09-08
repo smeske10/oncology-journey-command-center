@@ -614,6 +614,93 @@ def test_first_submission_request_validation_returns_a_correctable_error_code(
     assert session.submissions == {}
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "questionnaire_version": "",
+            "answers": [{"link_id": "nausea_change", "value": "same"}],
+        },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [{"link_id": "nausea_change", "value": "same"}],
+            "supersedes_submission_id": "not-a-uuid",
+        },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [{"link_id": "nausea_change", "value": "same"}],
+            "unexpected_configuration": True,
+        },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [{"link_id": "nausea_change", "value": "same"}],
+            "unexpected_configuration": "must not receive real health information",
+        },
+        {
+            "questionnaire_version": "breast-active-v1",
+            "answers": [],
+            "unexpected_configuration": True,
+        },
+    ],
+)
+def test_submission_request_validation_distinguishes_malformed_configuration(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+    payload: dict[str, Any],
+) -> None:
+    """Malformed request metadata must not send the UI into answer-correction mode."""
+    session, _ = client_context
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json=payload,
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "configuration_invalid",
+            "message": "This check-in request is invalid. Reload the current check-in.",
+        }
+    }
+    assert session.committed is False
+    assert session.submissions == {}
+
+
+def test_submission_request_validation_treats_malformed_json_as_configuration_invalid(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    session, _ = client_context
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                content=b'{"questionnaire_version":',
+                headers={"content-type": "application/json"},
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "configuration_invalid"
+    assert session.committed is False
+    assert session.submissions == {}
+
+
 def test_patient_can_export_only_own_synthetic_fhir_submission(
     patient_cookie: dict[str, str],
     check_in_definition: CheckInDefinition,
@@ -869,7 +956,16 @@ def test_submission_rejects_explicit_contact_fields_with_a_public_demo_warning(
     response = asyncio.run(submit())
 
     assert response.status_code == 422
-    assert "must not receive real health information" in response.text
+    assert response.json() == {
+        "detail": {
+            "code": "answers_invalid",
+            "message": (
+                "This public synthetic demo must not receive real health information or contact "
+                "details. Please remove email addresses, phone numbers, and medical-record "
+                "identifiers."
+            ),
+        }
+    }
 
 
 def test_patient_check_in_router_is_registered_without_enabling_docs() -> None:

@@ -105,7 +105,7 @@ def post_resolution(
     except ValueError as error:
         session.rollback()
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(error),
         ) from error
     return ResolutionRead(**result.__dict__)

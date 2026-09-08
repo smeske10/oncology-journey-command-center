@@ -35,14 +35,23 @@ async def stable_check_in_validation_error(
         and request.url.path.startswith("/v1/patient/check-ins/")
         and request.url.path.endswith("/submissions")
     )
-    has_body_error = any(item.get("loc", (None,))[0] == "body" for item in error.errors())
     if is_check_in_submission:
-        rendered_errors = " ".join(str(item) for item in error.errors())
-        if has_body_error:
+        validation_errors = error.errors()
+        has_phi_error = any(
+            str(item.get("ctx", {}).get("error", "")) == PUBLIC_DEMO_PHI_WARNING
+            for item in validation_errors
+        )
+        has_only_answer_content_errors = bool(validation_errors) and all(
+            len(location := item.get("loc", ())) > 1
+            and location[0] == "body"
+            and location[1] in {"answers", "free_text"}
+            for item in validation_errors
+        )
+        if has_phi_error or has_only_answer_content_errors:
             code = "answers_invalid"
             message = (
                 PUBLIC_DEMO_PHI_WARNING
-                if "must not receive real health information" in rendered_errors
+                if has_phi_error
                 else "Please review the answers and try again."
             )
         else:

@@ -15,6 +15,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -349,6 +350,68 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
             assert second_summary == first_summary
             assert second_digest == first_digest
             assert inspect_integrity(session) == []
+        engine.dispose()
+
+
+def test_seed_restores_trigger_enforcement_after_a_python_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caught helper error must not leave triggers disabled in the caller's transaction."""
+    with _disposable_database() as database_url:
+        engine = create_engine(database_url)
+        with Session(engine) as session:
+            transaction = session.begin()
+
+            class ExpectedSeedError(RuntimeError):
+                pass
+
+            def fail_check_in_seed(
+                _session: Session,
+                _ids: dict[str, object],
+                _values: dict[str, object],
+            ) -> None:
+                raise ExpectedSeedError
+
+            monkeypatch.setattr(seed_demo_script, "_seed_check_ins", fail_check_in_seed)
+
+            with pytest.raises(ExpectedSeedError):
+                seed_demo(session)
+
+            assert transaction.is_active
+            assert session.scalar(text("SHOW session_replication_role")) == "origin"
+            transaction.rollback()
+        engine.dispose()
+
+
+def test_seed_preserves_database_error_until_the_caller_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed SQL transaction must remain owned by the caller and reset on rollback."""
+    with _disposable_database() as database_url:
+        engine = create_engine(database_url)
+        with Session(engine) as session:
+            transaction = session.begin()
+
+            def fail_with_database_error(
+                failed_session: Session,
+                _ids: dict[str, object],
+                _values: dict[str, object],
+            ) -> None:
+                failed_session.execute(text("SELECT * FROM table_that_does_not_exist"))
+
+            monkeypatch.setattr(
+                seed_demo_script, "_seed_check_ins", fail_with_database_error
+            )
+
+            with pytest.raises(SQLAlchemyError) as caught:
+                seed_demo(session)
+
+            assert "table_that_does_not_exist" in str(
+                getattr(caught.value, "statement", "")
+            )
+            assert transaction.is_active
+            transaction.rollback()
+            assert session.scalar(text("SHOW session_replication_role")) == "origin"
         engine.dispose()
 
 
