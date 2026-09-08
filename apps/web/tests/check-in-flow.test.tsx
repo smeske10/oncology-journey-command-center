@@ -81,7 +81,7 @@ test("shows one question at a time and progresses through every required answer"
   expect(screen.queryByRole("heading", { name: "Review your check-in" })).not.toBeInTheDocument();
 });
 
-test("returns to a correction screen for validation errors", async () => {
+test("returns an invalid first submission to its answer screen", async () => {
   render(
     <CheckInFlow
       definition={definition}
@@ -97,6 +97,26 @@ test("returns to a correction screen for validation errors", async () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/please correct/i);
   });
   expect(screen.getByRole("heading", { name: /nausea better/i })).toBeVisible();
+});
+
+test("reloads the current definition instead of entering a correction loop", async () => {
+  const onConfigurationError = vi.fn().mockResolvedValue(undefined);
+  render(
+    <CheckInFlow
+      definition={definition}
+      onConfigurationError={onConfigurationError}
+      onSubmit={vi.fn().mockRejectedValue(
+        new ApiError("This check-in changed. Reloading it now.", "configuration"),
+      )}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+
+  await waitFor(() => expect(onConfigurationError).toHaveBeenCalledOnce());
+  expect(screen.getByRole("heading", { name: "Review your check-in" })).toBeVisible();
 });
 
 test("returns to the first question when a completed multi-question review needs correction", async () => {

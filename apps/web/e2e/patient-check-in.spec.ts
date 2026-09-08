@@ -61,7 +61,12 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
       await route.fulfill({
         contentType: "application/json",
         status: 422,
-        body: JSON.stringify({ detail: "Please correct the highlighted answer" }),
+        body: JSON.stringify({
+          detail: {
+            code: "answers_invalid",
+            message: "Please correct the highlighted answer",
+          },
+        }),
       });
       return;
     }

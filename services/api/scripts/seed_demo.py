@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -330,27 +332,40 @@ def seed_demo(session: Session) -> SeedSummary:
             },
         )
 
+    questionnaires: dict[int, dict[str, Any]] = {}
     for version, definition_key, pathway_key in (
         (1, "definition_v1", "pathway_v1"),
         (2, "definition_v2", "pathway_v2"),
     ):
         questionnaire = {
+            "canonical": (
+                "https://oncology-journey-command-center.example/Questionnaire/"
+                f"weekly-synthetic-check-in|{version}"
+            ),
             "questions": [
                 {
-                    "id": "pain",
-                    "label": "Synthetic pain level",
-                    "type": "scale",
-                    "min": 0,
-                    "max": 10,
+                    "link_id": "pain_change",
+                    "label": "Since your last check-in, is synthetic pain better, the same, or worse?",
+                    "options": [
+                        {"value": "better", "label": "It is better"},
+                        {"value": "same", "label": "About the same"},
+                        {"value": "worse", "label": "It is worse"},
+                    ],
+                    "required": True,
                 },
                 {
-                    "id": "transportation",
+                    "link_id": "transportation",
                     "label": "Need synthetic transportation support?",
-                    "type": "boolean",
+                    "options": [
+                        {"value": "yes", "label": "Yes"},
+                        {"value": "no", "label": "No"},
+                    ],
+                    "required": True,
                 },
             ],
-            "version": version,
+            "version": f"weekly-synthetic-check-in-v{version}",
         }
+        questionnaires[version] = questionnaire
         _insert(
             session,
             "INSERT INTO check_in_definition "
@@ -367,23 +382,56 @@ def seed_demo(session: Session) -> SeedSummary:
             },
         )
 
+    current_questionnaire = questionnaires[2]
     submissions = (
         (
             "submission_v1",
-            "definition_v1",
             None,
             TIMES["submission_v1_at"],
-            {"pain": 7, "transportation": True},
+            "worse",
+            "yes",
+            "Synthetic first submission for the public demo.",
         ),
         (
             "submission_v2",
-            "definition_v2",
             ids["submission_v1"],
             TIMES["submission_v2_at"],
-            {"pain": 5, "transportation": True},
+            "same",
+            "yes",
+            "Synthetic correction retained as immutable history.",
         ),
     )
-    for submission_key, definition_key, predecessor, submitted_at, answers in submissions:
+    for (
+        submission_key,
+        predecessor,
+        submitted_at,
+        pain_change,
+        transportation,
+        free_text,
+    ) in submissions:
+        answers = {
+            "questionnaire_version": current_questionnaire["version"],
+            "questionnaire_canonical": current_questionnaire["canonical"],
+            "items": [
+                {
+                    "link_id": "pain_change",
+                    "label": (
+                        "Since your last check-in, is synthetic pain better, the same, or worse?"
+                    ),
+                    "value": pain_change,
+                },
+                {
+                    "link_id": "transportation",
+                    "label": "Need synthetic transportation support?",
+                    "value": transportation,
+                },
+            ],
+            "free_text": free_text,
+            "provenance": {
+                "source": "patient-supplied",
+                "actor_id": str(ids["patient_user"]),
+            },
+        }
         _insert(
             session,
             "INSERT INTO check_in_submission "
@@ -396,7 +444,7 @@ def seed_demo(session: Session) -> SeedSummary:
             values
             | {
                 "id": ids[submission_key],
-                "definition": ids[definition_key],
+                "definition": ids["definition_v2"],
                 "predecessor": predecessor,
                 "submitted_at": submitted_at,
                 "answers": json.dumps(answers, sort_keys=True),
@@ -1092,6 +1140,23 @@ def validate_disposable_database_url(database_url: str) -> URL:
     return url
 
 
+@contextmanager
+def without_libpq_environment() -> Iterator[None]:
+    """Make the explicit validated URL the only libpq connection route."""
+    inherited = {
+        key: value for key, value in os.environ.items() if key.upper().startswith("PG")
+    }
+    try:
+        for key in inherited:
+            os.environ.pop(key, None)
+        yield
+    finally:
+        for key in tuple(os.environ):
+            if key.upper().startswith("PG"):
+                os.environ.pop(key, None)
+        os.environ.update(inherited)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed the deterministic synthetic public demo.")
     parser.add_argument("--database-url", required=True)
@@ -1100,19 +1165,22 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
-    validated_url = validate_disposable_database_url(arguments.database_url)
-    engine = create_engine(validated_url, pool_pre_ping=True)
-    try:
-        with Session(engine) as session, session.begin():
-            summary = seed_demo(session)
-            violations = inspect_integrity(session)
-            if violations:
-                raise RuntimeError(
-                    "Synthetic seed failed integrity: "
-                    + json.dumps([violation.as_dict() for violation in violations], sort_keys=True)
-                )
-    finally:
-        engine.dispose()
+    with without_libpq_environment():
+        validated_url = validate_disposable_database_url(arguments.database_url)
+        engine = create_engine(validated_url, pool_pre_ping=True)
+        try:
+            with Session(engine) as session, session.begin():
+                summary = seed_demo(session)
+                violations = inspect_integrity(session)
+                if violations:
+                    raise RuntimeError(
+                        "Synthetic seed failed integrity: "
+                        + json.dumps(
+                            [violation.as_dict() for violation in violations], sort_keys=True
+                        )
+                    )
+        finally:
+            engine.dispose()
     print(json.dumps({"status": "seeded", **summary.as_dict()}, indent=2, sort_keys=True))
     return 0
 

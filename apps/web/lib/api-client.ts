@@ -7,11 +7,18 @@ export type NavigatorQueueResponse = paths["/v1/navigator/queue"]["get"]["respon
 export type NavigatorPatientCaseResponse = paths["/v1/navigator/patients/{patient_id}/case"]["get"]["responses"][200]["content"]["application/json"];
 
 export type ApiErrorKind = "configuration" | "correction" | "persistence";
+export type ApiErrorCode =
+  | "answers_invalid"
+  | "configuration_invalid"
+  | "correction_stale"
+  | "definition_inactive"
+  | "questionnaire_stale";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly kind: ApiErrorKind = "persistence",
+    public readonly code?: ApiErrorCode,
   ) {
     super(message);
   }
@@ -57,19 +64,44 @@ async function request<T = undefined>(path: string, init?: RequestInit): Promise
     return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
   }
   const detail = await errorDetail(response);
-  if (response.status === 422) throw new ApiError(detail, "correction");
-  if (response.status === 401 || response.status === 403 || response.status === 503) {
-    throw new ApiError(detail, "configuration");
+  if (response.status === 422) {
+    const kind = detail.code === "answers_invalid" ? "correction" : "configuration";
+    throw new ApiError(detail.message, kind, detail.code);
   }
-  throw new ApiError(detail, "persistence");
+  if (response.status === 401 || response.status === 403 || response.status === 503) {
+    throw new ApiError(detail.message, "configuration", detail.code);
+  }
+  throw new ApiError(detail.message, "persistence", detail.code);
 }
 
-async function errorDetail(response: Response): Promise<string> {
+type ErrorDetail = { code?: ApiErrorCode; message: string };
+
+async function errorDetail(response: Response): Promise<ErrorDetail> {
   try {
-    const body = (await response.json()) as { detail?: string };
-    if (body.detail) return body.detail;
+    const body = (await response.json()) as {
+      detail?: string | { code?: string; message?: string };
+    };
+    if (typeof body.detail === "string") return { message: body.detail };
+    if (body.detail && typeof body.detail.message === "string") {
+      return {
+        code: isApiErrorCode(body.detail.code) ? body.detail.code : undefined,
+        message: body.detail.message,
+      };
+    }
   } catch {
     // The public error message remains safe if a proxy or server returns a non-JSON error.
   }
-  return "We could not save your check-in. Your review is still available; please try again.";
+  return {
+    message: "We could not save your check-in. Your review is still available; please try again.",
+  };
+}
+
+function isApiErrorCode(value: unknown): value is ApiErrorCode {
+  return [
+    "answers_invalid",
+    "configuration_invalid",
+    "correction_stale",
+    "definition_inactive",
+    "questionnaire_stale",
+  ].includes(String(value));
 }

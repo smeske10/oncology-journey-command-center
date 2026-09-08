@@ -441,3 +441,110 @@ def test_disposable_target_requires_explicit_local_port_before_engine_creation(
                 "ojcc_demo_deadbeef",
             ]
         )
+
+
+LIBPQ_ENVIRONMENT_NAMES = (
+    "PGHOSTADDR",
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+    "PGSERVICE",
+    "PGSERVICEFILE",
+    "PGOPTIONS",
+    "PGTARGETSESSIONATTRS",
+    "PGLOADBALANCEHOSTS",
+    "pghost",
+    "PgSyntheticProbe",
+)
+
+
+@pytest.mark.parametrize("variable_name", LIBPQ_ENVIRONMENT_NAMES)
+def test_standalone_seed_removes_libpq_environment_before_engine_and_restores_it(
+    monkeypatch: pytest.MonkeyPatch,
+    variable_name: str,
+) -> None:
+    """Production break: inherited libpq settings can reroute a validated seed URL."""
+    original_value = f"unsafe-{variable_name}"
+    monkeypatch.setenv(variable_name, original_value)
+
+    class ExpectedEngineStop(RuntimeError):
+        pass
+
+    def inspect_environment_then_stop(*_args: object, **_kwargs: object) -> None:
+        inherited = sorted(key for key in os.environ if key.upper().startswith("PG"))
+        assert inherited == []
+        raise ExpectedEngineStop
+
+    monkeypatch.setattr(seed_demo_script, "create_engine", inspect_environment_then_stop)
+
+    with pytest.raises(ExpectedEngineStop):
+        seed_demo_script.main(
+            [
+                "--database-url",
+                "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+                "ojcc_demo_deadbeef",
+            ]
+        )
+
+    assert os.environ[variable_name] == original_value
+
+
+def test_reset_removes_all_libpq_environment_before_engine_creation(tmp_path: Path) -> None:
+    """Production break: reset child processes inherit libpq connection overrides."""
+    dirty_sentinel = "libpq environment reached engine creation"
+    clean_sentinel = "engine reached with clean libpq environment"
+    (tmp_path / "sitecustomize.py").write_text(
+        "import os\n"
+        "import sqlalchemy\n"
+        "def blocked_create_engine(*args, **kwargs):\n"
+        "    inherited = sorted(key for key in os.environ "
+        "if key.upper().startswith('PG'))\n"
+        "    if inherited:\n"
+        f"        raise AssertionError({dirty_sentinel!r} + ': ' + ','.join(inherited))\n"
+        f"    raise AssertionError({clean_sentinel!r})\n"
+        "sqlalchemy.create_engine = blocked_create_engine\n",
+        encoding="utf-8",
+    )
+    python_path = str(tmp_path)
+    if existing_python_path := os.environ.get("PYTHONPATH"):
+        python_path += os.pathsep + existing_python_path
+    unsafe_environment = os.environ | {
+        name: f"unsafe-{name}" for name in LIBPQ_ENVIRONMENT_NAMES
+    }
+    unsafe_environment["PYTHONPATH"] = python_path
+
+    result = _run_reset(
+        "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+        "ojcc_demo_deadbeef",
+        "ojcc_demo_deadbeef",
+        environment=unsafe_environment,
+    )
+    output = (result.stdout + result.stderr).lower()
+
+    assert result.returncode != 0
+    assert clean_sentinel in output
+    assert dirty_sentinel not in output
+
+
+def test_standalone_seed_restores_libpq_environment_after_validation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected target must not leak the temporary process-environment cleanup."""
+    prior_values = {
+        "PGHOST": "synthetic-remote.example.test",
+        "pgport": "6543",
+        "PgOptions": "-c search_path=synthetic",
+    }
+    for key, value in prior_values.items():
+        monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValueError, match="non-disposable database"):
+        seed_demo_script.main(
+            [
+                "--database-url",
+                "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/ojcc",
+            ]
+        )
+
+    for key, value in prior_values.items():
+        assert os.environ[key] == value

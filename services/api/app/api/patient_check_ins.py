@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -51,6 +51,21 @@ class CheckInSubmissionResponse(BaseModel):
     questionnaire_version: str
     submitted_at: str
     supersedes_submission_id: UUID | None
+
+
+class CheckInSubmissionErrorDetail(BaseModel):
+    code: Literal[
+        "answers_invalid",
+        "configuration_invalid",
+        "correction_stale",
+        "definition_inactive",
+        "questionnaire_stale",
+    ]
+    message: str
+
+
+class CheckInSubmissionErrorResponse(BaseModel):
+    detail: CheckInSubmissionErrorDetail
 
 
 def get_check_in_unit_of_work(
@@ -127,6 +142,7 @@ def get_current_check_in(
     "/{definition_id}/submissions",
     response_model=CheckInSubmissionResponse,
     status_code=201,
+    responses={422: {"model": CheckInSubmissionErrorResponse}},
 )
 def submit_check_in(
     definition_id: UUID,
@@ -172,9 +188,9 @@ def submit_check_in(
                 check_in_definition_id=definition.id,
                 organization_id=actor.organization_id,
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="Check-in definition is not active for this care episode",
+                raise _submission_error(
+                    "definition_inactive",
+                    "This check-in is no longer active. Reload the current check-in.",
                 )
             predecessor = None
             if payload.supersedes_submission_id is not None:
@@ -194,10 +210,7 @@ def submit_check_in(
             unit_of_work.add(cast(TenantScoped, submission))
             unit_of_work.commit()
     except CheckInDefinitionMismatchError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(error),
-        ) from error
+        raise _submission_error(error.code, str(error)) from error
     except SQLAlchemyError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -302,4 +315,11 @@ def _submission_response(submission: CheckInSubmission) -> CheckInSubmissionResp
         questionnaire_version=str(submission.answers["questionnaire_version"]),
         submitted_at=submission.submitted_at.isoformat() if submission.submitted_at else "",
         supersedes_submission_id=submission.supersedes_submission_id,
+    )
+
+
+def _submission_error(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": code, "message": message},
     )

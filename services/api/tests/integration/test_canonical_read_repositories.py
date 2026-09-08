@@ -447,5 +447,3 @@ def test_fhir_repository_returns_only_qualifying_approved_authorizers(
         self_approval_proposal.id: "pending",
     }
     assert decisions == {approved_proposal.id: [approved_decision]}
-    ProposedChange,
-    RoleAssignment,

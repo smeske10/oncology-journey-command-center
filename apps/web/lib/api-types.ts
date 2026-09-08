@@ -344,6 +344,20 @@ export interface components {
             /** Supersedes Submission Id */
             supersedes_submission_id?: string | null;
         };
+        /** CheckInSubmissionErrorDetail */
+        CheckInSubmissionErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "answers_invalid" | "configuration_invalid" | "correction_stale" | "definition_inactive" | "questionnaire_stale";
+            /** Message */
+            message: string;
+        };
+        /** CheckInSubmissionErrorResponse */
+        CheckInSubmissionErrorResponse: {
+            detail: components["schemas"]["CheckInSubmissionErrorDetail"];
+        };
         /** CheckInSubmissionResponse */
         CheckInSubmissionResponse: {
             /**
@@ -1060,13 +1074,13 @@ export interface operations {
                     "application/json": components["schemas"]["CheckInSubmissionResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["CheckInSubmissionErrorResponse"];
                 };
             };
         };

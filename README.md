@@ -42,6 +42,11 @@ platform-user and patient identities, historical roles, pathway/submission versi
 closed work, every safety state, approval history, workflow and knowledge lineage, and user,
 agent, policy, and system audit actors.
 
+The reset and standalone seed temporarily remove every inherited process environment variable
+whose name begins with `PG` (case-insensitive) before constructing an engine or starting migration,
+seed, and audit child processes, then restore the exact prior values in `finally`. This prevents
+libpq environment routing from overriding the single explicit, validated loopback URL.
+
 ### Restore and bulk-load integrity audit
 
 Run the audit after every restore, ETL, or bulk load that used

@@ -421,16 +421,25 @@ def test_submit_check_in_is_atomic(
 
 
 @pytest.mark.parametrize(
-    "answers, questionnaire_version",
+    "answers, questionnaire_version, expected_code",
     [
-        ([{"link_id": "nausea_change", "value": "worse"}], "tampered-version"),
-        ([{"link_id": "unknown_question", "value": "worse"}], "breast-active-v1"),
+        (
+            [{"link_id": "nausea_change", "value": "worse"}],
+            "tampered-version",
+            "questionnaire_stale",
+        ),
+        (
+            [{"link_id": "unknown_question", "value": "worse"}],
+            "breast-active-v1",
+            "answers_invalid",
+        ),
         (
             [
                 {"link_id": "nausea_change", "value": "worse"},
                 {"link_id": "nausea_change", "value": "same"},
             ],
             "breast-active-v1",
+            "answers_invalid",
         ),
     ],
 )
@@ -440,6 +449,7 @@ def test_submission_rejects_definition_mismatches_without_committing(
     client_context: tuple[FakeSession, CurrentActor],
     answers: list[dict[str, str]],
     questionnaire_version: str,
+    expected_code: str,
 ) -> None:
     """This fails if client claims can change the immutable questionnaire source record."""
     session, _ = client_context
@@ -460,11 +470,8 @@ def test_submission_rejects_definition_mismatches_without_committing(
     response = asyncio.run(submit())
 
     assert response.status_code == 422
-    assert (
-        "does not match" in response.text
-        or "known" in response.text
-        or "repeat" in response.text
-    )
+    assert response.json()["detail"]["code"] == expected_code
+    assert response.json()["detail"]["message"]
     assert session.committed is False
     assert session.rolled_back is True
     assert session.submissions == {}
@@ -497,7 +504,8 @@ def test_submission_requires_every_required_definition_answer(
     response = asyncio.run(submit())
 
     assert response.status_code == 422
-    assert "required" in response.text
+    assert response.json()["detail"]["code"] == "answers_invalid"
+    assert "required" in response.json()["detail"]["message"].lower()
     assert session.committed is False
     assert session.rolled_back is True
     assert session.submissions == {}
@@ -562,7 +570,46 @@ def test_submission_rejects_a_definition_outside_the_episode_pathway(
     response = asyncio.run(submit())
 
     assert response.status_code == 422
-    assert response.json() == {"detail": "Check-in definition is not active for this care episode"}
+    assert response.json() == {
+        "detail": {
+            "code": "definition_inactive",
+            "message": "This check-in is no longer active. Reload the current check-in.",
+        }
+    }
+    assert session.committed is False
+    assert session.submissions == {}
+
+
+def test_first_submission_request_validation_returns_a_correctable_error_code(
+    patient_cookie: dict[str, str],
+    check_in_definition: CheckInDefinition,
+    client_context: tuple[FakeSession, CurrentActor],
+) -> None:
+    """Production break: an invalid first submission has no machine-readable recovery path."""
+    session, _ = client_context
+
+    async def submit() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver", cookies=patient_cookie
+        ) as client:
+            return await client.post(
+                f"/v1/patient/check-ins/{check_in_definition.id}/submissions",
+                json={
+                    "questionnaire_version": "breast-active-v1",
+                    "answers": [],
+                },
+            )
+
+    response = asyncio.run(submit())
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "answers_invalid",
+            "message": "Please review the answers and try again.",
+        }
+    }
     assert session.committed is False
     assert session.submissions == {}
 

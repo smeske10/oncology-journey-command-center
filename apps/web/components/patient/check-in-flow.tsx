@@ -28,10 +28,11 @@ type Draft = { answers: Record<string, string>; freeText: string };
 
 type CheckInFlowProps = {
   definition: PatientCheckInDefinition;
+  onConfigurationError?: () => Promise<void>;
   onSubmit: (submission: CheckInSubmissionInput) => Promise<unknown>;
 };
 
-export function CheckInFlow({ definition, onSubmit }: CheckInFlowProps) {
+export function CheckInFlow({ definition, onConfigurationError, onSubmit }: CheckInFlowProps) {
   const [stage, setStage] = useState<FlowStage>("question");
   const draftKey = `ojcc-check-in:${definition.id}`;
   const [draft, setDraft] = useState<Draft>(() => readDraft(draftKey));
@@ -74,6 +75,10 @@ export function CheckInFlow({ definition, onSubmit }: CheckInFlowProps) {
         setError(submissionError.message);
         setQuestionIndex(0);
         setStage("question");
+      } else if (submissionError instanceof ApiError && submissionError.kind === "configuration") {
+        setError(submissionError.message);
+        setStage("review");
+        await onConfigurationError?.();
       } else {
         setError("We couldn't save your check-in. Your review is still here—please try again.");
         setStage("review");

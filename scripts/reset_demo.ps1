@@ -10,6 +10,13 @@ $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $apiRoot = Join-Path $projectRoot "services/api"
 $priorDatabaseUrl = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
+$priorLibpqEnvironment = @{}
+
+Get-ChildItem Env: | Where-Object {
+    $_.Name.StartsWith("PG", [System.StringComparison]::OrdinalIgnoreCase)
+} | ForEach-Object {
+    $priorLibpqEnvironment[$_.Name] = $_.Value
+}
 
 function Invoke-CheckedPython {
     param([scriptblock]$Command)
@@ -20,8 +27,13 @@ function Invoke-CheckedPython {
     }
 }
 
-Push-Location $apiRoot
+$locationPushed = $false
 try {
+    foreach ($name in $priorLibpqEnvironment.Keys) {
+        Remove-Item -LiteralPath ("Env:{0}" -f $name)
+    }
+    Push-Location $apiRoot
+    $locationPushed = $true
     $resetCode = @'
 import sys
 from sqlalchemy import create_engine, text
@@ -59,11 +71,21 @@ finally:
     Invoke-CheckedPython { python scripts/check_integrity.py --database-url $DatabaseUrl }
 }
 finally {
+    Get-ChildItem Env: | Where-Object {
+        $_.Name.StartsWith("PG", [System.StringComparison]::OrdinalIgnoreCase)
+    } | ForEach-Object {
+        Remove-Item -LiteralPath ("Env:{0}" -f $_.Name)
+    }
+    foreach ($entry in $priorLibpqEnvironment.GetEnumerator()) {
+        [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
     if ($null -eq $priorDatabaseUrl) {
         [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $null, "Process")
     }
     else {
         [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $priorDatabaseUrl, "Process")
     }
-    Pop-Location
+    if ($locationPushed) {
+        Pop-Location
+    }
 }

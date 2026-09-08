@@ -288,6 +288,43 @@
         "title": "CheckInSubmissionCreate",
         "type": "object"
       },
+      "CheckInSubmissionErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "answers_invalid",
+              "configuration_invalid",
+              "correction_stale",
+              "definition_inactive",
+              "questionnaire_stale"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "CheckInSubmissionErrorDetail",
+        "type": "object"
+      },
+      "CheckInSubmissionErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CheckInSubmissionErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "CheckInSubmissionErrorResponse",
+        "type": "object"
+      },
       "CheckInSubmissionResponse": {
         "properties": {
           "id": {
@@ -1699,11 +1736,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/CheckInSubmissionErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Submit Check In",

@@ -74,6 +74,10 @@ class CheckInSubmissionCreate(BaseModel):
 class CheckInDefinitionMismatchError(ValueError):
     """The submitted source data does not match the tenant-scoped questionnaire definition."""
 
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 def _contains_real_phi(value: Any, key: str | None = None) -> bool:
     if key is not None and key.lower() in _NON_CONTENT_FIELDS:
@@ -103,7 +107,8 @@ def create_immutable_submission(
     _validate_submission_against_definition(definition, payload)
     if actor.patient_id is None:
         raise CheckInDefinitionMismatchError(
-            "Patient identity link is required to submit a check-in"
+            "Patient identity link is required to submit a check-in",
+            code="configuration_invalid",
         )
     _validate_correction_predecessor(
         actor=actor,
@@ -153,10 +158,15 @@ def _validate_correction_predecessor(
 ) -> None:
     if payload.supersedes_submission_id is None:
         if predecessor is not None:
-            raise CheckInDefinitionMismatchError("Correction predecessor was not requested")
+            raise CheckInDefinitionMismatchError(
+                "Correction predecessor was not requested", code="correction_stale"
+            )
         return
     if predecessor is None or predecessor.id != payload.supersedes_submission_id:
-        raise CheckInDefinitionMismatchError("Correction must supersede the active submission")
+        raise CheckInDefinitionMismatchError(
+            "A newer check-in is available. Reload before correcting it.",
+            code="correction_stale",
+        )
     if (
         predecessor.organization_id != actor.organization_id
         or predecessor.patient_id != actor.patient_id
@@ -164,7 +174,8 @@ def _validate_correction_predecessor(
         or predecessor.check_in_definition_id != definition.id
     ):
         raise CheckInDefinitionMismatchError(
-            "Correction predecessor does not match this patient check-in"
+            "A newer check-in is available. Reload before correcting it.",
+            code="correction_stale",
         )
 
 
@@ -191,22 +202,31 @@ def _validate_submission_against_definition(
 ) -> None:
     expected_version = questionnaire_version_for(definition)
     if payload.questionnaire_version != expected_version:
-        raise CheckInDefinitionMismatchError("Questionnaire version does not match this check-in")
+        raise CheckInDefinitionMismatchError(
+            "This check-in has changed. Reload the current check-in before submitting.",
+            code="questionnaire_stale",
+        )
 
     questions = _questions_by_link_id(definition.questionnaire)
     submitted_link_ids = [answer.link_id for answer in payload.answers]
     unknown_link_ids = set(submitted_link_ids) - set(questions)
     if unknown_link_ids:
-        raise CheckInDefinitionMismatchError("Answers must use known questionnaire link IDs")
+        raise CheckInDefinitionMismatchError(
+            "Answers must use known questionnaire link IDs", code="answers_invalid"
+        )
     if len(submitted_link_ids) != len(set(submitted_link_ids)):
-        raise CheckInDefinitionMismatchError("Answers must not repeat questionnaire link IDs")
+        raise CheckInDefinitionMismatchError(
+            "Answers must not repeat questionnaire link IDs", code="answers_invalid"
+        )
 
     required_link_ids = {
         link_id for link_id, question in questions.items() if question.get("required", True) is True
     }
     missing_link_ids = required_link_ids - set(submitted_link_ids)
     if missing_link_ids:
-        raise CheckInDefinitionMismatchError("Please answer every required questionnaire item")
+        raise CheckInDefinitionMismatchError(
+            "Please answer every required questionnaire item", code="answers_invalid"
+        )
 
 
 def _questions_by_link_id(questionnaire: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
