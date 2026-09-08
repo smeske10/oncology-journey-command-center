@@ -189,12 +189,9 @@ def _row_counts(session: Session) -> dict[str, int]:
     return counts
 
 
-def seed_demo(session: Session) -> SeedSummary:
-    """Insert one fixed, entirely synthetic and idempotent reconciled-domain dataset."""
-    ids = DEMO_IDS
-    values: dict[str, Any] = ids | TIMES
-    session.execute(text("SET LOCAL session_replication_role = replica"))
-
+def _seed_identity_and_pathways(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
     _insert(
         session,
         "INSERT INTO organization (id, name, created_at) VALUES "
@@ -332,6 +329,10 @@ def seed_demo(session: Session) -> SeedSummary:
             },
         )
 
+
+def _seed_check_ins(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
     questionnaires: dict[int, dict[str, Any]] = {}
     for version, definition_key, pathway_key in (
         (1, "definition_v1", "pathway_v1"),
@@ -508,6 +509,10 @@ def seed_demo(session: Session) -> SeedSummary:
         values,
     )
 
+
+def _seed_signals_and_workflows(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
     for rule_key, code, kind, name in (
         (
             "deterministic_rule",
@@ -768,6 +773,10 @@ def seed_demo(session: Session) -> SeedSummary:
         values | {"retry_context": json.dumps({"attempt": 1, "synthetic": True})},
     )
 
+
+def _seed_approvals(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
     task_value = {
         "title": "Review synthetic recurrence",
         "resources": [
@@ -1013,6 +1022,10 @@ def seed_demo(session: Session) -> SeedSummary:
         values,
     )
 
+
+def _seed_audit_events(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
     audit_rows = (
         (
             "audit_user",
@@ -1120,6 +1133,17 @@ def seed_demo(session: Session) -> SeedSummary:
             },
         )
 
+
+def seed_demo(session: Session) -> SeedSummary:
+    """Insert one fixed, entirely synthetic and idempotent reconciled-domain dataset."""
+    ids = DEMO_IDS
+    values: dict[str, Any] = ids | TIMES
+    session.execute(text("SET LOCAL session_replication_role = replica"))
+    _seed_identity_and_pathways(session, ids, values)
+    _seed_check_ins(session, ids, values)
+    _seed_signals_and_workflows(session, ids, values)
+    _seed_approvals(session, ids, values)
+    _seed_audit_events(session, ids, values)
     session.execute(text("SET LOCAL session_replication_role = origin"))
     return SeedSummary(organization_id=ids["organization"], row_counts=_row_counts(session))
 
