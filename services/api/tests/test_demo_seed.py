@@ -403,9 +403,12 @@ def test_seed_preserves_database_error_until_the_caller_rolls_back(
                 seed_demo_script, "_seed_check_ins", fail_with_database_error
             )
 
-            with pytest.raises(SQLAlchemyError):
+            with pytest.raises(SQLAlchemyError) as caught:
                 seed_demo(session)
 
+            assert "table_that_does_not_exist" in str(
+                getattr(caught.value, "statement", "")
+            )
             assert transaction.is_active
             transaction.rollback()
             assert session.scalar(text("SHOW session_replication_role")) == "origin"
