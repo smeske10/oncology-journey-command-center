@@ -46,7 +46,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 - Package 1 — Persistence and invariant tests: complete; focused checkpoint gate `34 passed`.
 - Package 2 — Navigator reads and compatible review: complete; focused checkpoint gate `117 passed`.
-- Package 3 — Task command services and concurrency: pending.
+- Package 3 — Task command services and concurrency: complete; focused checkpoint gate `81 passed`.
 - Package 4 — Patient response, timelines and resolution safety: pending.
 - Package 5 — Seeded UI and live browser-to-database journey: pending.
 - Package 6 — Reproducible verification and handoff: pending.
@@ -74,18 +74,28 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 2 focused command: `117 passed in 8.29s` across workspace, review, approvals, check-ins, and navigator queue tests.
 - Package 2 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
 - Package 2 contract review: two consecutive generator passes were byte-identical; the route comparison found no removed paths and exactly one addition, `/v1/navigator/needs/{need_id}/workspace`; old explicit approval-role clients remain accepted.
+- Package 3 claim RED: an exact approved proposal received route `404`. GREEN: claim uses need → exact proposal → refreshed task → active-role locking, copies the approved title, derives the signed actor as owner, normalizes an aware future due time, and returns the database-authored claim state/audit.
+- Package 3 transition RED: start and complete routes returned `404`. GREEN: only the bound assignee can move assigned → in-progress → completed, and completion returns the trigger-authored immutable request without inserting a service duplicate.
+- Package 3 boundary coverage: pending, superseded, wrong-target, foreign, closed, historical-unbound, naive/past due, changed claim tuple, wrong owner, revoked authority, injected identity fields, v1/v2 and multiple-root cases all return the specified safe result without granting execution.
+- Package 3 replay coverage: exact claim/start/complete retries return `replayed=true`; a completed task retains the same task/request/timestamps after Outcome and after its due instant; replay emits no duplicate transition audit or request.
+- Package 3 concurrency RED: a second transaction reused the pre-lock SQLAlchemy task state, producing `task_state_conflict` instead of `task_claim_mismatch` and misreporting concurrent completion as first-run. GREEN: the post-need-lock task query refreshes the identity map; committed two-session tests now pass for claim/claim, complete/complete, and both orderings of start/Outcome and complete/Outcome with a bounded lock timeout and final-row assertions.
+- Package 3 focused command: `81 passed in 8.51s` across task commands, task concurrency, persistence guards, Outcomes, and need/task lifecycle integration.
+- Package 3 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
+- Package 3 test-fixture note: the committed concurrency aggregate and exact organization teardown live in `closed_loop/conftest.py` so real independent connections can observe the same rows; teardown disables triggers only inside its owned synthetic organization and deletes explicit tenant-scoped tables.
 
 ## Contract hashes
 
 - Baseline generation completed twice with identical hashes: OpenAPI `2EEC25C...D1428`; TypeScript `192BD4F...CDCDD0`.
 - Package 2 generation completed twice with identical hashes: OpenAPI `B13F5DAE25DE119D999848559E3644B6A9D2A5398915BBE1966517CC48BFB8B0`; TypeScript `08572A570973D0B497CDC718E754CD8456D7A0AEBCB776ECCA805D6CE0B500F8`.
+- Package 3 generation completed twice with identical hashes: OpenAPI `9916699F12F2E05DD8805DBB8DEF6810705C7687F546322023000E935DCDB799`; TypeScript `86C8EF5C1893E6B0A3DF116DABF22C596FFE219C781CC71369199F6F71BA502B`. Contract review found no removed paths and exactly the claim/start/complete route additions; task status remains an explicit enum.
 
 ## Checkpoint commits
 
 - `67af3c6` — preserved the byte-identical approved plan on the feature branch.
 - `eca440a` — started the approval/baseline progress ledger.
 - `1e7ee41` — `feat: persist approved task execution and follow-up history`.
-- Package 2 checkpoint prepared with message `feat: expose evidence and governed task proposal review`.
+- `2a33d37` — `feat: expose evidence and governed task proposal review`.
+- Package 3 checkpoint prepared with message `feat: operate approved navigator tasks safely`.
 
 ## Decisions and conflicts
 
@@ -93,4 +103,4 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## Next exact step
 
-Commit the reviewed Package 2 files explicitly, then begin Package 3 with failing task command and concurrency tests. No Package 4 work may begin before the Package 3 checkpoint.
+Commit the reviewed Package 3 files explicitly, then begin Package 4 with failing patient follow-up and audience-specific timeline tests. No Package 5 work may begin before the Package 4 checkpoint.

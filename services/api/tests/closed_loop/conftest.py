@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import make_url
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.dependencies import current_actor
@@ -326,6 +326,48 @@ def closed_loop_case(closed_loop_session: Session) -> ClosedLoopCase:
 @pytest.fixture
 def approved_closed_loop_case(closed_loop_session: Session) -> ClosedLoopCase:
     return _seed_closed_loop_case(closed_loop_session, approve=True)
+
+
+@pytest.fixture
+def committed_closed_loop_case() -> Iterator[tuple[Engine, ClosedLoopCase]]:
+    """Committed aggregate owned by one test for real multi-connection races."""
+    if not _database_is_reachable(settings.database_url):
+        pytest.skip("PostgreSQL DATABASE_URL is not reachable for closed-loop tests")
+    engine = create_engine(settings.database_url)
+    with Session(engine, expire_on_commit=False) as session:
+        case = _seed_closed_loop_case(session, approve=True)
+        session.commit()
+    try:
+        yield engine, case
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text("SET LOCAL session_replication_role = replica"))
+            parameters = {"organization_id": case.organization_id}
+            for statement in (
+                "DELETE FROM follow_up_response WHERE organization_id = :organization_id",
+                "DELETE FROM follow_up_request WHERE organization_id = :organization_id",
+                "DELETE FROM audit_event WHERE organization_id = :organization_id",
+                "DELETE FROM outcome WHERE organization_id = :organization_id",
+                "DELETE FROM navigation_task_resource WHERE organization_id = :organization_id",
+                "DELETE FROM approval_decision WHERE organization_id = :organization_id",
+                "DELETE FROM proposed_change WHERE organization_id = :organization_id",
+                "DELETE FROM approval_policy WHERE organization_id = :organization_id",
+                "DELETE FROM navigation_task WHERE organization_id = :organization_id",
+                "DELETE FROM reported_need WHERE organization_id = :organization_id",
+                "DELETE FROM check_in_submission WHERE organization_id = :organization_id",
+                "DELETE FROM episode_pathway_assignment WHERE organization_id = :organization_id",
+                "DELETE FROM check_in_definition WHERE organization_id = :organization_id",
+                "DELETE FROM care_episode WHERE organization_id = :organization_id",
+                "DELETE FROM pathway_definition WHERE organization_id = :organization_id",
+                "DELETE FROM patient_identity_link WHERE organization_id = :organization_id",
+                "DELETE FROM role_assignment WHERE organization_id = :organization_id",
+                "DELETE FROM synthetic_patient WHERE organization_id = :organization_id",
+                "DELETE FROM user_account WHERE primary_organization_id = :organization_id",
+                "DELETE FROM organization WHERE id = :organization_id",
+            ):
+                connection.execute(text(statement), parameters)
+            connection.execute(text("SET LOCAL session_replication_role = origin"))
+        engine.dispose()
 
 
 @pytest.fixture

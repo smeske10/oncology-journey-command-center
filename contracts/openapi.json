@@ -404,6 +404,12 @@
         "title": "ComparisonDeltaRead",
         "type": "object"
       },
+      "EmptyTaskCommand": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "EmptyTaskCommand",
+        "type": "object"
+      },
       "EvidenceRead": {
         "properties": {
           "field": {
@@ -497,6 +503,17 @@
         ],
         "title": "NavigationTaskRead",
         "type": "object"
+      },
+      "NavigationTaskStatus": {
+        "enum": [
+          "open",
+          "assigned",
+          "in_progress",
+          "completed",
+          "cancelled"
+        ],
+        "title": "NavigationTaskStatus",
+        "type": "string"
       },
       "NavigatorNeedWorkspaceRead": {
         "properties": {
@@ -1369,6 +1386,121 @@
           "provenance"
         ],
         "title": "SubmissionRead",
+        "type": "object"
+      },
+      "TaskClaimCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "due_at": {
+            "format": "date-time",
+            "title": "Due At",
+            "type": "string"
+          },
+          "proposed_change_id": {
+            "format": "uuid",
+            "title": "Proposed Change Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposed_change_id",
+          "due_at"
+        ],
+        "title": "TaskClaimCreate",
+        "type": "object"
+      },
+      "TaskCommandRead": {
+        "properties": {
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "authorized_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized Proposed Change Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "follow_up_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Request Id"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NavigationTaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "need_id",
+          "status",
+          "assignee_user_id",
+          "due_at",
+          "authorized_proposed_change_id",
+          "completed_at",
+          "follow_up_request_id",
+          "replayed"
+        ],
+        "title": "TaskCommandRead",
         "type": "object"
       },
       "UserRole": {
@@ -2560,6 +2692,165 @@
           }
         },
         "summary": "Post Resolution",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/tasks/{task_id}/claim": {
+      "post": {
+        "operationId": "claim_task_v1_navigator_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskClaimCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Task",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/tasks/{task_id}/complete": {
+      "post": {
+        "operationId": "complete_task_v1_navigator_tasks__task_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyTaskCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Task",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/tasks/{task_id}/start": {
+      "post": {
+        "operationId": "start_task_v1_navigator_tasks__task_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyTaskCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Task",
         "tags": [
           "navigator"
         ]

@@ -191,6 +191,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/tasks/{task_id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim Task */
+        post: operations["claim_task_v1_navigator_tasks__task_id__claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/tasks/{task_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Task */
+        post: operations["complete_task_v1_navigator_tasks__task_id__complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/tasks/{task_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Task */
+        post: operations["start_task_v1_navigator_tasks__task_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/patient/check-ins/current": {
         parameters: {
             query?: never;
@@ -399,6 +450,8 @@ export interface components {
             previous_present: boolean;
             previous_value: components["schemas"]["JsonValue"];
         };
+        /** EmptyTaskCommand */
+        EmptyTaskCommand: Record<string, never>;
         /** EvidenceRead */
         EvidenceRead: {
             /** Field */
@@ -438,6 +491,11 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * NavigationTaskStatus
+         * @enum {string}
+         */
+        NavigationTaskStatus: "open" | "assigned" | "in_progress" | "completed" | "cancelled";
         /** NavigatorNeedWorkspaceRead */
         NavigatorNeedWorkspaceRead: {
             comparisons: components["schemas"]["WorkspaceComparisonsRead"];
@@ -767,6 +825,45 @@ export interface components {
             };
             /** Submitted At */
             submitted_at: string | null;
+        };
+        /** TaskClaimCreate */
+        TaskClaimCreate: {
+            /**
+             * Due At
+             * Format: date-time
+             */
+            due_at: string;
+            /**
+             * Proposed Change Id
+             * Format: uuid
+             */
+            proposed_change_id: string;
+        };
+        /** TaskCommandRead */
+        TaskCommandRead: {
+            /** Assignee User Id */
+            assignee_user_id: string | null;
+            /** Authorized Proposed Change Id */
+            authorized_proposed_change_id: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Due At */
+            due_at: string | null;
+            /** Follow Up Request Id */
+            follow_up_request_id: string | null;
+            /**
+             * Need Id
+             * Format: uuid
+             */
+            need_id: string;
+            /** Replayed */
+            replayed: boolean;
+            status: components["schemas"]["NavigationTaskStatus"];
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
         };
         /**
          * UserRole
@@ -1391,6 +1488,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolutionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claim_task_v1_navigator_tasks__task_id__claim_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskClaimCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_task_v1_navigator_tasks__task_id__complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmptyTaskCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_task_v1_navigator_tasks__task_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmptyTaskCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandRead"];
                 };
             };
             /** @description Validation Error */
