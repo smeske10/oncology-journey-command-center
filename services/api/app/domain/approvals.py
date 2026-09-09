@@ -26,6 +26,7 @@ from app.domain.enums import (
     ApprovalDecisionValue,
     SafetySeverity,
 )
+from app.domain.public_demo import validate_public_demo_text
 from app.domain.safety import severity_rank
 
 logger = logging.getLogger(__name__)
@@ -302,11 +303,12 @@ def record_decision(
     organization_id: UUID,
     proposed_change_id: UUID,
     authorized_by_user_id: UUID,
-    qualifying_role_assignment_id: UUID,
+    qualifying_role_assignment_id: UUID | None,
     decision: str | ApprovalDecisionValue,
     reason: str | None,
 ) -> DecisionResult:
     decision_value = ApprovalDecisionValue(decision)
+    validate_public_demo_text(reason)
     if decision_value is ApprovalDecisionValue.DECLINED and not (reason and reason.strip()):
         raise ValueError("Decline reason is required")
     proposal = session.scalar(
@@ -320,18 +322,26 @@ def record_decision(
     if proposal is None:
         raise ProposalNotFound("Proposed change not found")
     authorized_at = datetime.now(UTC)
-    assignment = session.scalar(
-        select(RoleAssignment).where(
+    assignment_statement = select(RoleAssignment).where(
+        RoleAssignment.organization_id == organization_id,
+        RoleAssignment.user_id == authorized_by_user_id,
+        RoleAssignment.role == proposal.required_approver_role_snapshot,
+        RoleAssignment.granted_at <= authorized_at,
+        (
+            RoleAssignment.revoked_at.is_(None)
+            | (authorized_at < RoleAssignment.revoked_at)
+        ),
+    )
+    if qualifying_role_assignment_id is not None:
+        assignment_statement = assignment_statement.where(
             RoleAssignment.id == qualifying_role_assignment_id,
-            RoleAssignment.organization_id == organization_id,
-            RoleAssignment.user_id == authorized_by_user_id,
-            RoleAssignment.role == proposal.required_approver_role_snapshot,
-            RoleAssignment.granted_at <= authorized_at,
-            (
-                RoleAssignment.revoked_at.is_(None)
-                | (authorized_at < RoleAssignment.revoked_at)
-            ),
         )
+    assignment = session.scalar(
+        assignment_statement.order_by(
+            RoleAssignment.granted_at.desc(), RoleAssignment.id.asc()
+        )
+        .limit(1)
+        .with_for_update()
     )
     if assignment is None:
         raise ApprovalForbidden("Role assignment does not qualify for this proposal")

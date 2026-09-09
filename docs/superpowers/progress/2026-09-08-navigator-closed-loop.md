@@ -45,7 +45,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 ## Package status
 
 - Package 1 — Persistence and invariant tests: complete; focused checkpoint gate `34 passed`.
-- Package 2 — Navigator reads and compatible review: pending.
+- Package 2 — Navigator reads and compatible review: complete; focused checkpoint gate `117 passed`.
 - Package 3 — Task command services and concurrency: pending.
 - Package 4 — Patient response, timelines and resolution safety: pending.
 - Package 5 — Seeded UI and live browser-to-database journey: pending.
@@ -67,16 +67,25 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 1 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
 - Package 1 schema/seed checks: Alembic current `0006_navigator_closed_loop (head)`; Alembic check reports no drift; reset plus two identical seed passes succeeded; integrity reports zero violations.
 - Immutable migration hashes 0001–0005 rechecked and exactly match the preflight values above.
+- Package 2 workspace RED: the need-scoped navigator route returned `404` because no typed evidence/review projection existed. GREEN: the tenant-scoped workspace exposes exact active source lineage, labels corrections separately from independent observations, preserves absent versus null values, uses deterministic root-time/UUID ordering, and leaves inherited recurrence evidence source-free.
+- Package 2 proposal RED: multiple proposal roots, revision state, v2 resource snapshots, and unsupported historical schemas had no review surface. GREEN: v1/v2 roots, exact policy/decision/resource snapshots, effective revision states, and unsupported-but-visible non-actionable history are projected without selecting a synthetic "latest" authorization.
+- Package 2 authority RED: omitting `qualifying_role_assignment_id` failed request validation. GREEN: the server deterministically resolves the newest active matching role interval while preserving explicit-ID compatibility, tenant/user/role checks, revocation behavior, and the existing self-approval rule.
+- Package 2 PHI RED: newly exposed approval reason prose accepted contact details. GREEN: one shared public-demo prose guard protects check-in and approval text while excluding identifier/timestamp fields from content scanning.
+- Package 2 focused command: `117 passed in 8.29s` across workspace, review, approvals, check-ins, and navigator queue tests.
+- Package 2 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
+- Package 2 contract review: two consecutive generator passes were byte-identical; the route comparison found no removed paths and exactly one addition, `/v1/navigator/needs/{need_id}/workspace`; old explicit approval-role clients remain accepted.
 
 ## Contract hashes
 
 - Baseline generation completed twice with identical hashes: OpenAPI `2EEC25C...D1428`; TypeScript `192BD4F...CDCDD0`.
+- Package 2 generation completed twice with identical hashes: OpenAPI `B13F5DAE25DE119D999848559E3644B6A9D2A5398915BBE1966517CC48BFB8B0`; TypeScript `08572A570973D0B497CDC718E754CD8456D7A0AEBCB776ECCA805D6CE0B500F8`.
 
 ## Checkpoint commits
 
 - `67af3c6` — preserved the byte-identical approved plan on the feature branch.
 - `eca440a` — started the approval/baseline progress ledger.
-- Package 1 checkpoint prepared with message `feat: persist approved task execution and follow-up history`.
+- `1e7ee41` — `feat: persist approved task execution and follow-up history`.
+- Package 2 checkpoint prepared with message `feat: expose evidence and governed task proposal review`.
 
 ## Decisions and conflicts
 
@@ -84,4 +93,4 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## Next exact step
 
-Commit the reviewed Package 1 files explicitly, then begin Package 2 with failing navigator workspace/review contract tests. No Package 3 work may begin before the Package 2 checkpoint.
+Commit the reviewed Package 2 files explicitly, then begin Package 3 with failing task command and concurrency tests. No Package 4 work may begin before the Package 3 checkpoint.

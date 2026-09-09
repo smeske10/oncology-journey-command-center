@@ -92,9 +92,16 @@
             "$ref": "#/components/schemas/ApprovalDecisionValue"
           },
           "qualifying_role_assignment_id": {
-            "format": "uuid",
-            "title": "Qualifying Role Assignment Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualifying Role Assignment Id"
           },
           "reason": {
             "anyOf": [
@@ -110,8 +117,7 @@
           }
         },
         "required": [
-          "decision",
-          "qualifying_role_assignment_id"
+          "decision"
         ],
         "title": "ApprovalDecisionCreate",
         "type": "object"
@@ -367,6 +373,37 @@
         "title": "CheckInSubmissionResponse",
         "type": "object"
       },
+      "ComparisonDeltaRead": {
+        "properties": {
+          "current_present": {
+            "title": "Current Present",
+            "type": "boolean"
+          },
+          "current_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "field_identifier": {
+            "title": "Field Identifier",
+            "type": "string"
+          },
+          "previous_present": {
+            "title": "Previous Present",
+            "type": "boolean"
+          },
+          "previous_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "required": [
+          "field_identifier",
+          "previous_present",
+          "current_present",
+          "previous_value",
+          "current_value"
+        ],
+        "title": "ComparisonDeltaRead",
+        "type": "object"
+      },
       "EvidenceRead": {
         "properties": {
           "field": {
@@ -398,6 +435,7 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "JsonValue": {},
       "NavigationTaskRead": {
         "properties": {
           "created_at": {
@@ -460,6 +498,65 @@
         "title": "NavigationTaskRead",
         "type": "object"
       },
+      "NavigatorNeedWorkspaceRead": {
+        "properties": {
+          "comparisons": {
+            "$ref": "#/components/schemas/WorkspaceComparisonsRead"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "follow_ups": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceFollowUpRead"
+            },
+            "title": "Follow Ups",
+            "type": "array"
+          },
+          "need": {
+            "$ref": "#/components/schemas/WorkspaceNeedRead"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceOutcomeRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceTaskRead"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "timeline": {
+            "items": {
+              "$ref": "#/components/schemas/NavigatorTimelineEventRead"
+            },
+            "title": "Timeline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "need",
+          "evidence",
+          "comparisons",
+          "tasks",
+          "follow_ups",
+          "outcome",
+          "timeline"
+        ],
+        "title": "NavigatorNeedWorkspaceRead",
+        "type": "object"
+      },
       "NavigatorQueueRead": {
         "properties": {
           "items": {
@@ -474,6 +571,36 @@
           "items"
         ],
         "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "NavigatorTimelineEventRead": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "occurred_at",
+          "label"
+        ],
+        "title": "NavigatorTimelineEventRead",
         "type": "object"
       },
       "OutcomeCommandCreate": {
@@ -1136,6 +1263,60 @@
         "title": "SafetySignalRead",
         "type": "object"
       },
+      "SubmissionComparisonRead": {
+        "properties": {
+          "current_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Submission Id"
+          },
+          "deltas": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonDeltaRead"
+            },
+            "title": "Deltas",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "previous_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Submission Id"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "insufficient_history",
+              "not_comparable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "label"
+        ],
+        "title": "SubmissionComparisonRead",
+        "type": "object"
+      },
       "SubmissionRead": {
         "properties": {
           "free_text": {
@@ -1237,6 +1418,672 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceApprovalDecisionRead": {
+        "properties": {
+          "authorized_at": {
+            "format": "date-time",
+            "title": "Authorized At",
+            "type": "string"
+          },
+          "authorized_by_user_id": {
+            "format": "uuid",
+            "title": "Authorized By User Id",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "qualifying_role_assignment_id": {
+            "format": "uuid",
+            "title": "Qualifying Role Assignment Id",
+            "type": "string"
+          },
+          "qualifying_role_snapshot": {
+            "title": "Qualifying Role Snapshot",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "authorized_by_user_id",
+          "qualifying_role_assignment_id",
+          "qualifying_role_snapshot",
+          "decision",
+          "authorized_at",
+          "reason"
+        ],
+        "title": "WorkspaceApprovalDecisionRead",
+        "type": "object"
+      },
+      "WorkspaceApprovalPolicyRead": {
+        "properties": {
+          "allow_self_approval": {
+            "title": "Allow Self Approval",
+            "type": "boolean"
+          },
+          "deterministic_severity_threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deterministic Severity Threshold"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "required_approval_count": {
+            "title": "Required Approval Count",
+            "type": "integer"
+          },
+          "required_approver_role": {
+            "title": "Required Approver Role",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "allow_self_approval",
+          "required_approval_count",
+          "required_approver_role",
+          "deterministic_severity_threshold"
+        ],
+        "title": "WorkspaceApprovalPolicyRead",
+        "type": "object"
+      },
+      "WorkspaceComparisonsRead": {
+        "properties": {
+          "between_check_ins": {
+            "$ref": "#/components/schemas/SubmissionComparisonRead"
+          },
+          "correction": {
+            "$ref": "#/components/schemas/SubmissionComparisonRead"
+          }
+        },
+        "required": [
+          "correction",
+          "between_check_ins"
+        ],
+        "title": "WorkspaceComparisonsRead",
+        "type": "object"
+      },
+      "WorkspaceEvidenceRead": {
+        "properties": {
+          "display_text": {
+            "title": "Display Text",
+            "type": "string"
+          },
+          "field_identifier": {
+            "title": "Field Identifier",
+            "type": "string"
+          },
+          "provenance_kind": {
+            "enum": [
+              "source_submission",
+              "inherited_history",
+              "stored_need_evidence"
+            ],
+            "title": "Provenance Kind",
+            "type": "string"
+          },
+          "source_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Submission Id"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "value_present": {
+            "title": "Value Present",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_submission_id",
+          "field_identifier",
+          "value_present",
+          "value",
+          "display_text",
+          "provenance_kind"
+        ],
+        "title": "WorkspaceEvidenceRead",
+        "type": "object"
+      },
+      "WorkspaceFollowUpRead": {
+        "properties": {
+          "navigation_task_id": {
+            "format": "uuid",
+            "title": "Navigation Task Id",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "integer"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "response_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Note"
+          },
+          "status": {
+            "enum": [
+              "awaiting_response",
+              "answered",
+              "unavailable_need_closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "navigation_task_id",
+          "requested_by_user_id",
+          "requested_at",
+          "prompt_version",
+          "status",
+          "response",
+          "response_note",
+          "responded_at"
+        ],
+        "title": "WorkspaceFollowUpRead",
+        "type": "object"
+      },
+      "WorkspaceNeedRead": {
+        "properties": {
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_state": {
+            "title": "Effective State",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "raw_status": {
+            "title": "Raw Status",
+            "type": "string"
+          },
+          "reopened_from_need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopened From Need Id"
+          }
+        },
+        "required": [
+          "id",
+          "patient_id",
+          "care_episode_id",
+          "patient_display_name",
+          "kind",
+          "raw_status",
+          "effective_state",
+          "created_at",
+          "reopened_from_need_id"
+        ],
+        "title": "WorkspaceNeedRead",
+        "type": "object"
+      },
+      "WorkspaceOutcomeRead": {
+        "properties": {
+          "disposition": {
+            "title": "Disposition",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by_user_id": {
+            "format": "uuid",
+            "title": "Recorded By User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "disposition",
+          "note",
+          "recorded_by_user_id",
+          "recorded_at"
+        ],
+        "title": "WorkspaceOutcomeRead",
+        "type": "object"
+      },
+      "WorkspaceProposalRead": {
+        "properties": {
+          "change_type": {
+            "title": "Change Type",
+            "type": "string"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceApprovalDecisionRead"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "execution_authorized": {
+            "title": "Execution Authorized",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceApprovalPolicyRead"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_value": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Proposed Value",
+            "type": "object"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceResourceRead"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "reviewable": {
+            "title": "Reviewable",
+            "type": "boolean"
+          },
+          "root_proposal_id": {
+            "format": "uuid",
+            "title": "Root Proposal Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "supersedes_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Proposed Change Id"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "unsupported_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Reason"
+          },
+          "value_schema_id": {
+            "title": "Value Schema Id",
+            "type": "string"
+          },
+          "value_schema_version": {
+            "title": "Value Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "root_proposal_id",
+          "supersedes_proposed_change_id",
+          "proposed_at",
+          "state",
+          "supported",
+          "reviewable",
+          "execution_authorized",
+          "unsupported_reason",
+          "change_type",
+          "title",
+          "proposed_value",
+          "rationale",
+          "value_schema_id",
+          "value_schema_version",
+          "policy",
+          "decisions",
+          "resources"
+        ],
+        "title": "WorkspaceProposalRead",
+        "type": "object"
+      },
+      "WorkspaceResourceRead": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "match_rationale": {
+            "title": "Match Rationale",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "resource_id": {
+            "format": "uuid",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "name",
+          "category",
+          "url",
+          "metadata",
+          "match_rationale",
+          "proposed_at",
+          "approved_at",
+          "delivered_at"
+        ],
+        "title": "WorkspaceResourceRead",
+        "type": "object"
+      },
+      "WorkspaceTaskRead": {
+        "properties": {
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "authorized_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized Proposed Change Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceProposalRead"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "assignee_user_id",
+          "due_at",
+          "authorized_proposed_change_id",
+          "completed_at",
+          "created_at",
+          "proposals"
+        ],
+        "title": "WorkspaceTaskRead",
         "type": "object"
       }
     }
@@ -1406,6 +2253,49 @@
           }
         },
         "summary": "Post Outcome",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/workspace": {
+      "get": {
+        "operationId": "get_navigator_need_workspace_v1_navigator_needs__need_id__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigatorNeedWorkspaceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Navigator Need Workspace",
         "tags": [
           "navigator"
         ]
