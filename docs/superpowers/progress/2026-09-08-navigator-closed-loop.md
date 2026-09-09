@@ -44,7 +44,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## Package status
 
-- Package 1 — Persistence and invariant tests: in progress; fixture-contract reconnaissance is next.
+- Package 1 — Persistence and invariant tests: complete; focused checkpoint gate `34 passed`.
 - Package 2 — Navigator reads and compatible review: pending.
 - Package 3 — Task command services and concurrency: pending.
 - Package 4 — Patient response, timelines and resolution safety: pending.
@@ -53,8 +53,20 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## RED / GREEN evidence
 
-- No production implementation has begun.
-- Baseline verifier evidence is not RED/GREEN evidence for new behavior and does not cover the future live journey.
+- Package 1 schema RED: reflection failed because `navigation_task.authorized_proposed_change_id` and follow-up persistence were absent. GREEN: exact composite tenant/patient/need/task keys, both follow-up tables, ORM metadata, and additive `0006_navigator_closed_loop` installed.
+- Package 1 authorization RED: pending proposals could bind and approved execution title/owner/due could be rewritten. GREEN: only the exact effective approved v1/v2 task proposal can bind an open task; approved title, owner, due, and binding freeze after claim.
+- Package 1 transition RED: completion produced no durable follow-up request. GREEN: claim/start/complete use the strict transition chain, database-owned completion time, one deterministic typed audit per transition, and one deterministic completion request in the same transaction.
+- Package 1 boundary RED: bound deletion returned only a generic foreign-key failure. GREEN: a dedicated guard rejects bound deletion, skipped/reversed transitions, and work after navigator authority revocation.
+- Package 1 follow-up RED: forged early requests and client response timestamps were accepted. GREEN: request provenance is revalidated; response time is database-owned; request/response rows are append-only; closed needs, revoked roles, duplicate responses, and invalid patient-link attribution are rejected.
+- Package 1 identity RED: referenced link history could be rewritten. GREEN: organization/patient/user/link-time attribution and backdated revocation are protected while legitimate later revocation remains allowed.
+- Package 1 privilege RED: `ojcc_app` could not use the guarded response append surface. GREEN: it has only SELECT on requests and SELECT/INSERT on responses; trigger functions use the established SECURITY DEFINER/search-path pattern; direct request insertion and history rewrites remain unavailable.
+- Package 1 rollback tests: injected request and audit failures both leave task state and side effects fully rolled back.
+- Package 1 migration RED: downgrade was an unconditional placeholder refusal. GREEN: empty 0006 upgrades/downgrades cleanly to exact 0005 task-guard behavior, populated 0005 unbound/v2 resource history is preserved, and downgrade refuses actionable history loss.
+- Package 1 auditor RED: deliberate title/lifecycle, request, response, and transition-event corruption was invisible. GREEN: five content-minimal diagnostic categories detect invalid/missing/duplicate/mismatched history; valid closed-loop and legacy unbound history remain at zero violations.
+- Package 1 focused command: `34 passed in 14.44s`.
+- Package 1 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
+- Package 1 schema/seed checks: Alembic current `0006_navigator_closed_loop (head)`; Alembic check reports no drift; reset plus two identical seed passes succeeded; integrity reports zero violations.
+- Immutable migration hashes 0001–0005 rechecked and exactly match the preflight values above.
 
 ## Contract hashes
 
@@ -63,6 +75,8 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 ## Checkpoint commits
 
 - `67af3c6` — preserved the byte-identical approved plan on the feature branch.
+- `eca440a` — started the approval/baseline progress ledger.
+- Package 1 checkpoint prepared with message `feat: persist approved task execution and follow-up history`.
 
 ## Decisions and conflicts
 
@@ -70,4 +84,4 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## Next exact step
 
-Read the Package 1 fixture sources (`test_outcomes.py`, `test_approvals.py`, `test_core_domain_migration.py`, and `integration/test_need_task_lifecycle.py`), then create the rollback-safe closed-loop fixture contract before the first behavior-specific failing persistence test.
+Commit the reviewed Package 1 files explicitly, then begin Package 2 with failing navigator workspace/review contract tests. No Package 3 work may begin before the Package 2 checkpoint.

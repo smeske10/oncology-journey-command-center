@@ -45,6 +45,8 @@ EXPECTED_RECONCILED_TABLES_THROUGH_TASK_FIVE = {
     "navigation_task_resource",
     "organization_knowledge_approval",
     "agent_run_citation",
+    "follow_up_request",
+    "follow_up_response",
 }
 
 
@@ -65,3 +67,5 @@ def test_domain_modules_own_their_mapped_models() -> None:
     assert workflow.AgentRun.__module__ == workflow.__name__
     assert knowledge.KnowledgeDocument.__module__ == knowledge.__name__
     assert audit.AuditEvent.__module__ == audit.__name__
+    assert models.FollowUpRequest.__module__ == "app.db.models.follow_ups"
+    assert models.FollowUpResponse.__module__ == "app.db.models.follow_ups"

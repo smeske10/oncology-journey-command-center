@@ -110,3 +110,9 @@ class AuditActorType(str, Enum):
 class OutcomeDisposition(str, Enum):
     RESOLVED = "resolved"
     CLOSED_UNRESOLVED = "closed_unresolved"
+
+
+class FollowUpResponseValue(str, Enum):
+    RESOLVED = "resolved"
+    UNRESOLVED = "unresolved"
+    STILL_NEEDS_HELP = "still_needs_help"
