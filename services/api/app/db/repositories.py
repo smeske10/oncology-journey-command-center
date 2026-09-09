@@ -95,6 +95,152 @@ class SqlAlchemyPatientRepository:
         )
         return self._session.scalar(statement)
 
+    def resolve_active_patient_link(
+        self,
+        *,
+        user_id: UUID,
+        patient_id: UUID,
+        organization_id: UUID,
+        at: datetime | None = None,
+    ) -> models.PatientIdentityLink | None:
+        at = datetime.now(UTC) if at is None else at
+        return self._session.scalar(
+            select(models.PatientIdentityLink)
+            .where(
+                models.PatientIdentityLink.organization_id == organization_id,
+                models.PatientIdentityLink.user_id == user_id,
+                models.PatientIdentityLink.patient_id == patient_id,
+                models.PatientIdentityLink.linked_at <= at,
+                models.PatientIdentityLink.revoked_at.is_(None)
+                | (at < models.PatientIdentityLink.revoked_at),
+            )
+            .order_by(
+                models.PatientIdentityLink.linked_at.desc(),
+                models.PatientIdentityLink.id.asc(),
+            )
+            .limit(1)
+        )
+
+    def list_follow_up_requests(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> list[models.FollowUpRequest]:
+        return list(
+            self._session.scalars(
+                select(models.FollowUpRequest)
+                .where(
+                    models.FollowUpRequest.organization_id == organization_id,
+                    models.FollowUpRequest.patient_id == patient_id,
+                )
+                .order_by(
+                    models.FollowUpRequest.requested_at.desc(),
+                    models.FollowUpRequest.id.desc(),
+                )
+            ).all()
+        )
+
+    def list_follow_up_responses(
+        self, *, request_ids: set[UUID], organization_id: UUID
+    ) -> list[models.FollowUpResponse]:
+        if not request_ids:
+            return []
+        return list(
+            self._session.scalars(
+                select(models.FollowUpResponse).where(
+                    models.FollowUpResponse.organization_id == organization_id,
+                    models.FollowUpResponse.follow_up_request_id.in_(request_ids),
+                )
+            ).all()
+        )
+
+    def list_outcomes_for_needs(
+        self,
+        *,
+        need_ids: set[UUID],
+        patient_id: UUID,
+        organization_id: UUID,
+    ) -> list[models.Outcome]:
+        if not need_ids:
+            return []
+        return list(
+            self._session.scalars(
+                select(models.Outcome).where(
+                    models.Outcome.organization_id == organization_id,
+                    models.Outcome.patient_id == patient_id,
+                    models.Outcome.reported_need_id.in_(need_ids),
+                )
+            ).all()
+        )
+
+    def list_submissions(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> list[models.CheckInSubmission]:
+        return list(
+            self._session.scalars(
+                select(models.CheckInSubmission)
+                .where(
+                    models.CheckInSubmission.organization_id == organization_id,
+                    models.CheckInSubmission.patient_id == patient_id,
+                )
+                .order_by(
+                    models.CheckInSubmission.submitted_at,
+                    models.CheckInSubmission.id,
+                )
+            ).all()
+        )
+
+    def list_needs(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> list[models.ReportedNeed]:
+        return list(
+            self._session.scalars(
+                select(models.ReportedNeed)
+                .where(
+                    models.ReportedNeed.organization_id == organization_id,
+                    models.ReportedNeed.patient_id == patient_id,
+                )
+                .order_by(models.ReportedNeed.created_at, models.ReportedNeed.id)
+            ).all()
+        )
+
+    def list_tasks(
+        self, *, patient_id: UUID, organization_id: UUID
+    ) -> list[models.NavigationTask]:
+        return list(
+            self._session.scalars(
+                select(models.NavigationTask)
+                .where(
+                    models.NavigationTask.organization_id == organization_id,
+                    models.NavigationTask.patient_id == patient_id,
+                )
+                .order_by(models.NavigationTask.created_at, models.NavigationTask.id)
+            ).all()
+        )
+
+    def list_task_audits(
+        self, *, task_ids: set[UUID], organization_id: UUID
+    ) -> list[models.AuditEvent]:
+        if not task_ids:
+            return []
+        return list(
+            self._session.scalars(
+                select(models.AuditEvent)
+                .where(
+                    models.AuditEvent.organization_id == organization_id,
+                    models.AuditEvent.entity_type == "navigation_task",
+                    models.AuditEvent.entity_id.in_(task_ids),
+                    models.AuditEvent.event_type.in_(
+                        (
+                            "navigation_task_claimed",
+                            "navigation_task_started",
+                            "navigation_task_completed",
+                            "task_cancelled_by_closure",
+                        )
+                    ),
+                )
+                .order_by(models.AuditEvent.created_at, models.AuditEvent.id)
+            ).all()
+        )
+
 
 class SqlAlchemyNavigatorRepository:
     """Organization-scoped read repository backed by canonical lifecycle views."""
@@ -280,6 +426,25 @@ class SqlAlchemyNavigatorRepository:
             ).all()
         )
 
+    def list_episode_needs(
+        self,
+        *,
+        patient_id: UUID,
+        care_episode_id: UUID,
+        organization_id: UUID,
+    ) -> list[models.ReportedNeed]:
+        return list(
+            self._session.scalars(
+                select(models.ReportedNeed)
+                .where(
+                    models.ReportedNeed.organization_id == organization_id,
+                    models.ReportedNeed.patient_id == patient_id,
+                    models.ReportedNeed.care_episode_id == care_episode_id,
+                )
+                .order_by(models.ReportedNeed.created_at, models.ReportedNeed.id)
+            ).all()
+        )
+
     def list_task_proposals(
         self, *, task_ids: set[UUID], organization_id: UUID
     ) -> list[EffectiveProposedChangeRecord]:
@@ -387,6 +552,31 @@ class SqlAlchemyNavigatorRepository:
                 models.Outcome.patient_id == patient_id,
                 models.Outcome.reported_need_id == need_id,
             )
+        )
+
+    def list_task_audits(
+        self, *, task_ids: set[UUID], organization_id: UUID
+    ) -> list[models.AuditEvent]:
+        if not task_ids:
+            return []
+        return list(
+            self._session.scalars(
+                select(models.AuditEvent)
+                .where(
+                    models.AuditEvent.organization_id == organization_id,
+                    models.AuditEvent.entity_type == "navigation_task",
+                    models.AuditEvent.entity_id.in_(task_ids),
+                    models.AuditEvent.event_type.in_(
+                        (
+                            "navigation_task_claimed",
+                            "navigation_task_started",
+                            "navigation_task_completed",
+                            "task_cancelled_by_closure",
+                        )
+                    ),
+                )
+                .order_by(models.AuditEvent.created_at, models.AuditEvent.id)
+            ).all()
         )
 
 

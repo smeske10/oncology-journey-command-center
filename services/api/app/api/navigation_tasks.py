@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Never
+from typing import Literal, Never
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -52,7 +52,27 @@ class EmptyTaskCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-@router.post("/{task_id}/claim", response_model=TaskCommandRead)
+class TaskCommandErrorDetail(BaseModel):
+    code: Literal[
+        "need_closed",
+        "task_state_conflict",
+        "task_claim_mismatch",
+        "task_unbound",
+        "proposal_not_approved",
+        "concurrent_change",
+    ]
+    message: str
+
+
+class TaskCommandErrorResponse(BaseModel):
+    detail: TaskCommandErrorDetail
+
+
+@router.post(
+    "/{task_id}/claim",
+    response_model=TaskCommandRead,
+    responses={409: {"model": TaskCommandErrorResponse}},
+)
 def claim_task(
     task_id: UUID,
     command: TaskClaimCreate,
@@ -92,7 +112,11 @@ def claim_task(
     return _read(result)
 
 
-@router.post("/{task_id}/start", response_model=TaskCommandRead)
+@router.post(
+    "/{task_id}/start",
+    response_model=TaskCommandRead,
+    responses={409: {"model": TaskCommandErrorResponse}},
+)
 def start_task(
     task_id: UUID,
     command: EmptyTaskCommand,
@@ -111,7 +135,11 @@ def start_task(
     )
 
 
-@router.post("/{task_id}/complete", response_model=TaskCommandRead)
+@router.post(
+    "/{task_id}/complete",
+    response_model=TaskCommandRead,
+    responses={409: {"model": TaskCommandErrorResponse}},
+)
 def complete_task(
     task_id: UUID,
     command: EmptyTaskCommand,

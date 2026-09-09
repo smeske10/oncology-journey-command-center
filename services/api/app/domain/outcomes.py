@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.models import AuditEvent, NavigationTask, Outcome, ReportedNeed
 from app.domain.enums import NavigationTaskStatus, OutcomeDisposition
 from app.domain.needs import NeedNotFound
+from app.domain.public_demo import validate_public_demo_text
 
 NONTERMINAL_TASK_STATES = (
     NavigationTaskStatus.OPEN,
@@ -96,6 +97,7 @@ def record_outcome(
         raise ValueError("Idempotency key must not be blank")
     if len(idempotency_key) > 255:
         raise ValueError("Idempotency key must not exceed 255 characters")
+    validate_public_demo_text(note)
     disposition_value = OutcomeDisposition(disposition)
 
     need = session.scalar(

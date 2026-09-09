@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, JsonValue
 
 from app.db.models import (
     ApprovalDecision,
+    AuditEvent,
     CheckInDefinition,
     CheckInSubmission,
     FollowUpRequest,
@@ -23,6 +24,7 @@ from app.db.models import (
 )
 from app.db.repositories import EffectiveProposedChangeRecord
 from app.domain.enums import ApprovalChangeType
+from app.domain.journey_timeline import NavigatorTimelineEvent, build_navigator_timeline
 
 ComparisonStatus = Literal["available", "insufficient_history", "not_comparable"]
 ProvenanceKind = Literal[
@@ -157,13 +159,6 @@ class WorkspaceOutcomeRead(BaseModel):
     recorded_at: datetime
 
 
-class NavigatorTimelineEventRead(BaseModel):
-    id: UUID
-    kind: str
-    occurred_at: datetime
-    label: str
-
-
 class NavigatorNeedWorkspaceRead(BaseModel):
     need: WorkspaceNeedRead
     evidence: list[WorkspaceEvidenceRead]
@@ -171,13 +166,14 @@ class NavigatorNeedWorkspaceRead(BaseModel):
     tasks: list[WorkspaceTaskRead]
     follow_ups: list[WorkspaceFollowUpRead]
     outcome: WorkspaceOutcomeRead | None
-    timeline: list[NavigatorTimelineEventRead]
+    timeline: list[NavigatorTimelineEvent]
 
 
 def build_navigator_workspace(
     *,
     need: ReportedNeed,
     effective_state: str,
+    need_lineage: Sequence[ReportedNeed],
     patient: SyntheticPatient,
     submissions: Sequence[CheckInSubmission],
     definitions: Sequence[CheckInDefinition],
@@ -185,6 +181,7 @@ def build_navigator_workspace(
     proposals: Sequence[EffectiveProposedChangeRecord],
     decisions: Sequence[ApprovalDecision],
     resources: Sequence[NavigationTaskResource],
+    audits: Sequence[AuditEvent],
     follow_up_requests: Sequence[FollowUpRequest],
     follow_up_responses: Sequence[FollowUpResponse],
     outcome: Outcome | None,
@@ -272,7 +269,18 @@ def build_navigator_workspace(
             if outcome is not None
             else None
         ),
-        timeline=[],
+        timeline=build_navigator_timeline(
+            need=need,
+            need_lineage=need_lineage,
+            submissions=submissions,
+            tasks=tasks,
+            proposals=proposals,
+            decisions=decisions,
+            audits=audits,
+            requests=follow_up_requests,
+            responses=follow_up_responses,
+            outcome=outcome,
+        ),
     )
 
 

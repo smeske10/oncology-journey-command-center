@@ -47,7 +47,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 1 — Persistence and invariant tests: complete; focused checkpoint gate `34 passed`.
 - Package 2 — Navigator reads and compatible review: complete; focused checkpoint gate `117 passed`.
 - Package 3 — Task command services and concurrency: complete; focused checkpoint gate `81 passed`.
-- Package 4 — Patient response, timelines and resolution safety: pending.
+- Package 4 — Patient response, timelines and resolution safety: complete; focused checkpoint gate `67 passed`.
 - Package 5 — Seeded UI and live browser-to-database journey: pending.
 - Package 6 — Reproducible verification and handoff: pending.
 
@@ -82,12 +82,21 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 3 focused command: `81 passed in 8.51s` across task commands, task concurrency, persistence guards, Outcomes, and need/task lifecycle integration.
 - Package 3 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
 - Package 3 test-fixture note: the committed concurrency aggregate and exact organization teardown live in `closed_loop/conftest.py` so real independent connections can observe the same rows; teardown disables triggers only inside its owned synthetic organization and deletes explicit tenant-scoped tables.
+- Package 4 follow-up RED: patient follow-up list/response routes returned `404`. GREEN: the currently linked supporting actor sees only their requests, the fixed prompt and derived status; response author/link/time come from the signed session and database, notes normalize before validation, and exact retries return the same identity/time with `replayed=true`.
+- Package 4 response boundaries: all three controlled values, null/blank notes, changed content/author, foreign requests, injected identity/time, PHI-like content, link/role revocation, unanswered closure, and response-without-automatic-Outcome are executable tests. A response never mutates task/need/Outcome state.
+- Package 4 timeline RED: the patient route returned `404` and navigator workspaces had no history. GREEN: discriminated typed events use exact source IDs/timestamps and stable `(occurred_at, causal_rank, source_id)` ordering; correction, inherited lineage, governance, task transitions, follow-up, Outcome, and actual cancellation are projected without raw event serialization.
+- Package 4 audience test: a full closed journey exercises every navigator kind and every patient-allowed kind. Patient JSON excludes sentinel task titles, proposal rationale/IDs, staff/role IDs, internal Outcome notes, and raw audit payloads while retaining the patient's own validated response note and controlled labels.
+- Package 4 concurrency/auth: committed two-session response/Outcome tests pass in both orderings with exact final row counts and bounded locks. Real signed-cookie requests succeed before link/role revocation and are rejected as `401` by a fresh database session afterward.
+- Package 4 Outcome safeguard: the shared synthetic-demo PHI guard now covers newly exposed Outcome note prose while preserving existing Outcome lifecycle/idempotency tests and never scanning UUID/idempotency/timestamp fields.
+- Package 4 focused command: `67 passed in 4.70s` across follow-ups, timelines, response/Outcome races, signed auth, Outcomes, check-ins, and tenant isolation.
+- Package 4 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
 
 ## Contract hashes
 
 - Baseline generation completed twice with identical hashes: OpenAPI `2EEC25C...D1428`; TypeScript `192BD4F...CDCDD0`.
 - Package 2 generation completed twice with identical hashes: OpenAPI `B13F5DAE25DE119D999848559E3644B6A9D2A5398915BBE1966517CC48BFB8B0`; TypeScript `08572A570973D0B497CDC718E754CD8456D7A0AEBCB776ECCA805D6CE0B500F8`.
 - Package 3 generation completed twice with identical hashes: OpenAPI `9916699F12F2E05DD8805DBB8DEF6810705C7687F546322023000E935DCDB799`; TypeScript `86C8EF5C1893E6B0A3DF116DABF22C596FFE219C781CC71369199F6F71BA502B`. Contract review found no removed paths and exactly the claim/start/complete route additions; task status remains an explicit enum.
+- Package 4 generation completed twice with identical hashes: OpenAPI `56EB4AAB2D0E650E121091BE68737CC12B8DCD5254814ECAA1DDD1767B106882`; TypeScript `9C46A9CB6A2654ED0E41A964FD86D7F9479CCD5874EF5F0ADFF188BCF70DDC46`. Contract review found no removed paths and exactly the follow-up list, response, and patient timeline additions; timeline unions include OpenAPI discriminators and command conflicts have documented typed payloads.
 
 ## Checkpoint commits
 
@@ -95,7 +104,8 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - `eca440a` — started the approval/baseline progress ledger.
 - `1e7ee41` — `feat: persist approved task execution and follow-up history`.
 - `2a33d37` — `feat: expose evidence and governed task proposal review`.
-- Package 3 checkpoint prepared with message `feat: operate approved navigator tasks safely`.
+- `59c0b39` — `feat: operate approved navigator tasks safely`.
+- Package 4 checkpoint prepared with message `feat: capture patient follow-up and audience-safe journey history`.
 
 ## Decisions and conflicts
 
@@ -103,4 +113,4 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 
 ## Next exact step
 
-Commit the reviewed Package 3 files explicitly, then begin Package 4 with failing patient follow-up and audience-specific timeline tests. No Package 5 work may begin before the Package 4 checkpoint.
+Commit the reviewed Package 4 files explicitly, then read the installed Next.js guidance and begin Package 5 with failing seed, component, and live-browser controls. No Package 6 work may begin before the Package 5 checkpoint.

@@ -59,6 +59,11 @@ def get_navigator_need_workspace(
         patient_id=need.patient_id,
         organization_id=actor.organization_id,
     )
+    need_lineage = repository.list_episode_needs(
+        patient_id=need.patient_id,
+        care_episode_id=need.care_episode_id,
+        organization_id=actor.organization_id,
+    )
     proposals = repository.list_task_proposals(
         task_ids={task.id for task in tasks},
         organization_id=actor.organization_id,
@@ -70,6 +75,10 @@ def get_navigator_need_workspace(
     )
     resources = repository.list_proposal_resources(
         proposal_ids=proposal_ids,
+        organization_id=actor.organization_id,
+    )
+    audits = repository.list_task_audits(
+        task_ids={task.id for task in tasks},
         organization_id=actor.organization_id,
     )
     follow_up_requests = repository.list_need_follow_up_requests(
@@ -89,6 +98,7 @@ def get_navigator_need_workspace(
     return build_navigator_workspace(
         need=need,
         effective_state=effective_state,
+        need_lineage=need_lineage,
         patient=patient,
         submissions=submissions,
         definitions=definitions,
@@ -96,6 +106,7 @@ def get_navigator_need_workspace(
         proposals=proposals,
         decisions=decisions,
         resources=resources,
+        audits=audits,
         follow_up_requests=follow_up_requests,
         follow_up_responses=follow_up_responses,
         outcome=outcome,

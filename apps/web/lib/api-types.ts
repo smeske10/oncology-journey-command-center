@@ -293,6 +293,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/patient/follow-ups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Patient Follow Ups */
+        get: operations["get_patient_follow_ups_v1_patient_follow_ups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/patient/follow-ups/{request_id}/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Follow Up Response */
+        post: operations["post_follow_up_response_v1_patient_follow_ups__request_id__responses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/patient/journey-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Patient Journey Timeline */
+        get: operations["get_patient_journey_timeline_v1_patient_journey_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -380,6 +431,39 @@ export interface components {
          * @enum {string}
          */
         ApprovalDecisionValue: "approved" | "declined";
+        /** CheckInCorrectedEvent */
+        CheckInCorrectedEvent: {
+            detail: components["schemas"]["CheckInDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "check_in_corrected";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default check_in_submission
+             * @constant
+             */
+            source_type: "check_in_submission";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
         /** CheckInDefinitionResponse */
         CheckInDefinitionResponse: {
             /** Active Submission Id */
@@ -397,6 +481,13 @@ export interface components {
             }[];
             /** Title */
             title: string;
+        };
+        /** CheckInDetail */
+        CheckInDetail: {
+            /** Correction Of Submission Id */
+            correction_of_submission_id: string | null;
+            /** Inherited */
+            inherited: boolean;
         };
         /** CheckInSubmissionCreate */
         CheckInSubmissionCreate: {
@@ -439,6 +530,39 @@ export interface components {
             /** Supersedes Submission Id */
             supersedes_submission_id: string | null;
         };
+        /** CheckInSubmittedEvent */
+        CheckInSubmittedEvent: {
+            detail: components["schemas"]["CheckInDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "check_in_submitted";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default check_in_submission
+             * @constant
+             */
+            source_type: "check_in_submission";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
         /** ComparisonDeltaRead */
         ComparisonDeltaRead: {
             /** Current Present */
@@ -450,6 +574,11 @@ export interface components {
             previous_present: boolean;
             previous_value: components["schemas"]["JsonValue"];
         };
+        /**
+         * EffectiveProposalState
+         * @enum {string}
+         */
+        EffectiveProposalState: "superseded" | "declined" | "approved" | "pending";
         /** EmptyTaskCommand */
         EmptyTaskCommand: Record<string, never>;
         /** EvidenceRead */
@@ -459,6 +588,133 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** FollowUpErrorDetail */
+        FollowUpErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "need_closed" | "follow_up_already_answered" | "concurrent_change";
+            /** Message */
+            message: string;
+        };
+        /** FollowUpErrorResponse */
+        FollowUpErrorResponse: {
+            detail: components["schemas"]["FollowUpErrorDetail"];
+        };
+        /** FollowUpRequestedDetail */
+        FollowUpRequestedDetail: {
+            /** Prompt */
+            prompt: string;
+            /** Prompt Version */
+            prompt_version: number;
+        };
+        /** FollowUpRequestedEvent */
+        FollowUpRequestedEvent: {
+            detail: components["schemas"]["FollowUpRequestedDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "follow_up_requested";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default follow_up_request
+             * @constant
+             */
+            source_type: "follow_up_request";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** FollowUpRespondedDetail */
+        FollowUpRespondedDetail: {
+            /** Note */
+            note: string | null;
+            response: components["schemas"]["FollowUpResponseValue"];
+        };
+        /** FollowUpRespondedEvent */
+        FollowUpRespondedEvent: {
+            detail: components["schemas"]["FollowUpRespondedDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "follow_up_responded";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default follow_up_response
+             * @constant
+             */
+            source_type: "follow_up_response";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** FollowUpResponseCreate */
+        FollowUpResponseCreate: {
+            /** Note */
+            note?: string | null;
+            response: components["schemas"]["FollowUpResponseValue"];
+        };
+        /** FollowUpResponseRead */
+        FollowUpResponseRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note */
+            note: string | null;
+            /** Replayed */
+            replayed: boolean;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            response: components["schemas"]["FollowUpResponseValue"];
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+        };
+        /**
+         * FollowUpResponseValue
+         * @enum {string}
+         */
+        FollowUpResponseValue: "resolved" | "unresolved" | "still_needs_help";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -508,29 +764,91 @@ export interface components {
             /** Tasks */
             tasks: components["schemas"]["WorkspaceTaskRead"][];
             /** Timeline */
-            timeline: components["schemas"]["NavigatorTimelineEventRead"][];
+            timeline: (components["schemas"]["CheckInSubmittedEvent"] | components["schemas"]["CheckInCorrectedEvent"] | components["schemas"]["NeedReportedEvent"] | components["schemas"]["ProposalCreatedEvent"] | components["schemas"]["ProposalDecidedEvent"] | components["schemas"]["TaskClaimedEvent"] | components["schemas"]["TaskStartedEvent"] | components["schemas"]["TaskCompletedEvent"] | components["schemas"]["FollowUpRequestedEvent"] | components["schemas"]["FollowUpRespondedEvent"] | components["schemas"]["NavigatorOutcomeRecordedEvent"] | components["schemas"]["TaskCancelledEvent"])[];
+        };
+        /** NavigatorOutcomeDetail */
+        NavigatorOutcomeDetail: {
+            disposition: components["schemas"]["OutcomeDisposition"];
+            /** Note */
+            note: string | null;
+        };
+        /** NavigatorOutcomeRecordedEvent */
+        NavigatorOutcomeRecordedEvent: {
+            detail: components["schemas"]["NavigatorOutcomeDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "outcome_recorded";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default outcome
+             * @constant
+             */
+            source_type: "outcome";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /** NavigatorQueueRead */
         NavigatorQueueRead: {
             /** Items */
             items: components["schemas"]["QueueItemRead"][];
         };
-        /** NavigatorTimelineEventRead */
-        NavigatorTimelineEventRead: {
+        /** NeedDetail */
+        NeedDetail: {
+            /** Inherited */
+            inherited: boolean;
+            /** Practical Need Label */
+            practical_need_label: string;
+        };
+        /** NeedReportedEvent */
+        NeedReportedEvent: {
+            detail: components["schemas"]["NeedDetail"];
+            /** Event Id */
+            event_id: string;
             /**
-             * Id
-             * Format: uuid
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
              */
-            id: string;
-            /** Kind */
-            kind: string;
-            /** Label */
-            label: string;
+            kind: "need_reported";
+            /** Need Id */
+            need_id: string | null;
             /**
              * Occurred At
              * Format: date-time
              */
             occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default reported_need
+             * @constant
+             */
+            source_type: "reported_need";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /** OutcomeCommandCreate */
         OutcomeCommandCreate: {
@@ -612,6 +930,90 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** PatientFollowUpListRead */
+        PatientFollowUpListRead: {
+            /** Items */
+            items: components["schemas"]["PatientFollowUpRead"][];
+        };
+        /** PatientFollowUpRead */
+        PatientFollowUpRead: {
+            /**
+             * Need Id
+             * Format: uuid
+             */
+            need_id: string;
+            /** Note */
+            note: string | null;
+            /** Prompt */
+            prompt: string;
+            /** Prompt Version */
+            prompt_version: number;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Responded At */
+            responded_at: string | null;
+            response: components["schemas"]["FollowUpResponseValue"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "awaiting_response" | "answered" | "unavailable_need_closed";
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+        };
+        /** PatientOutcomeDetail */
+        PatientOutcomeDetail: {
+            disposition: components["schemas"]["OutcomeDisposition"];
+        };
+        /** PatientOutcomeRecordedEvent */
+        PatientOutcomeRecordedEvent: {
+            detail: components["schemas"]["PatientOutcomeDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "outcome_recorded";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default outcome
+             * @constant
+             */
+            source_type: "outcome";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** PatientTimelineRead */
+        PatientTimelineRead: {
+            /** Events */
+            events: (components["schemas"]["CheckInSubmittedEvent"] | components["schemas"]["CheckInCorrectedEvent"] | components["schemas"]["NeedReportedEvent"] | components["schemas"]["TaskClaimedEvent"] | components["schemas"]["TaskStartedEvent"] | components["schemas"]["TaskCompletedEvent"] | components["schemas"]["FollowUpRequestedEvent"] | components["schemas"]["FollowUpRespondedEvent"] | components["schemas"]["PatientOutcomeRecordedEvent"] | components["schemas"]["TaskCancelledEvent"])[];
+        };
         /** PriorityResultRead */
         PriorityResultRead: {
             /**
@@ -623,6 +1025,84 @@ export interface components {
             reasons: string[];
             /** Score */
             score: number;
+        };
+        /** ProposalCreatedDetail */
+        ProposalCreatedDetail: {
+            proposal_state: components["schemas"]["EffectiveProposalState"];
+            /** Value Schema Id */
+            value_schema_id: string;
+            /** Value Schema Version */
+            value_schema_version: number;
+        };
+        /** ProposalCreatedEvent */
+        ProposalCreatedEvent: {
+            detail: components["schemas"]["ProposalCreatedDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "proposal_created";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default proposed_change
+             * @constant
+             */
+            source_type: "proposed_change";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** ProposalDecidedDetail */
+        ProposalDecidedDetail: {
+            decision: components["schemas"]["ApprovalDecisionValue"];
+        };
+        /** ProposalDecidedEvent */
+        ProposalDecidedEvent: {
+            detail: components["schemas"]["ProposalDecidedDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "proposal_decided";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default approval_decision
+             * @constant
+             */
+            source_type: "approval_decision";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /** ProposedChangeCreate */
         ProposedChangeCreate: {
@@ -826,6 +1306,47 @@ export interface components {
             /** Submitted At */
             submitted_at: string | null;
         };
+        /** TaskCancelledDetail */
+        TaskCancelledDetail: {
+            /**
+             * Reason
+             * @constant
+             */
+            reason: "need_closed";
+        };
+        /** TaskCancelledEvent */
+        TaskCancelledEvent: {
+            detail: components["schemas"]["TaskCancelledDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task_cancelled";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default audit_event
+             * @constant
+             */
+            source_type: "audit_event";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
         /** TaskClaimCreate */
         TaskClaimCreate: {
             /**
@@ -838,6 +1359,53 @@ export interface components {
              * Format: uuid
              */
             proposed_change_id: string;
+        };
+        /** TaskClaimedEvent */
+        TaskClaimedEvent: {
+            detail: components["schemas"]["TaskProgressDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task_claimed";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default audit_event
+             * @constant
+             */
+            source_type: "audit_event";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** TaskCommandErrorDetail */
+        TaskCommandErrorDetail: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "need_closed" | "task_state_conflict" | "task_claim_mismatch" | "task_unbound" | "proposal_not_approved" | "concurrent_change";
+            /** Message */
+            message: string;
+        };
+        /** TaskCommandErrorResponse */
+        TaskCommandErrorResponse: {
+            detail: components["schemas"]["TaskCommandErrorDetail"];
         };
         /** TaskCommandRead */
         TaskCommandRead: {
@@ -864,6 +1432,80 @@ export interface components {
              * Format: uuid
              */
             task_id: string;
+        };
+        /** TaskCompletedEvent */
+        TaskCompletedEvent: {
+            detail: components["schemas"]["TaskProgressDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task_completed";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default audit_event
+             * @constant
+             */
+            source_type: "audit_event";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
+        };
+        /** TaskProgressDetail */
+        TaskProgressDetail: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "assigned" | "in_progress" | "completed";
+        };
+        /** TaskStartedEvent */
+        TaskStartedEvent: {
+            detail: components["schemas"]["TaskProgressDetail"];
+            /** Event Id */
+            event_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task_started";
+            /** Need Id */
+            need_id: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /**
+             * Source Type
+             * @default audit_event
+             * @constant
+             */
+            source_type: "audit_event";
+            /** Summary */
+            summary: string;
+            /** Task Id */
+            task_id: string | null;
         };
         /**
          * UserRole
@@ -1525,6 +2167,15 @@ export interface operations {
                     "application/json": components["schemas"]["TaskCommandRead"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1560,6 +2211,15 @@ export interface operations {
                     "application/json": components["schemas"]["TaskCommandRead"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1593,6 +2253,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskCommandRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskCommandErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1690,6 +2359,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_patient_follow_ups_v1_patient_follow_ups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientFollowUpListRead"];
+                };
+            };
+        };
+    };
+    post_follow_up_response_v1_patient_follow_ups__request_id__responses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FollowUpResponseCreate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowUpResponseRead"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowUpResponseRead"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowUpErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_patient_journey_timeline_v1_patient_journey_timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatientTimelineRead"];
                 };
             };
         };
