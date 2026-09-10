@@ -98,9 +98,9 @@ print(json.dumps(list(row)))
 engine.dispose()
 `;
   const output = execFileSync(
-    "uv",
-    ["run", "--project", apiRoot, "--extra", "dev", "python", "-c", verification],
-    { encoding: "utf8", env: { ...process.env, DATABASE_URL: databaseUrl } },
+    "python",
+    ["-c", verification],
+    { cwd: apiRoot, encoding: "utf8", env: { ...process.env, DATABASE_URL: databaseUrl } },
   );
   const [requests, responses, outcomes, bindings, audits] = JSON.parse(output.trim()) as number[];
   expect({ requests, responses, outcomes, bindings }).toEqual({
