@@ -12,7 +12,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "uv run --project . --extra dev uvicorn app.main:app --host 127.0.0.1 --port 8011",
+      command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8011",
       cwd: "../../services/api",
       env: {
         ...process.env,
