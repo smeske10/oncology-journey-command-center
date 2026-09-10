@@ -96,7 +96,7 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
   }
 
   return (
-    <main style={mainStyle}>
+    <section aria-label="Patient check-in" style={mainStyle}>
       <header>
         <p style={eyebrowStyle}>ONCOLOGY JOURNEY</p>
         <h1 style={titleStyle}>{definition.title}</h1>
@@ -201,7 +201,7 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
           <p>Thank you. In this demo, any next step is reviewed by a human navigator.</p>
         </section>
       )}
-    </main>
+    </section>
   );
 }
 

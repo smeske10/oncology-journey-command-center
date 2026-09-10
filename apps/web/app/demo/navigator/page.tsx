@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { PatientCase } from "../../../components/navigator/patient-case";
+import { NeedWorkspace } from "../../../components/navigator/need-workspace";
 import { WorkQueue, type NavigatorQueueItem } from "../../../components/navigator/work-queue";
 import {
   ApiError,
   bootstrapNavigatorQueue,
+  getNavigatorNeedWorkspace,
   getNavigatorPatientCase,
+  type NavigatorNeedWorkspaceResponse,
   type NavigatorPatientCaseResponse,
 } from "../../../lib/api-client";
 
@@ -16,18 +19,46 @@ export default function NavigatorDemoPage() {
   const [items, setItems] = useState<NavigatorQueueItem[]>([]);
   const [queueError, setQueueError] = useState("");
   const [loadingQueue, setLoadingQueue] = useState(true);
-  const [selected, setSelected] = useState<NavigatorQueueItem>();
+  const [selected, setSelected] = useState<{ needId: string; patientId: string }>();
   const [caseData, setCaseData] = useState<NavigatorPatientCaseResponse>();
   const [caseError, setCaseError] = useState("");
   const [loadingCase, setLoadingCase] = useState(false);
-  const selectedNeedId = selected?.need_id;
-  const selectedPatientId = selected?.patient_id;
+  const [workspace, setWorkspace] = useState<NavigatorNeedWorkspaceResponse>();
+  const [workspaceError, setWorkspaceError] = useState("");
+  const requestId = useRef(0);
+  const requestController = useRef<AbortController | undefined>(undefined);
+  const selectedNeedId = selected?.needId;
+  const selectedPatientId = selected?.patientId;
 
   const selectQueueItem = useCallback((item: NavigatorQueueItem) => {
-    setSelected(item);
+    const selection = { needId: item.need_id, patientId: item.patient_id };
+    setSelected(selection);
+    window.localStorage.setItem("ojcc-navigator-selection", JSON.stringify(selection));
     setCaseData(undefined);
+    setWorkspace(undefined);
     setCaseError("");
+    setWorkspaceError("");
     setLoadingCase(true);
+  }, []);
+
+  const loadSelected = useCallback(async (needId: string, patientId: string) => {
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
+    const currentRequest = ++requestId.current;
+    setLoadingCase(true);
+    setCaseError("");
+    setWorkspaceError("");
+    const [caseResult, workspaceResult] = await Promise.allSettled([
+      getNavigatorPatientCase(patientId, controller.signal),
+      getNavigatorNeedWorkspace(needId, controller.signal),
+    ]);
+    if (controller.signal.aborted || requestId.current !== currentRequest) return;
+    if (caseResult.status === "fulfilled") setCaseData(caseResult.value);
+    else setCaseError(readError(caseResult.reason, "The patient case could not be loaded."));
+    if (workspaceResult.status === "fulfilled") setWorkspace(workspaceResult.value);
+    else setWorkspaceError(readError(workspaceResult.reason, "The selected need could not be loaded."));
+    setLoadingCase(false);
   }, []);
 
   useEffect(() => {
@@ -35,7 +66,13 @@ export default function NavigatorDemoPage() {
       .then((response) => {
         const queueItems = response.items;
         setItems(queueItems);
-        if (queueItems[0]) selectQueueItem(queueItems[0]);
+        const retained = readRetainedSelection();
+        const retainedQueueItem = retained
+          ? queueItems.find((item) => item.need_id === retained.needId && item.patient_id === retained.patientId)
+          : undefined;
+        if (retainedQueueItem) selectQueueItem(retainedQueueItem);
+        else if (retained) setSelected(retained);
+        else if (queueItems[0]) selectQueueItem(queueItems[0]);
       })
       .catch((error: unknown) => setQueueError(readError(error, "The navigator queue could not be loaded.")))
       .finally(() => setLoadingQueue(false));
@@ -43,21 +80,16 @@ export default function NavigatorDemoPage() {
 
   useEffect(() => {
     if (!selectedNeedId || !selectedPatientId) return;
-    const controller = new AbortController();
-    void getNavigatorPatientCase(selectedPatientId, controller.signal)
-      .then((response) => {
-        if (!controller.signal.aborted) setCaseData(response);
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setCaseError(readError(error, "The patient case could not be loaded."));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoadingCase(false);
-      });
-    return () => controller.abort();
-  }, [selectedNeedId, selectedPatientId]);
+    queueMicrotask(() => void loadSelected(selectedNeedId, selectedPatientId));
+    return () => requestController.current?.abort();
+  }, [loadSelected, selectedNeedId, selectedPatientId]);
+
+  const refreshCanonical = useCallback(async () => {
+    if (!selectedNeedId || !selectedPatientId) return;
+    const response = await bootstrapNavigatorQueue();
+    setItems(response.items);
+    await loadSelected(selectedNeedId, selectedPatientId);
+  }, [loadSelected, selectedNeedId, selectedPatientId]);
 
   return (
     <main style={mainStyle}>
@@ -70,7 +102,7 @@ export default function NavigatorDemoPage() {
         error={queueError || undefined}
         items={items}
         onSelect={selectQueueItem}
-        selectedNeedId={selected?.need_id}
+        selectedNeedId={selectedNeedId}
         state={loadingQueue ? "loading" : undefined}
       />
       <PatientCase
@@ -78,12 +110,31 @@ export default function NavigatorDemoPage() {
         error={caseError || undefined}
         openNeeds={
           caseData?.open_needs
-          ?? (selected ? items.filter((item) => item.patient_id === selected.patient_id) : [])
+          ?? (selectedPatientId ? items.filter((item) => item.patient_id === selectedPatientId) : [])
         }
         state={loadingCase ? "loading" : undefined}
       />
+      <NeedWorkspace
+        error={workspaceError || undefined}
+        onRefresh={refreshCanonical}
+        state={loadingCase ? "loading" : undefined}
+        workspace={workspace}
+      />
     </main>
   );
+}
+
+function readRetainedSelection(): { needId: string; patientId: string } | undefined {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("ojcc-navigator-selection") ?? "null") as unknown;
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const value = parsed as Record<string, unknown>;
+    return typeof value.needId === "string" && typeof value.patientId === "string"
+      ? { needId: value.needId, patientId: value.patientId }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readError(error: unknown, fallback: string): string {

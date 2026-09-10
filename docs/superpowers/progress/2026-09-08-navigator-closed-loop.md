@@ -48,7 +48,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 2 — Navigator reads and compatible review: complete; focused checkpoint gate `117 passed`.
 - Package 3 — Task command services and concurrency: complete; focused checkpoint gate `81 passed`.
 - Package 4 — Patient response, timelines and resolution safety: complete; focused checkpoint gate `67 passed`.
-- Package 5 — Seeded UI and live browser-to-database journey: pending.
+- Package 5 — Seeded UI and live browser-to-database journey: complete; checkpoint gate API `443 passed`, web `34 passed`, mocked browser `3 passed`, live desktop `1 passed`, live mobile `1 passed`.
 - Package 6 — Reproducible verification and handoff: pending.
 
 ## RED / GREEN evidence
@@ -90,6 +90,17 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 4 Outcome safeguard: the shared synthetic-demo PHI guard now covers newly exposed Outcome note prose while preserving existing Outcome lifecycle/idempotency tests and never scanning UUID/idempotency/timestamp fields.
 - Package 4 focused command: `67 passed in 4.70s` across follow-ups, timelines, response/Outcome races, signed auth, Outcomes, check-ins, and tenant isolation.
 - Package 4 static checks: Ruff clean; Pyright on `services/api/app` and `services/api/tests/closed_loop` reports `0 errors, 0 warnings`.
+- Package 5 seed RED: the focused seed contract failed because the distinct transportation need, open task, pending v2 authorization proposal, and exact resource snapshot were absent. GREEN: stable `DEMO_IDS` add only that source-backed story after trigger enforcement is restored, preserve all legacy history, and extend summaries to both follow-up tables.
+- Package 5 reseed RED: exercising the story through approval, claim, start, completion, response, and Outcome made an `ON CONFLICT` insert fire the task lifecycle `BEFORE INSERT` guard on reseed. GREEN: an atomic stable-story boundary check leaves user-owned state unchanged; post-journey reseeding preserves the approved proposal, completed task, response, Outcome, closed need, and zero integrity violations without duplicating history.
+- Package 5 UI RED: Vitest reached the rendered navigator page but the selected-workspace evidence/control region was absent. GREEN: the navigator workspace now renders exact evidence, proposal/policy/resource review, governed task commands, follow-up state, truthful Outcome preview/results, and retained closed history; the patient view adds the controlled follow-up response and audience-safe timeline beside the existing check-in.
+- Package 5 live RED: the real API and Next servers started, signed role cookies and same-origin rewrites reached the seeded queue, and the scenario failed at the first missing evidence control rather than on configuration or network setup. GREEN: the unmocked scenario completes approve → claim → start → complete → patient response → navigator Outcome with independent contexts, explicit refresh, queue removal, retained history, reload persistence, exact database binding/row checks, and task audit checks.
+- Package 5 UI boundary coverage: invalid/missing/naive due times, unsupported or absent approved proposals, historical read-only tasks, pending double submission, uncertain idempotent Outcome retry, `409` canonical refetch, revoked-session recovery, blank and PHI-like notes, answered/closed requests, and empty queue with retained selection are executable Vitest cases. The live scenario uses keyboard activation and verifies the mobile viewport has no horizontal page overflow.
+- Package 5 seed/integration command: `35 passed in 24.90s`; the full API suite later completed `443 passed in 129.62s`. Existing API coverage exercises decline, `closed_unresolved`, and early-closure conflicts separately from the mutating browser journey.
+- Package 5 web gates: Vitest `34 passed`; ESLint clean; Next production build passed; existing mocked Playwright `3 passed`. The legacy smoke fixtures explicitly cover the new supplemental patient reads and a deterministic non-blocking workspace failure, so they make no accidental live-API requests.
+- Package 5 live gate: `scripts/verify_live_journey.ps1` validated the explicit loopback disposable name before connection, found the owned database unused before each reset, reset only `ojcc_demo_809e0d91920742a4acf2e26eee1ab341`, ran desktop and mobile sequentially, and released ports `8011`/`3011`; desktop `1 passed`, mobile `1 passed`, with zero pre-run integrity violations for both seeds.
+- Package 5 static checks: Ruff clean; configured Pyright scope reports `0 errors, 0 warnings`. An explicitly supplied whole-API Pyright path was discarded as an invalid gate because it overrides configured exclusions and surfaces 42 pre-existing migration/test-fixture diagnostics.
+- Package 5 full-suite RED: two legacy integration assertions still named Alembic `0005` as head. GREEN: their expectations now recognize additive head `0006_navigator_closed_loop`; the destructive downgrade still refuses before any `0005` teardown and leaves the revision at `0006`.
+- Immutable migration hashes `0001`–`0005` rechecked after the live gate and exactly match the preflight values; the protected-file diff is empty. The persistent `ojcc` database was never targeted by a reset, drop, seed, or live/API test command.
 
 ## Contract hashes
 
@@ -105,12 +116,14 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - `1e7ee41` — `feat: persist approved task execution and follow-up history`.
 - `2a33d37` — `feat: expose evidence and governed task proposal review`.
 - `59c0b39` — `feat: operate approved navigator tasks safely`.
-- Package 4 checkpoint prepared with message `feat: capture patient follow-up and audience-safe journey history`.
+- `54c29d9` — `feat: capture patient follow-up and audience-safe journey history`.
+- Package 5 checkpoint prepared with message `feat: deliver the synthetic navigator closed-loop journey`.
 
 ## Decisions and conflicts
 
 - Preflight review found no material scope or contract conflict. The plan status line still says “awaiting user approval,” but the execution contract explicitly requires conversation approval, which is present; the plan itself must remain byte-identical.
+- The Package 5 full-suite head mismatch was a stale test expectation, not a scope or migration-contract conflict: additive migration `0006` is the approved head, downgrade refusal preserved `0005`, and no protected migration was edited.
 
 ## Next exact step
 
-Commit the reviewed Package 4 files explicitly, then read the installed Next.js guidance and begin Package 5 with failing seed, component, and live-browser controls. No Package 6 work may begin before the Package 5 checkpoint.
+Commit the reviewed Package 5 files explicitly and stop at that checkpoint. Package 6 remains pending and must not begin in this execution milestone.

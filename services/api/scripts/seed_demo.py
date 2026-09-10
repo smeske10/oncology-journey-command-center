@@ -53,8 +53,10 @@ DEMO_IDS = {
         "submission_v2",
         "closed_need",
         "open_need",
+        "transportation_need",
         "cancelled_task",
         "open_task",
+        "transportation_task",
         "outcome",
         "deterministic_rule",
         "human_escalation_rule",
@@ -71,6 +73,7 @@ DEMO_IDS = {
         "dismiss_proposal",
         "override_proposal",
         "task_proposal",
+        "transportation_task_proposal",
         "message_proposal",
         "declined_proposal",
         "revised_proposal",
@@ -81,6 +84,8 @@ DEMO_IDS = {
         "decline_decision",
         "resource",
         "task_resource",
+        "transportation_resource",
+        "transportation_task_resource",
         "workflow",
         "transition_triaged",
         "transition_complete",
@@ -142,6 +147,8 @@ ROW_COUNT_TABLES = (
     "check_in_definition",
     "check_in_submission",
     "episode_pathway_assignment",
+    "follow_up_request",
+    "follow_up_response",
     "knowledge_document",
     "manual_review_task",
     "navigation_task",
@@ -1135,6 +1142,120 @@ def _seed_audit_events(
         )
 
 
+def _seed_closed_loop_transportation_story(
+    session: Session, ids: dict[str, UUID], values: dict[str, Any]
+) -> None:
+    """Add the interactive story with database trigger enforcement active."""
+    if session.scalar(
+        text(
+            "SELECT 1 FROM reported_need "
+            "WHERE organization_id = :organization AND id = :transportation_need"
+        ),
+        values,
+    ):
+        # The story is created atomically. Once present, its governed state is user-owned.
+        return
+    proposed_at = _at("2026-02-07T12:00:00+00:00")
+    resource_metadata = {"synthetic": True, "service_area": "demo"}
+    match_rationale = "Serves the synthetic patient's upcoming oncology visit."
+    proposed_value = {
+        "title": "Arrange transportation for oncology follow-up",
+        "resources": [
+            {
+                "resource_id": str(ids["transportation_resource"]),
+                "name": "Synthetic community ride network",
+                "category": "transportation",
+                "url": "https://example.test/community-rides",
+                "metadata": resource_metadata,
+                "match_rationale": match_rationale,
+            }
+        ],
+    }
+    _insert(
+        session,
+        "INSERT INTO reported_need "
+        "(id, organization_id, patient_id, care_episode_id, source_submission_id, kind, "
+        "status, evidence, created_at) VALUES "
+        "(:transportation_need, :organization, :patient, :episode, :submission_v2, "
+        "'transportation', 'open', CAST(:evidence AS jsonb), :proposed_at) "
+        "ON CONFLICT DO NOTHING",
+        values
+        | {
+            "proposed_at": proposed_at,
+            "evidence": json.dumps(
+                [
+                    {
+                        "question_id": "transportation",
+                        "label": "Need synthetic transportation support?",
+                        "value": "yes",
+                        "source": "patient-supplied",
+                    }
+                ],
+                sort_keys=True,
+            ),
+        },
+    )
+    _insert(
+        session,
+        "INSERT INTO navigation_task "
+        "(id, organization_id, patient_id, reported_need_id, title, status, created_at) VALUES "
+        "(:transportation_task, :organization, :patient, :transportation_need, "
+        "'Arrange transportation for oncology follow-up', 'open', :proposed_at) "
+        "ON CONFLICT DO NOTHING",
+        values | {"proposed_at": proposed_at},
+    )
+    _insert(
+        session,
+        "INSERT INTO resource "
+        "(id, organization_id, name, category, url, is_active, metadata, created_at) VALUES "
+        "(:transportation_resource, :organization, 'Synthetic community ride network', "
+        "'transportation', 'https://example.test/community-rides', true, "
+        "CAST(:metadata AS jsonb), :proposed_at) ON CONFLICT DO NOTHING",
+        values
+        | {
+            "metadata": json.dumps(resource_metadata, sort_keys=True),
+            "proposed_at": proposed_at,
+        },
+    )
+    _insert(
+        session,
+        "INSERT INTO proposed_change "
+        "(id, organization_id, proposed_by_agent_run_id, proposed_at, change_type, "
+        "proposed_value, rationale, value_schema_id, value_schema_version, navigation_task_id, "
+        "approval_policy_id, approval_policy_version, deterministic_severity_threshold_snapshot, "
+        "allow_self_approval_snapshot, required_approval_count_snapshot, "
+        "required_approver_role_snapshot) VALUES "
+        "(:transportation_task_proposal, :organization, :successful_agent_run, :proposed_at, "
+        "'authorize_navigation_task', CAST(:proposed_value AS jsonb), "
+        "'Synthetic transportation support proposed from the latest check-in.', "
+        "'ojcc.authorize-navigation-task', 2, :transportation_task, :task_policy, 1, NULL, "
+        "false, 1, 'navigator') ON CONFLICT DO NOTHING",
+        values
+        | {
+            "proposed_at": proposed_at,
+            "proposed_value": json.dumps(proposed_value, sort_keys=True),
+        },
+    )
+    _insert(
+        session,
+        "INSERT INTO navigation_task_resource "
+        "(id, organization_id, navigation_task_id, resource_id, proposed_change_id, "
+        "resource_name_snapshot, resource_category_snapshot, resource_url_snapshot, "
+        "resource_metadata_snapshot, match_rationale_snapshot, proposed_at) VALUES "
+        "(:transportation_task_resource, :organization, :transportation_task, "
+        ":transportation_resource, :transportation_task_proposal, "
+        "'Synthetic community ride network', 'transportation', "
+        "'https://example.test/community-rides', CAST(:metadata AS jsonb), :match_rationale, "
+        ":proposed_at) ON CONFLICT DO NOTHING",
+        values
+        | {
+            "metadata": json.dumps(resource_metadata, sort_keys=True),
+            "match_rationale": match_rationale,
+            "proposed_at": proposed_at,
+        },
+    )
+
+
 def seed_demo(session: Session) -> SeedSummary:
     """Insert one fixed, entirely synthetic and idempotent reconciled-domain dataset."""
     ids = DEMO_IDS
@@ -1153,6 +1274,7 @@ def seed_demo(session: Session) -> SeedSummary:
     finally:
         if restore_trigger_enforcement:
             session.execute(text("SET LOCAL session_replication_role = origin"))
+    _seed_closed_loop_transportation_story(session, ids, values)
     return SeedSummary(organization_id=ids["organization"], row_counts=_row_counts(session))
 
 

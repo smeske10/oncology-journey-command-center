@@ -1,6 +1,12 @@
 import { expect, test, vi } from "vitest";
 
-import { bootstrapPatientCheckIn, submitCheckIn } from "../lib/api-client";
+import {
+  bootstrapPatientCheckIn,
+  claimTask,
+  recordOutcome,
+  respondToFollowUp,
+  submitCheckIn,
+} from "../lib/api-client";
 
 test("bootstraps a synthetic session and loads the generated current-check-in contract", async () => {
   const fetchMock = vi.fn()
@@ -87,4 +93,59 @@ test("does not classify an unknown 422 response as a correctable answer", async 
       answers: [{ link_id: "nausea_change", value: "worse" }],
     }),
   ).rejects.toMatchObject({ kind: "configuration" });
+});
+
+test("sends governed task, follow-up, and Outcome commands to their exact contracts", async () => {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json({})));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await claimTask("task/one", "proposal-one", "2099-09-10T18:30:00.000Z");
+  await respondToFollowUp("request/one", { response: "resolved", note: undefined });
+  await recordOutcome("need/one", { disposition: "resolved" }, "stable-command-key");
+
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    1,
+    "/api/v1/navigator/tasks/task%2Fone/claim",
+    expect.objectContaining({
+      body: JSON.stringify({
+        due_at: "2099-09-10T18:30:00.000Z",
+        proposed_change_id: "proposal-one",
+      }),
+      credentials: "include",
+      method: "POST",
+    }),
+  );
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    2,
+    "/api/v1/patient/follow-ups/request%2Fone/responses",
+    expect.objectContaining({
+      body: JSON.stringify({ response: "resolved", note: undefined }),
+      credentials: "include",
+      method: "POST",
+    }),
+  );
+  expect(fetchMock).toHaveBeenNthCalledWith(
+    3,
+    "/api/v1/navigator/needs/need%2Fone/outcomes",
+    expect.objectContaining({
+      credentials: "include",
+      headers: expect.objectContaining({ "Idempotency-Key": "stable-command-key" }),
+      method: "POST",
+    }),
+  );
+});
+
+test("preserves typed conflict and authorization status for canonical recovery", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      Response.json(
+        { detail: { code: "task_state_conflict", message: "Task changed." } },
+        { status: 409 },
+      ),
+    ),
+  );
+
+  await expect(claimTask("task-one", "proposal-one", "2099-09-10T18:30:00.000Z"))
+    .rejects.toMatchObject({ code: "task_state_conflict", status: 409 });
 });
