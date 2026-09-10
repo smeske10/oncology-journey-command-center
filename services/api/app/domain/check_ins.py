@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -12,29 +11,8 @@ from sqlalchemy import DateTime, String, Uuid, column, table
 from app.auth.models import CurrentActor
 from app.db.models import CheckInDefinition, CheckInSubmission
 from app.domain.enums import CheckInStatus, SubmissionSource
+from app.domain.public_demo import PUBLIC_DEMO_PHI_WARNING, contains_real_phi
 from app.domain.types import uuid7
-
-PUBLIC_DEMO_PHI_WARNING = (
-    "This public synthetic demo must not receive real health information or contact details. "
-    "Please remove email addresses, phone numbers, and medical-record identifiers."
-)
-
-_EMAIL_PATTERN = re.compile(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b")
-_PHONE_PATTERN = re.compile(r"(?:\+?\d[\d(). -]{7,}\d)")
-_MRN_PATTERN = re.compile(
-    r"\b(?:mrn|medical[ -]?record(?:[ -]?(?:number|no))?)\s*[:#-]?\s*[A-Za-z0-9-]{4,}\b",
-    re.IGNORECASE,
-)
-_CONTACT_FIELDS = {
-    "contact",
-    "contact_email",
-    "email",
-    "mobile",
-    "phone",
-    "phone_number",
-    "telephone",
-}
-_NON_CONTENT_FIELDS = {"link_id", "questionnaire_version", "supersedes_submission_id"}
 
 active_check_in_submission = table(
     "active_check_in_submission",
@@ -66,7 +44,7 @@ class CheckInSubmissionCreate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def reject_real_phi(cls, values: Any) -> Any:
-        if _contains_real_phi(values):
+        if contains_real_phi(values):
             raise ValueError(PUBLIC_DEMO_PHI_WARNING)
         return values
 
@@ -77,22 +55,6 @@ class CheckInDefinitionMismatchError(ValueError):
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
         self.code = code
-
-
-def _contains_real_phi(value: Any, key: str | None = None) -> bool:
-    if key is not None and key.lower() in _NON_CONTENT_FIELDS:
-        return False
-    if key is not None and key.lower() in _CONTACT_FIELDS:
-        return True
-    if isinstance(value, Mapping):
-        return any(_contains_real_phi(item, str(item_key)) for item_key, item in value.items())
-    if isinstance(value, list):
-        return any(_contains_real_phi(item) for item in value)
-    if not isinstance(value, str):
-        return False
-    return bool(
-        _EMAIL_PATTERN.search(value) or _PHONE_PATTERN.search(value) or _MRN_PATTERN.search(value)
-    )
 
 
 def create_immutable_submission(

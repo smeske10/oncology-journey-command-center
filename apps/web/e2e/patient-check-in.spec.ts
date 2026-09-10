@@ -37,6 +37,12 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
       }),
     }),
   );
+  await page.route("**/api/v1/patient/follow-ups", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }),
+  );
+  await page.route("**/api/v1/patient/journey-timeline", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ events: [] }) }),
+  );
   await page.route("**/api/v1/patient/check-ins/*/submissions", async (route) => {
     submissionAttempt += 1;
     const payload = route.request().postDataJSON();

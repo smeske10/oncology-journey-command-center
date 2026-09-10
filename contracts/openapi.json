@@ -92,9 +92,16 @@
             "$ref": "#/components/schemas/ApprovalDecisionValue"
           },
           "qualifying_role_assignment_id": {
-            "format": "uuid",
-            "title": "Qualifying Role Assignment Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualifying Role Assignment Id"
           },
           "reason": {
             "anyOf": [
@@ -110,8 +117,7 @@
           }
         },
         "required": [
-          "decision",
-          "qualifying_role_assignment_id"
+          "decision"
         ],
         "title": "ApprovalDecisionCreate",
         "type": "object"
@@ -192,6 +198,78 @@
         "title": "ApprovalDecisionValue",
         "type": "string"
       },
+      "CheckInCorrectedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CheckInDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "check_in_corrected",
+            "default": "check_in_corrected",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "check_in_submission",
+            "default": "check_in_submission",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "CheckInCorrectedEvent",
+        "type": "object"
+      },
       "CheckInDefinitionResponse": {
         "properties": {
           "active_submission_id": {
@@ -236,6 +314,32 @@
           "active_submission_id"
         ],
         "title": "CheckInDefinitionResponse",
+        "type": "object"
+      },
+      "CheckInDetail": {
+        "properties": {
+          "correction_of_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correction Of Submission Id"
+          },
+          "inherited": {
+            "title": "Inherited",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "correction_of_submission_id",
+          "inherited"
+        ],
+        "title": "CheckInDetail",
         "type": "object"
       },
       "CheckInSubmissionCreate": {
@@ -367,6 +471,125 @@
         "title": "CheckInSubmissionResponse",
         "type": "object"
       },
+      "CheckInSubmittedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/CheckInDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "check_in_submitted",
+            "default": "check_in_submitted",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "check_in_submission",
+            "default": "check_in_submission",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "CheckInSubmittedEvent",
+        "type": "object"
+      },
+      "ComparisonDeltaRead": {
+        "properties": {
+          "current_present": {
+            "title": "Current Present",
+            "type": "boolean"
+          },
+          "current_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "field_identifier": {
+            "title": "Field Identifier",
+            "type": "string"
+          },
+          "previous_present": {
+            "title": "Previous Present",
+            "type": "boolean"
+          },
+          "previous_value": {
+            "$ref": "#/components/schemas/JsonValue"
+          }
+        },
+        "required": [
+          "field_identifier",
+          "previous_present",
+          "current_present",
+          "previous_value",
+          "current_value"
+        ],
+        "title": "ComparisonDeltaRead",
+        "type": "object"
+      },
+      "EffectiveProposalState": {
+        "enum": [
+          "superseded",
+          "declined",
+          "approved",
+          "pending"
+        ],
+        "title": "EffectiveProposalState",
+        "type": "string"
+      },
+      "EmptyTaskCommand": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "EmptyTaskCommand",
+        "type": "object"
+      },
       "EvidenceRead": {
         "properties": {
           "field": {
@@ -385,6 +608,308 @@
         "title": "EvidenceRead",
         "type": "object"
       },
+      "FollowUpErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "need_closed",
+              "follow_up_already_answered",
+              "concurrent_change"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "FollowUpErrorDetail",
+        "type": "object"
+      },
+      "FollowUpErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/FollowUpErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "FollowUpErrorResponse",
+        "type": "object"
+      },
+      "FollowUpRequestedDetail": {
+        "properties": {
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_version",
+          "prompt"
+        ],
+        "title": "FollowUpRequestedDetail",
+        "type": "object"
+      },
+      "FollowUpRequestedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/FollowUpRequestedDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "follow_up_requested",
+            "default": "follow_up_requested",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "follow_up_request",
+            "default": "follow_up_request",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "FollowUpRequestedEvent",
+        "type": "object"
+      },
+      "FollowUpRespondedDetail": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "response": {
+            "$ref": "#/components/schemas/FollowUpResponseValue"
+          }
+        },
+        "required": [
+          "response",
+          "note"
+        ],
+        "title": "FollowUpRespondedDetail",
+        "type": "object"
+      },
+      "FollowUpRespondedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/FollowUpRespondedDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "follow_up_responded",
+            "default": "follow_up_responded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "follow_up_response",
+            "default": "follow_up_response",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "FollowUpRespondedEvent",
+        "type": "object"
+      },
+      "FollowUpResponseCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "response": {
+            "$ref": "#/components/schemas/FollowUpResponseValue"
+          }
+        },
+        "required": [
+          "response"
+        ],
+        "title": "FollowUpResponseCreate",
+        "type": "object"
+      },
+      "FollowUpResponseRead": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "response": {
+            "$ref": "#/components/schemas/FollowUpResponseValue"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "response",
+          "note",
+          "submitted_at",
+          "replayed"
+        ],
+        "title": "FollowUpResponseRead",
+        "type": "object"
+      },
+      "FollowUpResponseValue": {
+        "enum": [
+          "resolved",
+          "unresolved",
+          "still_needs_help"
+        ],
+        "title": "FollowUpResponseValue",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -398,6 +923,7 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "JsonValue": {},
       "NavigationTaskRead": {
         "properties": {
           "created_at": {
@@ -460,6 +986,226 @@
         "title": "NavigationTaskRead",
         "type": "object"
       },
+      "NavigationTaskStatus": {
+        "enum": [
+          "open",
+          "assigned",
+          "in_progress",
+          "completed",
+          "cancelled"
+        ],
+        "title": "NavigationTaskStatus",
+        "type": "string"
+      },
+      "NavigatorNeedWorkspaceRead": {
+        "properties": {
+          "comparisons": {
+            "$ref": "#/components/schemas/WorkspaceComparisonsRead"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceEvidenceRead"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "follow_ups": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceFollowUpRead"
+            },
+            "title": "Follow Ups",
+            "type": "array"
+          },
+          "need": {
+            "$ref": "#/components/schemas/WorkspaceNeedRead"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceOutcomeRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceTaskRead"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "timeline": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "check_in_corrected": "#/components/schemas/CheckInCorrectedEvent",
+                  "check_in_submitted": "#/components/schemas/CheckInSubmittedEvent",
+                  "follow_up_requested": "#/components/schemas/FollowUpRequestedEvent",
+                  "follow_up_responded": "#/components/schemas/FollowUpRespondedEvent",
+                  "need_reported": "#/components/schemas/NeedReportedEvent",
+                  "outcome_recorded": "#/components/schemas/NavigatorOutcomeRecordedEvent",
+                  "proposal_created": "#/components/schemas/ProposalCreatedEvent",
+                  "proposal_decided": "#/components/schemas/ProposalDecidedEvent",
+                  "task_cancelled": "#/components/schemas/TaskCancelledEvent",
+                  "task_claimed": "#/components/schemas/TaskClaimedEvent",
+                  "task_completed": "#/components/schemas/TaskCompletedEvent",
+                  "task_started": "#/components/schemas/TaskStartedEvent"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CheckInSubmittedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/CheckInCorrectedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/NeedReportedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/ProposalCreatedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/ProposalDecidedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskClaimedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskStartedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskCompletedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/FollowUpRequestedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/FollowUpRespondedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/NavigatorOutcomeRecordedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskCancelledEvent"
+                }
+              ]
+            },
+            "title": "Timeline",
+            "type": "array"
+          }
+        },
+        "required": [
+          "need",
+          "evidence",
+          "comparisons",
+          "tasks",
+          "follow_ups",
+          "outcome",
+          "timeline"
+        ],
+        "title": "NavigatorNeedWorkspaceRead",
+        "type": "object"
+      },
+      "NavigatorOutcomeDetail": {
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "disposition",
+          "note"
+        ],
+        "title": "NavigatorOutcomeDetail",
+        "type": "object"
+      },
+      "NavigatorOutcomeRecordedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/NavigatorOutcomeDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "outcome_recorded",
+            "default": "outcome_recorded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "outcome",
+            "default": "outcome",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "NavigatorOutcomeRecordedEvent",
+        "type": "object"
+      },
       "NavigatorQueueRead": {
         "properties": {
           "items": {
@@ -474,6 +1220,96 @@
           "items"
         ],
         "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "NeedDetail": {
+        "properties": {
+          "inherited": {
+            "title": "Inherited",
+            "type": "boolean"
+          },
+          "practical_need_label": {
+            "title": "Practical Need Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "practical_need_label",
+          "inherited"
+        ],
+        "title": "NeedDetail",
+        "type": "object"
+      },
+      "NeedReportedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/NeedDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "need_reported",
+            "default": "need_reported",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "reported_need",
+            "default": "reported_need",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "NeedReportedEvent",
         "type": "object"
       },
       "OutcomeCommandCreate": {
@@ -670,6 +1506,256 @@
         "title": "PatientCaseRead",
         "type": "object"
       },
+      "PatientFollowUpListRead": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PatientFollowUpRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PatientFollowUpListRead",
+        "type": "object"
+      },
+      "PatientFollowUpRead": {
+        "properties": {
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "integer"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FollowUpResponseValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "awaiting_response",
+              "answered",
+              "unavailable_need_closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "need_id",
+          "task_id",
+          "requested_at",
+          "prompt_version",
+          "prompt",
+          "status",
+          "response",
+          "note",
+          "responded_at"
+        ],
+        "title": "PatientFollowUpRead",
+        "type": "object"
+      },
+      "PatientOutcomeDetail": {
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/OutcomeDisposition"
+          }
+        },
+        "required": [
+          "disposition"
+        ],
+        "title": "PatientOutcomeDetail",
+        "type": "object"
+      },
+      "PatientOutcomeRecordedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/PatientOutcomeDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "outcome_recorded",
+            "default": "outcome_recorded",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "outcome",
+            "default": "outcome",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "PatientOutcomeRecordedEvent",
+        "type": "object"
+      },
+      "PatientTimelineRead": {
+        "properties": {
+          "events": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "check_in_corrected": "#/components/schemas/CheckInCorrectedEvent",
+                  "check_in_submitted": "#/components/schemas/CheckInSubmittedEvent",
+                  "follow_up_requested": "#/components/schemas/FollowUpRequestedEvent",
+                  "follow_up_responded": "#/components/schemas/FollowUpRespondedEvent",
+                  "need_reported": "#/components/schemas/NeedReportedEvent",
+                  "outcome_recorded": "#/components/schemas/PatientOutcomeRecordedEvent",
+                  "task_cancelled": "#/components/schemas/TaskCancelledEvent",
+                  "task_claimed": "#/components/schemas/TaskClaimedEvent",
+                  "task_completed": "#/components/schemas/TaskCompletedEvent",
+                  "task_started": "#/components/schemas/TaskStartedEvent"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CheckInSubmittedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/CheckInCorrectedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/NeedReportedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskClaimedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskStartedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskCompletedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/FollowUpRequestedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/FollowUpRespondedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/PatientOutcomeRecordedEvent"
+                },
+                {
+                  "$ref": "#/components/schemas/TaskCancelledEvent"
+                }
+              ]
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "PatientTimelineRead",
+        "type": "object"
+      },
       "PriorityResultRead": {
         "properties": {
           "level": {
@@ -699,6 +1785,184 @@
           "reasons"
         ],
         "title": "PriorityResultRead",
+        "type": "object"
+      },
+      "ProposalCreatedDetail": {
+        "properties": {
+          "proposal_state": {
+            "$ref": "#/components/schemas/EffectiveProposalState"
+          },
+          "value_schema_id": {
+            "title": "Value Schema Id",
+            "type": "string"
+          },
+          "value_schema_version": {
+            "title": "Value Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "proposal_state",
+          "value_schema_id",
+          "value_schema_version"
+        ],
+        "title": "ProposalCreatedDetail",
+        "type": "object"
+      },
+      "ProposalCreatedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ProposalCreatedDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "proposal_created",
+            "default": "proposal_created",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "proposed_change",
+            "default": "proposed_change",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "ProposalCreatedEvent",
+        "type": "object"
+      },
+      "ProposalDecidedDetail": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecisionValue"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ProposalDecidedDetail",
+        "type": "object"
+      },
+      "ProposalDecidedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ProposalDecidedDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "proposal_decided",
+            "default": "proposal_decided",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "approval_decision",
+            "default": "approval_decision",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "ProposalDecidedEvent",
         "type": "object"
       },
       "ProposedChangeCreate": {
@@ -1136,6 +2400,60 @@
         "title": "SafetySignalRead",
         "type": "object"
       },
+      "SubmissionComparisonRead": {
+        "properties": {
+          "current_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Submission Id"
+          },
+          "deltas": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonDeltaRead"
+            },
+            "title": "Deltas",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "previous_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Submission Id"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "insufficient_history",
+              "not_comparable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "label"
+        ],
+        "title": "SubmissionComparisonRead",
+        "type": "object"
+      },
       "SubmissionRead": {
         "properties": {
           "free_text": {
@@ -1190,6 +2508,479 @@
         "title": "SubmissionRead",
         "type": "object"
       },
+      "TaskCancelledDetail": {
+        "properties": {
+          "reason": {
+            "const": "need_closed",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "TaskCancelledDetail",
+        "type": "object"
+      },
+      "TaskCancelledEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TaskCancelledDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "task_cancelled",
+            "default": "task_cancelled",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "audit_event",
+            "default": "audit_event",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "TaskCancelledEvent",
+        "type": "object"
+      },
+      "TaskClaimCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "due_at": {
+            "format": "date-time",
+            "title": "Due At",
+            "type": "string"
+          },
+          "proposed_change_id": {
+            "format": "uuid",
+            "title": "Proposed Change Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposed_change_id",
+          "due_at"
+        ],
+        "title": "TaskClaimCreate",
+        "type": "object"
+      },
+      "TaskClaimedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TaskProgressDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "task_claimed",
+            "default": "task_claimed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "audit_event",
+            "default": "audit_event",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "TaskClaimedEvent",
+        "type": "object"
+      },
+      "TaskCommandErrorDetail": {
+        "properties": {
+          "code": {
+            "enum": [
+              "need_closed",
+              "task_state_conflict",
+              "task_claim_mismatch",
+              "task_unbound",
+              "proposal_not_approved",
+              "concurrent_change"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TaskCommandErrorDetail",
+        "type": "object"
+      },
+      "TaskCommandErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TaskCommandErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TaskCommandErrorResponse",
+        "type": "object"
+      },
+      "TaskCommandRead": {
+        "properties": {
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "authorized_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized Proposed Change Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "follow_up_request_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up Request Id"
+          },
+          "need_id": {
+            "format": "uuid",
+            "title": "Need Id",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NavigationTaskStatus"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "need_id",
+          "status",
+          "assignee_user_id",
+          "due_at",
+          "authorized_proposed_change_id",
+          "completed_at",
+          "follow_up_request_id",
+          "replayed"
+        ],
+        "title": "TaskCommandRead",
+        "type": "object"
+      },
+      "TaskCompletedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TaskProgressDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "task_completed",
+            "default": "task_completed",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "audit_event",
+            "default": "audit_event",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "TaskCompletedEvent",
+        "type": "object"
+      },
+      "TaskProgressDetail": {
+        "properties": {
+          "status": {
+            "enum": [
+              "assigned",
+              "in_progress",
+              "completed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TaskProgressDetail",
+        "type": "object"
+      },
+      "TaskStartedEvent": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TaskProgressDetail"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "task_started",
+            "default": "task_started",
+            "title": "Kind",
+            "type": "string"
+          },
+          "need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_type": {
+            "const": "audit_event",
+            "default": "audit_event",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "event_id",
+          "occurred_at",
+          "source_id",
+          "need_id",
+          "task_id",
+          "summary",
+          "detail"
+        ],
+        "title": "TaskStartedEvent",
+        "type": "object"
+      },
       "UserRole": {
         "enum": [
           "administrator",
@@ -1237,6 +3028,672 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceApprovalDecisionRead": {
+        "properties": {
+          "authorized_at": {
+            "format": "date-time",
+            "title": "Authorized At",
+            "type": "string"
+          },
+          "authorized_by_user_id": {
+            "format": "uuid",
+            "title": "Authorized By User Id",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "qualifying_role_assignment_id": {
+            "format": "uuid",
+            "title": "Qualifying Role Assignment Id",
+            "type": "string"
+          },
+          "qualifying_role_snapshot": {
+            "title": "Qualifying Role Snapshot",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "authorized_by_user_id",
+          "qualifying_role_assignment_id",
+          "qualifying_role_snapshot",
+          "decision",
+          "authorized_at",
+          "reason"
+        ],
+        "title": "WorkspaceApprovalDecisionRead",
+        "type": "object"
+      },
+      "WorkspaceApprovalPolicyRead": {
+        "properties": {
+          "allow_self_approval": {
+            "title": "Allow Self Approval",
+            "type": "boolean"
+          },
+          "deterministic_severity_threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deterministic Severity Threshold"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "required_approval_count": {
+            "title": "Required Approval Count",
+            "type": "integer"
+          },
+          "required_approver_role": {
+            "title": "Required Approver Role",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "allow_self_approval",
+          "required_approval_count",
+          "required_approver_role",
+          "deterministic_severity_threshold"
+        ],
+        "title": "WorkspaceApprovalPolicyRead",
+        "type": "object"
+      },
+      "WorkspaceComparisonsRead": {
+        "properties": {
+          "between_check_ins": {
+            "$ref": "#/components/schemas/SubmissionComparisonRead"
+          },
+          "correction": {
+            "$ref": "#/components/schemas/SubmissionComparisonRead"
+          }
+        },
+        "required": [
+          "correction",
+          "between_check_ins"
+        ],
+        "title": "WorkspaceComparisonsRead",
+        "type": "object"
+      },
+      "WorkspaceEvidenceRead": {
+        "properties": {
+          "display_text": {
+            "title": "Display Text",
+            "type": "string"
+          },
+          "field_identifier": {
+            "title": "Field Identifier",
+            "type": "string"
+          },
+          "provenance_kind": {
+            "enum": [
+              "source_submission",
+              "inherited_history",
+              "stored_need_evidence"
+            ],
+            "title": "Provenance Kind",
+            "type": "string"
+          },
+          "source_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Submission Id"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "value_present": {
+            "title": "Value Present",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source_submission_id",
+          "field_identifier",
+          "value_present",
+          "value",
+          "display_text",
+          "provenance_kind"
+        ],
+        "title": "WorkspaceEvidenceRead",
+        "type": "object"
+      },
+      "WorkspaceFollowUpRead": {
+        "properties": {
+          "navigation_task_id": {
+            "format": "uuid",
+            "title": "Navigation Task Id",
+            "type": "string"
+          },
+          "prompt_version": {
+            "title": "Prompt Version",
+            "type": "integer"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by_user_id": {
+            "format": "uuid",
+            "title": "Requested By User Id",
+            "type": "string"
+          },
+          "responded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responded At"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "response_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Note"
+          },
+          "status": {
+            "enum": [
+              "awaiting_response",
+              "answered",
+              "unavailable_need_closed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "navigation_task_id",
+          "requested_by_user_id",
+          "requested_at",
+          "prompt_version",
+          "status",
+          "response",
+          "response_note",
+          "responded_at"
+        ],
+        "title": "WorkspaceFollowUpRead",
+        "type": "object"
+      },
+      "WorkspaceNeedRead": {
+        "properties": {
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_state": {
+            "title": "Effective State",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "raw_status": {
+            "title": "Raw Status",
+            "type": "string"
+          },
+          "reopened_from_need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopened From Need Id"
+          }
+        },
+        "required": [
+          "id",
+          "patient_id",
+          "care_episode_id",
+          "patient_display_name",
+          "kind",
+          "raw_status",
+          "effective_state",
+          "created_at",
+          "reopened_from_need_id"
+        ],
+        "title": "WorkspaceNeedRead",
+        "type": "object"
+      },
+      "WorkspaceOutcomeRead": {
+        "properties": {
+          "disposition": {
+            "title": "Disposition",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by_user_id": {
+            "format": "uuid",
+            "title": "Recorded By User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "disposition",
+          "note",
+          "recorded_by_user_id",
+          "recorded_at"
+        ],
+        "title": "WorkspaceOutcomeRead",
+        "type": "object"
+      },
+      "WorkspaceProposalRead": {
+        "properties": {
+          "change_type": {
+            "title": "Change Type",
+            "type": "string"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceApprovalDecisionRead"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "execution_authorized": {
+            "title": "Execution Authorized",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceApprovalPolicyRead"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_value": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Proposed Value",
+            "type": "object"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceResourceRead"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "reviewable": {
+            "title": "Reviewable",
+            "type": "boolean"
+          },
+          "root_proposal_id": {
+            "format": "uuid",
+            "title": "Root Proposal Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "supersedes_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Proposed Change Id"
+          },
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "unsupported_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Reason"
+          },
+          "value_schema_id": {
+            "title": "Value Schema Id",
+            "type": "string"
+          },
+          "value_schema_version": {
+            "title": "Value Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "root_proposal_id",
+          "supersedes_proposed_change_id",
+          "proposed_at",
+          "state",
+          "supported",
+          "reviewable",
+          "execution_authorized",
+          "unsupported_reason",
+          "change_type",
+          "title",
+          "proposed_value",
+          "rationale",
+          "value_schema_id",
+          "value_schema_version",
+          "policy",
+          "decisions",
+          "resources"
+        ],
+        "title": "WorkspaceProposalRead",
+        "type": "object"
+      },
+      "WorkspaceResourceRead": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "match_rationale": {
+            "title": "Match Rationale",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "resource_id": {
+            "format": "uuid",
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "resource_id",
+          "name",
+          "category",
+          "url",
+          "metadata",
+          "match_rationale",
+          "proposed_at",
+          "approved_at",
+          "delivered_at"
+        ],
+        "title": "WorkspaceResourceRead",
+        "type": "object"
+      },
+      "WorkspaceTaskRead": {
+        "properties": {
+          "assignee_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee User Id"
+          },
+          "authorized_proposed_change_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorized Proposed Change Id"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceProposalRead"
+            },
+            "title": "Proposals",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "assignee_user_id",
+          "due_at",
+          "authorized_proposed_change_id",
+          "completed_at",
+          "created_at",
+          "proposals"
+        ],
+        "title": "WorkspaceTaskRead",
         "type": "object"
       }
     }
@@ -1406,6 +3863,49 @@
           }
         },
         "summary": "Post Outcome",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/needs/{need_id}/workspace": {
+      "get": {
+        "operationId": "get_navigator_need_workspace_v1_navigator_needs__need_id__workspace_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "need_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Need Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigatorNeedWorkspaceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Navigator Need Workspace",
         "tags": [
           "navigator"
         ]
@@ -1675,6 +4175,195 @@
         ]
       }
     },
+    "/v1/navigator/tasks/{task_id}/claim": {
+      "post": {
+        "operationId": "claim_task_v1_navigator_tasks__task_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskClaimCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Task",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/tasks/{task_id}/complete": {
+      "post": {
+        "operationId": "complete_task_v1_navigator_tasks__task_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyTaskCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Task",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/tasks/{task_id}/start": {
+      "post": {
+        "operationId": "start_task_v1_navigator_tasks__task_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyTaskCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskCommandErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Task",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
     "/v1/patient/check-ins/current": {
       "get": {
         "operationId": "get_current_check_in_v1_patient_check_ins_current_get",
@@ -1791,6 +4480,121 @@
         "summary": "Export Submission As Synthetic Fhir",
         "tags": [
           "patient-check-ins"
+        ]
+      }
+    },
+    "/v1/patient/follow-ups": {
+      "get": {
+        "operationId": "get_patient_follow_ups_v1_patient_follow_ups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatientFollowUpListRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Patient Follow Ups",
+        "tags": [
+          "patient-follow-ups"
+        ]
+      }
+    },
+    "/v1/patient/follow-ups/{request_id}/responses": {
+      "post": {
+        "operationId": "post_follow_up_response_v1_patient_follow_ups__request_id__responses_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowUpResponseCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowUpResponseRead"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowUpResponseRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowUpErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Follow Up Response",
+        "tags": [
+          "patient-follow-ups"
+        ]
+      }
+    },
+    "/v1/patient/journey-timeline": {
+      "get": {
+        "operationId": "get_patient_journey_timeline_v1_patient_journey_timeline_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatientTimelineRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Patient Journey Timeline",
+        "tags": [
+          "patient-journey"
         ]
       }
     }

@@ -573,6 +573,352 @@ def inspect_integrity(session: Session) -> list[IntegrityViolation]:
         evidence_columns=("chain_type", "successor_ids"),
     )
 
+    _add_rows(
+        session,
+        violations,
+        category="invalid_bound_task_authorization",
+        query="""
+            SELECT
+                task.id AS navigation_task_id,
+                task.authorized_proposed_change_id,
+                CASE
+                    WHEN proposal.id IS NULL THEN 'missing_proposal'
+                    WHEN proposal.organization_id IS DISTINCT FROM task.organization_id
+                      OR proposal.navigation_task_id IS DISTINCT FROM task.id
+                        THEN 'wrong_scope_or_target'
+                    WHEN proposal.change_type IS DISTINCT FROM 'authorize_navigation_task'
+                      OR proposal.value_schema_id IS DISTINCT FROM
+                            'ojcc.authorize-navigation-task'
+                      OR proposal.value_schema_version NOT IN (1, 2)
+                        THEN 'unsupported_contract'
+                    WHEN state.effective_state IS DISTINCT FROM 'approved'
+                        THEN 'proposal_not_approved'
+                    ELSE 'approved_title_mismatch'
+                END AS issue,
+                coalesce(state.effective_state::text, 'missing') AS effective_state,
+                proposal.value_schema_version
+            FROM navigation_task AS task
+            LEFT JOIN proposed_change AS proposal
+              ON proposal.organization_id = task.organization_id
+             AND proposal.id = task.authorized_proposed_change_id
+            LEFT JOIN effective_proposed_change_state AS state
+              ON state.organization_id = proposal.organization_id
+             AND state.id = proposal.id
+            WHERE task.authorized_proposed_change_id IS NOT NULL
+              AND (
+                    proposal.id IS NULL
+                 OR proposal.organization_id IS DISTINCT FROM task.organization_id
+                 OR proposal.navigation_task_id IS DISTINCT FROM task.id
+                 OR proposal.change_type IS DISTINCT FROM 'authorize_navigation_task'
+                 OR proposal.value_schema_id IS DISTINCT FROM
+                        'ojcc.authorize-navigation-task'
+                 OR proposal.value_schema_version NOT IN (1, 2)
+                 OR state.effective_state IS DISTINCT FROM 'approved'
+                 OR task.title IS DISTINCT FROM proposal.proposed_value->>'title'
+              )
+            ORDER BY task.id
+        """,
+        identifier_columns=("navigation_task_id", "authorized_proposed_change_id"),
+        evidence_columns=("issue", "effective_state", "value_schema_version"),
+    )
+
+    _add_rows(
+        session,
+        violations,
+        category="inconsistent_bound_task_lifecycle",
+        query="""
+            SELECT
+                task.id AS navigation_task_id,
+                task.authorized_proposed_change_id,
+                task.status::text AS task_status,
+                task.assignee_user_id,
+                task.due_at,
+                task.completed_at
+            FROM navigation_task AS task
+            WHERE task.authorized_proposed_change_id IS NOT NULL
+              AND (
+                    task.status = 'open'
+                 OR task.assignee_user_id IS NULL
+                 OR task.due_at IS NULL
+                 OR (task.status = 'completed') IS DISTINCT FROM
+                    (task.completed_at IS NOT NULL)
+              )
+            ORDER BY task.id
+        """,
+        identifier_columns=("navigation_task_id", "authorized_proposed_change_id"),
+        evidence_columns=(
+            "task_status",
+            "assignee_user_id",
+            "due_at",
+            "completed_at",
+        ),
+    )
+
+    _add_rows(
+        session,
+        violations,
+        category="invalid_follow_up_request",
+        query="""
+            WITH request_facts AS (
+                SELECT
+                    task.id AS navigation_task_id,
+                    request.id AS follow_up_request_id,
+                    task.authorized_proposed_change_id,
+                    task.status::text AS task_status,
+                    task.organization_id AS task_organization_id,
+                    task.patient_id AS task_patient_id,
+                    task.reported_need_id AS task_need_id,
+                    task.assignee_user_id,
+                    task.completed_at,
+                    request.organization_id AS request_organization_id,
+                    request.patient_id AS request_patient_id,
+                    request.care_episode_id AS request_episode_id,
+                    request.reported_need_id AS request_need_id,
+                    request.navigation_task_id AS request_task_id,
+                    request.requested_by_user_id,
+                    request.requested_at,
+                    request.prompt_version,
+                    need.care_episode_id AS need_episode_id,
+                    count(request.id) OVER (
+                        PARTITION BY task.organization_id, task.id
+                    ) AS request_count
+                FROM navigation_task AS task
+                FULL OUTER JOIN follow_up_request AS request
+                  ON request.organization_id = task.organization_id
+                 AND request.navigation_task_id = task.id
+                LEFT JOIN reported_need AS need
+                  ON need.organization_id = coalesce(
+                        task.organization_id, request.organization_id
+                     )
+                 AND need.id = coalesce(task.reported_need_id, request.reported_need_id)
+            )
+            SELECT
+                navigation_task_id,
+                follow_up_request_id,
+                CASE
+                    WHEN navigation_task_id IS NULL THEN 'missing_task'
+                    WHEN authorized_proposed_change_id IS NULL
+                      OR task_status IS DISTINCT FROM 'completed'
+                        THEN 'task_not_completed_and_bound'
+                    WHEN request_count <> 1 THEN 'request_count'
+                    ELSE 'scope_or_provenance_mismatch'
+                END AS issue,
+                request_count,
+                task_status,
+                request_episode_id,
+                need_episode_id
+            FROM request_facts
+            WHERE (
+                authorized_proposed_change_id IS NOT NULL
+                AND task_status = 'completed'
+                AND (
+                    request_count <> 1
+                    OR follow_up_request_id IS NULL
+                    OR request_organization_id IS DISTINCT FROM task_organization_id
+                    OR request_patient_id IS DISTINCT FROM task_patient_id
+                    OR request_need_id IS DISTINCT FROM task_need_id
+                    OR request_task_id IS DISTINCT FROM navigation_task_id
+                    OR request_episode_id IS DISTINCT FROM need_episode_id
+                    OR requested_by_user_id IS DISTINCT FROM assignee_user_id
+                    OR requested_at IS DISTINCT FROM completed_at
+                    OR prompt_version <> 1
+                )
+            ) OR (
+                follow_up_request_id IS NOT NULL
+                AND (
+                    navigation_task_id IS NULL
+                    OR authorized_proposed_change_id IS NULL
+                    OR task_status IS DISTINCT FROM 'completed'
+                    OR request_organization_id IS DISTINCT FROM task_organization_id
+                    OR request_patient_id IS DISTINCT FROM task_patient_id
+                    OR request_need_id IS DISTINCT FROM task_need_id
+                    OR request_episode_id IS DISTINCT FROM need_episode_id
+                    OR requested_by_user_id IS DISTINCT FROM assignee_user_id
+                    OR requested_at IS DISTINCT FROM completed_at
+                    OR prompt_version <> 1
+                )
+            )
+            ORDER BY navigation_task_id, follow_up_request_id
+        """,
+        identifier_columns=("navigation_task_id", "follow_up_request_id"),
+        evidence_columns=(
+            "issue",
+            "request_count",
+            "task_status",
+            "request_episode_id",
+            "need_episode_id",
+        ),
+    )
+
+    _add_rows(
+        session,
+        violations,
+        category="invalid_follow_up_response",
+        query="""
+            WITH response_facts AS (
+                SELECT
+                    response.*,
+                    request.patient_id AS request_patient_id,
+                    request.requested_at,
+                    link.patient_id AS linked_patient_id,
+                    link.linked_at,
+                    link.revoked_at,
+                    count(response.id) OVER (
+                        PARTITION BY response.organization_id,
+                                     response.follow_up_request_id
+                    ) AS response_count,
+                    EXISTS (
+                        SELECT 1
+                        FROM role_assignment AS assignment
+                        WHERE assignment.organization_id = response.organization_id
+                          AND assignment.user_id = response.submitted_by_user_id
+                          AND assignment.role = 'supporting_actor'
+                          AND assignment.granted_at <= response.submitted_at
+                          AND (
+                            assignment.revoked_at IS NULL
+                            OR response.submitted_at < assignment.revoked_at
+                          )
+                    ) AS had_supporting_actor_authority
+                FROM follow_up_response AS response
+                LEFT JOIN follow_up_request AS request
+                  ON request.organization_id = response.organization_id
+                 AND request.id = response.follow_up_request_id
+                LEFT JOIN patient_identity_link AS link
+                  ON link.organization_id = response.organization_id
+                 AND link.user_id = response.submitted_by_user_id
+                 AND link.id = response.patient_identity_link_id
+            )
+            SELECT
+                id AS follow_up_response_id,
+                follow_up_request_id,
+                submitted_by_user_id,
+                patient_identity_link_id,
+                CASE
+                    WHEN requested_at IS NULL THEN 'missing_request'
+                    WHEN response_count <> 1 THEN 'response_count'
+                    WHEN submitted_at < requested_at THEN 'submitted_before_request'
+                    ELSE 'invalid_patient_attribution'
+                END AS issue,
+                response_count,
+                requested_at,
+                submitted_at
+            FROM response_facts
+            WHERE requested_at IS NULL
+               OR response_count <> 1
+               OR submitted_at < requested_at
+               OR linked_patient_id IS DISTINCT FROM request_patient_id
+               OR linked_at > submitted_at
+               OR (revoked_at IS NOT NULL AND submitted_at >= revoked_at)
+               OR NOT had_supporting_actor_authority
+            ORDER BY id
+        """,
+        identifier_columns=(
+            "follow_up_response_id",
+            "follow_up_request_id",
+            "submitted_by_user_id",
+            "patient_identity_link_id",
+        ),
+        evidence_columns=(
+            "issue",
+            "response_count",
+            "requested_at",
+            "submitted_at",
+        ),
+    )
+
+    _add_rows(
+        session,
+        violations,
+        category="invalid_navigation_task_transition_audit",
+        query="""
+            WITH expected AS (
+                SELECT
+                    task.*,
+                    transition.event_type,
+                    transition.from_status,
+                    transition.to_status
+                FROM navigation_task AS task
+                CROSS JOIN LATERAL (
+                    VALUES
+                        ('navigation_task_claimed', 'open', 'assigned'),
+                        ('navigation_task_started', 'assigned', 'in_progress'),
+                        ('navigation_task_completed', 'in_progress', 'completed')
+                ) AS transition(event_type, from_status, to_status)
+                WHERE task.authorized_proposed_change_id IS NOT NULL
+                  AND (
+                    transition.event_type = 'navigation_task_claimed'
+                    OR (
+                        transition.event_type = 'navigation_task_started'
+                        AND task.status IN ('in_progress', 'completed')
+                    )
+                    OR (
+                        transition.event_type = 'navigation_task_completed'
+                        AND task.status = 'completed'
+                    )
+                  )
+            ), checked AS (
+                SELECT
+                    expected.id AS navigation_task_id,
+                    expected.event_type,
+                    array_agg(event.id ORDER BY event.id)
+                        FILTER (WHERE event.id IS NOT NULL) AS audit_event_ids,
+                    count(event.id) AS event_count,
+                    bool_and(
+                        event.actor_type = 'user'
+                        AND event.actor_user_id = expected.assignee_user_id
+                        AND event.entity_type = 'navigation_task'
+                        AND event.entity_id = expected.id
+                        AND event.payload->>'need_id' = expected.reported_need_id::text
+                        AND event.payload->>'authorized_proposed_change_id' =
+                            expected.authorized_proposed_change_id::text
+                        AND event.payload->>'from_status' = expected.from_status
+                        AND event.payload->>'to_status' = expected.to_status
+                        AND event.payload->>'assignee_user_id' =
+                            expected.assignee_user_id::text
+                        AND event.payload->'due_at' = to_jsonb(expected.due_at)
+                        AND (
+                            expected.event_type <> 'navigation_task_completed'
+                            OR (
+                                event.created_at = expected.completed_at
+                                AND event.payload->>'follow_up_request_id' =
+                                    request.id::text
+                            )
+                        )
+                    ) FILTER (WHERE event.id IS NOT NULL) AS consistent
+                FROM expected
+                LEFT JOIN audit_event AS event
+                  ON event.organization_id = expected.organization_id
+                 AND event.entity_type = 'navigation_task'
+                 AND event.entity_id = expected.id
+                 AND event.event_type = expected.event_type
+                LEFT JOIN LATERAL (
+                    SELECT candidate.id
+                    FROM follow_up_request AS candidate
+                    WHERE candidate.organization_id = expected.organization_id
+                      AND candidate.navigation_task_id = expected.id
+                    ORDER BY candidate.id
+                    LIMIT 1
+                ) AS request ON true
+                GROUP BY expected.id, expected.event_type
+            )
+            SELECT
+                navigation_task_id,
+                event_type,
+                coalesce(audit_event_ids, ARRAY[]::uuid[]) AS audit_event_ids,
+                CASE
+                    WHEN event_count = 0 THEN 'missing_event'
+                    WHEN event_count > 1 THEN 'duplicate_event'
+                    ELSE 'inconsistent_event'
+                END AS issue,
+                event_count
+            FROM checked
+            WHERE event_count <> 1 OR consistent IS DISTINCT FROM true
+            ORDER BY navigation_task_id, event_type
+        """,
+        identifier_columns=("navigation_task_id", "event_type"),
+        evidence_columns=("audit_event_ids", "issue", "event_count"),
+    )
+
     return sorted(
         violations,
         key=lambda violation: (

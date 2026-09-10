@@ -54,6 +54,8 @@ def test_tenant_owned_relationships_use_organization_aware_foreign_keys() -> Non
         "knowledge_document": {"resource"},
         "agent_run": {"synthetic_patient", "check_in_submission", "reported_need"},
         "outcome": {"synthetic_patient", "reported_need"},
+        "follow_up_request": {"reported_need", "navigation_task"},
+        "follow_up_response": {"follow_up_request", "patient_identity_link"},
     }
 
     for table_name, referenced_tables in expected_relationships.items():

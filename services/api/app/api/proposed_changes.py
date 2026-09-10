@@ -24,6 +24,7 @@ from app.domain.approvals import (
     validate_target_shape,
 )
 from app.domain.enums import ApprovalChangeType, ApprovalDecisionValue, SafetySeverity, UserRole
+from app.domain.public_demo import validate_public_demo_text
 
 router = APIRouter(prefix="/v1/navigator/proposed-changes", tags=["navigator"])
 
@@ -77,11 +78,12 @@ class ProposedChangeRead(BaseModel):
 class ApprovalDecisionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     decision: ApprovalDecisionValue
-    qualifying_role_assignment_id: UUID
+    qualifying_role_assignment_id: UUID | None = None
     reason: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def decline_has_reason(self) -> ApprovalDecisionCreate:
+        validate_public_demo_text(self.reason)
         if self.decision is ApprovalDecisionValue.DECLINED and not (
             self.reason and self.reason.strip()
         ):

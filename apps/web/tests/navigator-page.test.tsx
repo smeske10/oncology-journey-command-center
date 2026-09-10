@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import type { NavigatorPatientCaseResponse, NavigatorQueueResponse } from "../lib/api-client";
+import type { NavigatorNeedWorkspaceResponse, NavigatorPatientCaseResponse, NavigatorQueueResponse } from "../lib/api-client";
 
 const api = vi.hoisted(() => ({
   bootstrapNavigatorQueue: vi.fn(),
+  getNavigatorNeedWorkspace: vi.fn(),
   getNavigatorPatientCase: vi.fn(),
 }));
 
@@ -62,7 +63,34 @@ function patientCase(name: string): NavigatorPatientCaseResponse {
 beforeEach(() => {
   api.bootstrapNavigatorQueue.mockReset();
   api.getNavigatorPatientCase.mockReset();
+  api.getNavigatorNeedWorkspace.mockReset();
+  api.getNavigatorNeedWorkspace.mockResolvedValue(emptyWorkspace());
 });
+
+function emptyWorkspace(): NavigatorNeedWorkspaceResponse {
+  return {
+    comparisons: {
+      between_check_ins: { label: "Between check-ins", status: "insufficient_history" },
+      correction: { label: "Correction", status: "insufficient_history" },
+    },
+    evidence: [],
+    follow_ups: [],
+    need: {
+      care_episode_id: "episode-a",
+      created_at: "2026-08-18T10:00:00Z",
+      effective_state: "open",
+      id: "need-a",
+      kind: "transportation",
+      patient_display_name: "Patient A",
+      patient_id: "patient-a",
+      raw_status: "open",
+      reopened_from_need_id: null,
+    },
+    outcome: null,
+    tasks: [],
+    timeline: [],
+  };
+}
 
 test("keeps the selected patient case when an older request resolves last", async () => {
   const patientA = deferred<NavigatorPatientCaseResponse>();

@@ -204,6 +204,12 @@ class ProposedChange(Base):
             "change_type",
             name="uq_proposed_change_signal_authorization_unit",
         ),
+        UniqueConstraint(
+            "organization_id",
+            "navigation_task_id",
+            "id",
+            name="uq_proposed_change_org_navigation_task_id",
+        ),
         ForeignKeyConstraint(
             ["organization_id", "safety_signal_id"],
             ["safety_signal.organization_id", "safety_signal.id"],

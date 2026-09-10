@@ -9,9 +9,10 @@ A public portfolio demonstration of a synthetic-data oncology navigation workflo
 3. Install the Playwright browser with `npm exec --workspace apps/web playwright install chromium`.
 4. Install API dependencies with `python -m pip install --require-hashes -r .\\services\\api\\requirements.lock`, then install the local API without re-resolving dependencies using `python -m pip install --no-deps --no-build-isolation -e .\\services\\api`.
 5. Start the local database with `docker compose up -d db`.
-6. Create and reset an explicitly named disposable demo database as described below, then set
-   `DATABASE_URL` to that database.
-7. Run the full verification pipeline with `.\\scripts\\verify.ps1`.
+6. Create two different explicitly named disposable demo databases as described below. Reset the
+   API database and set `DATABASE_URL` to it; reserve the second database for the live browser gate.
+7. Run the full verification pipeline with both mandatory live-database arguments:
+   `.\\scripts\\verify.ps1 -LiveDatabaseUrl $liveDatabaseUrl -LiveConfirmDatabaseName $liveDatabaseName`.
 
 The API health endpoint is available at `GET /health` and returns `{"status":"ok"}`.
 
@@ -28,12 +29,21 @@ remote hosts, omitted or unexpected ports, all URL query parameters, and confirm
 before creating a database engine or dropping any schema.
 
 ```powershell
-$databaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
-docker compose exec -T db createdb -U ojcc $databaseName
-$databaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$databaseName"
-.\\scripts\\reset_demo.ps1 -DatabaseUrl $databaseUrl -ConfirmDatabaseName $databaseName
-$env:DATABASE_URL = $databaseUrl
+$apiDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
+$liveDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
+if ($apiDatabaseName -eq $liveDatabaseName) { throw "Database names must be different" }
+docker compose exec -T db createdb -U ojcc $apiDatabaseName
+if ($LASTEXITCODE -ne 0) { throw "API database creation failed" }
+docker compose exec -T db createdb -U ojcc $liveDatabaseName
+if ($LASTEXITCODE -ne 0) { throw "Live database creation failed" }
+$apiDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$apiDatabaseName"
+$liveDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$liveDatabaseName"
+.\\scripts\\reset_demo.ps1 -DatabaseUrl $apiDatabaseUrl -ConfirmDatabaseName $apiDatabaseName
+$env:DATABASE_URL = $apiDatabaseUrl
 $env:DEMO_ORGANIZATION_ID = "aeb456d4-3728-5f64-ac05-afed26cd0edc"
+.\\scripts\\verify.ps1 `
+    -LiveDatabaseUrl $liveDatabaseUrl `
+    -LiveConfirmDatabaseName $liveDatabaseName
 ```
 
 The reset recreates the schema at Alembic head, runs the entirely synthetic fixed seed twice to
@@ -46,6 +56,26 @@ The reset and standalone seed temporarily remove every inherited process environ
 whose name begins with `PG` (case-insensitive) before constructing an engine or starting migration,
 seed, and audit child processes, then restore the exact prior values in `finally`. This prevents
 libpq environment routing from overriding the single explicit, validated loopback URL.
+
+The full verifier applies the same fail-closed validation to both targets before importing the API
+or running a child process. It refuses missing, persistent, remote, query-bearing, mismatched, or
+shared API/live targets. The live stage alone owns resets of the live database; it runs the real
+cookie-authenticated browser-to-PostgreSQL journey sequentially at desktop and mobile widths and
+audits integrity after each journey. It never resets the API test database.
+
+### Delivered closed-loop demonstration
+
+The seeded transportation story demonstrates exact patient evidence, policy and resource review,
+explicit navigator approval, governed claim/start/complete transitions, patient follow-up, an
+authorized closing Outcome, queue removal, and audience-safe retained history after reload. The
+live gate uses the real API, same-origin Next.js rewrite, signed synthetic sessions, and PostgreSQL;
+the three existing route-mocked browser tests remain separate smoke coverage.
+
+Remaining limits are intentional: entry is seeded rather than created automatically from a new
+check-in; proposal revision and reassignment are not implemented; the demo performs no external
+outreach or transportation booking; historical unbound tasks remain read-only; patient history
+uses controlled labels; and real-data operation, production deployment, and clinical-use claims
+remain out of scope.
 
 ### Restore and bulk-load integrity audit
 

@@ -106,6 +106,34 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                 submission.answers["provenance"]["source"] == "patient-supplied"
                 for submission in seeded
             )
+            transportation_story = session.execute(
+                text(
+                    "SELECT n.source_submission_id, t.reported_need_id, t.status, "
+                    "p.navigation_task_id, p.value_schema_id, p.value_schema_version, "
+                    "tr.resource_id, tr.proposed_change_id "
+                    "FROM reported_need n "
+                    "JOIN navigation_task t ON t.id = :task "
+                    "JOIN proposed_change p ON p.id = :proposal "
+                    "JOIN navigation_task_resource tr ON tr.id = :task_resource "
+                    "WHERE n.id = :need"
+                ),
+                {
+                    "need": DEMO_IDS["transportation_need"],
+                    "task": DEMO_IDS["transportation_task"],
+                    "proposal": DEMO_IDS["transportation_task_proposal"],
+                    "task_resource": DEMO_IDS["transportation_task_resource"],
+                },
+            ).one()
+            assert transportation_story == (
+                DEMO_IDS["submission_v2"],
+                DEMO_IDS["transportation_need"],
+                "open",
+                DEMO_IDS["transportation_task"],
+                "ojcc.authorize-navigation-task",
+                2,
+                DEMO_IDS["transportation_resource"],
+                DEMO_IDS["transportation_task_proposal"],
+            )
             assert inspect_integrity(session) == []
 
             journey_ids = {

@@ -87,6 +87,13 @@ test("shows explainable canonical open work without routine closure leakage", as
       }),
     }),
   );
+  await page.route(`**/api/v1/navigator/needs/${openNeedId}/workspace`, (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: { code: "need_not_found", message: "Not in smoke fixture" } }),
+    }),
+  );
 
   await page.goto("/demo/navigator");
 

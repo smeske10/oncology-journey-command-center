@@ -87,6 +87,12 @@ class PatientIdentityLink(Base):
     __tablename__ = "patient_identity_link"
     __table_args__ = (
         tenant_identity_constraint("patient_identity_link"),
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "id",
+            name="uq_patient_identity_link_organization_user_id",
+        ),
         ForeignKeyConstraint(
             ["organization_id", "patient_id"],
             ["synthetic_patient.organization_id", "synthetic_patient.id"],

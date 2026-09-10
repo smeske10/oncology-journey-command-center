@@ -6,6 +6,7 @@ from .approvals import (
     ProposedValueSchema,
 )
 from .audit import AuditEvent
+from .follow_ups import FollowUpRequest, FollowUpResponse
 from .identity import Organization, PatientIdentityLink, RoleAssignment, SyntheticPatient, User
 from .knowledge import (
     AgentRunCitation,
@@ -32,6 +33,8 @@ __all__ = [
     "CheckInDefinition",
     "CheckInSubmission",
     "EpisodePathwayAssignment",
+    "FollowUpRequest",
+    "FollowUpResponse",
     "KnowledgeDocument",
     "ManualReviewTask",
     "NavigationTask",

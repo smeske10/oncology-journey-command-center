@@ -1,50 +1,85 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 
+import { JourneyTimeline } from "../../../components/journey-timeline";
 import {
   CheckInFlow,
   type CheckInQuestion,
   type PatientCheckInDefinition,
 } from "../../../components/patient/check-in-flow";
+import { FollowUpPanel } from "../../../components/patient/follow-up-panel";
 import {
   ApiError,
   bootstrapPatientCheckIn,
+  getPatientFollowUps,
+  getPatientTimeline,
+  respondToFollowUp,
   submitCheckIn,
   type CheckInDefinitionResponse,
+  type PatientFollowUpListResponse,
+  type PatientTimelineResponse,
 } from "../../../lib/api-client";
 
 export default function PatientDemoPage() {
   const [definition, setDefinition] = useState<PatientCheckInDefinition>();
+  const [followUps, setFollowUps] = useState<PatientFollowUpListResponse["items"]>([]);
+  const [timeline, setTimeline] = useState<PatientTimelineResponse["events"]>([]);
   const [error, setError] = useState("");
+  const [supportError, setSupportError] = useState("");
 
-  const loadCurrentDefinition = useCallback(
-    () =>
-      bootstrapPatientCheckIn()
-        .then((response) => {
-          setError("");
-          setDefinition(toPresentationDefinition(response));
-        })
-        .catch((requestError: unknown) => {
-          const message = requestError instanceof ApiError ? requestError.message : "Demo unavailable";
-          setError(message);
-        }),
-    [],
-  );
+  const loadFollowUpsAndTimeline = useCallback(async () => {
+    try {
+      const [followUpResponse, timelineResponse] = await Promise.all([
+        getPatientFollowUps(),
+        getPatientTimeline(),
+      ]);
+      setFollowUps(followUpResponse.items);
+      setTimeline(timelineResponse.events);
+      setSupportError("");
+    } catch (requestError: unknown) {
+      const message = requestError instanceof ApiError
+        ? requestError.message
+        : "Navigation follow-up and history are temporarily unavailable.";
+      setSupportError(message);
+    }
+  }, []);
+
+  const loadCurrentDefinition = useCallback(async () => {
+    try {
+      const response = await bootstrapPatientCheckIn();
+      setDefinition(toPresentationDefinition(response));
+      setError("");
+      await loadFollowUpsAndTimeline();
+    } catch (requestError: unknown) {
+      const message = requestError instanceof ApiError ? requestError.message : "Demo unavailable";
+      setError(message);
+    }
+  }, [loadFollowUpsAndTimeline]);
 
   useEffect(() => {
-    void loadCurrentDefinition();
+    queueMicrotask(() => void loadCurrentDefinition());
   }, [loadCurrentDefinition]);
 
-  if (error) return <main><p role="alert">{error}</p></main>;
-  if (!definition) return <main><p aria-live="polite">Loading synthetic check-in…</p></main>;
+  if (error) return <main><p role="alert">{error}</p><button onClick={() => void loadCurrentDefinition()} type="button">Restore patient session</button></main>;
+  if (!definition) return <main><p aria-live="polite">Loading synthetic patient experience…</p></main>;
   return (
-    <CheckInFlow
-      definition={definition}
-      key={`${definition.id}:${definition.questionnaireVersion}:${definition.activeSubmissionId ?? "first"}`}
-      onConfigurationError={loadCurrentDefinition}
-      onSubmit={(payload) => submitCheckIn(definition.id, payload)}
-    />
+    <main style={mainStyle}>
+      <CheckInFlow
+        definition={definition}
+        key={`${definition.id}:${definition.questionnaireVersion}:${definition.activeSubmissionId ?? "first"}`}
+        onConfigurationError={loadCurrentDefinition}
+        onSubmit={(payload) => submitCheckIn(definition.id, payload)}
+      />
+      <FollowUpPanel
+        items={followUps}
+        onRefresh={loadFollowUpsAndTimeline}
+        onRespond={respondToFollowUp}
+      />
+      {supportError && <p role="alert">{supportError}</p>}
+      <JourneyTimeline events={timeline} />
+    </main>
   );
 }
 
@@ -59,6 +94,8 @@ function toPresentationDefinition(response: CheckInDefinitionResponse): PatientC
       .filter((question): question is CheckInQuestion => question !== null),
   };
 }
+
+const mainStyle: CSSProperties = { background: "#f4f8f6", color: "#12302d", display: "grid", fontFamily: "Arial, sans-serif", gap: "1.5rem", margin: "0 auto", maxWidth: "56rem", minHeight: "100vh", padding: "clamp(1rem, 4vw, 2.5rem)" };
 
 function toQuestion(question: Record<string, unknown>): CheckInQuestion | null {
   const linkId = question.link_id;

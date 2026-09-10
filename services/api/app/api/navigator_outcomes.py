@@ -6,7 +6,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import require_role
@@ -15,6 +15,7 @@ from app.db.session import get_session
 from app.domain.enums import OutcomeDisposition
 from app.domain.needs import NeedNotFound
 from app.domain.outcomes import OutcomeConflict, preview_outcome, record_outcome
+from app.domain.public_demo import validate_public_demo_text
 
 router = APIRouter(prefix="/v1/navigator", tags=["navigator"])
 
@@ -33,6 +34,11 @@ class OutcomePreviewRead(BaseModel):
 class OutcomeCommandCreate(BaseModel):
     disposition: OutcomeDisposition
     note: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def reject_real_phi(self) -> OutcomeCommandCreate:
+        validate_public_demo_text(self.note)
+        return self
 
 
 class OutcomeCommandRead(BaseModel):

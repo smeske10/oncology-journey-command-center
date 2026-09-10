@@ -1007,7 +1007,7 @@ def _alembic_downgrade(
     )
 
 
-def test_empty_upgrade_reaches_0005_with_metadata_parity() -> None:
+def test_empty_upgrade_reaches_current_head_with_task5_metadata_parity() -> None:
     """Production break: a fresh database misses Task 5 DDL or Alembic/ORM parity."""
     with _disposable_database() as database_url:
         _alembic(database_url, "head")
@@ -1016,7 +1016,7 @@ def test_empty_upgrade_reaches_0005_with_metadata_parity() -> None:
             with engine.connect() as connection:
                 assert TASK5_TABLES <= set(inspect(connection).get_table_names())
                 assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                    "0005_workflow_knowledge_audit"
+                    "0006_navigator_closed_loop"
                 )
             result = _alembic_check(database_url)
         finally:
@@ -1300,4 +1300,4 @@ def test_0005_downgrade_refuses_before_any_teardown_ddl() -> None:
     )
     assert "reset the synthetic demo database instead" in diagnostic
     assert TASK5_TABLES <= tables_after_refusal
-    assert revision_after_refusal == "0005_workflow_knowledge_audit"
+    assert revision_after_refusal == "0006_navigator_closed_loop"

@@ -126,6 +126,23 @@ class NavigationTask(Base):
             ["reported_need.organization_id", "reported_need.patient_id", "reported_need.id"],
             name="fk_navigation_task_parent_need",
         ),
+        ForeignKeyConstraint(
+            ["organization_id", "id", "authorized_proposed_change_id"],
+            [
+                "proposed_change.organization_id",
+                "proposed_change.navigation_task_id",
+                "proposed_change.id",
+            ],
+            name="fk_navigation_task_authorized_proposed_change",
+            use_alter=True,
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "patient_id",
+            "reported_need_id",
+            "id",
+            name="uq_navigation_task_org_patient_need_id",
+        ),
         CheckConstraint(
             "(status = 'open' AND assignee_user_id IS NULL) OR "
             "(status = 'assigned' AND assignee_user_id IS NOT NULL) OR "
@@ -157,6 +174,7 @@ class NavigationTask(Base):
         default=NavigationTaskStatus.OPEN,
     )
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    authorized_proposed_change_id: Mapped[UUID | None] = mapped_column(Uuid)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by_user_id: Mapped[UUID | None] = mapped_column(

@@ -9,17 +9,27 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.integrity import inspect_integrity
+from app.db.models import FollowUpRequest
+from app.domain.approvals import record_decision
+from app.domain.follow_ups import record_follow_up_response
+from app.domain.navigation_tasks import (
+    claim_navigation_task,
+    complete_navigation_task,
+    start_navigation_task,
+)
+from app.domain.outcomes import record_outcome
 from scripts import seed_demo as seed_demo_script
 from scripts.seed_demo import DEMO_IDS, seed_demo
 
@@ -29,6 +39,8 @@ DISPOSABLE_PREFIX = "ojcc_task7_"
 SCOPED_TABLES = (
     "agent_run_citation",
     "manual_review_task",
+    "follow_up_response",
+    "follow_up_request",
     "audit_event",
     "agent_run",
     "workflow_transition_event",
@@ -226,19 +238,21 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
                 "check_in_definition": 2,
                 "check_in_submission": 2,
                 "episode_pathway_assignment": 2,
+                "follow_up_request": 0,
+                "follow_up_response": 0,
                 "knowledge_document": 1,
                 "manual_review_task": 1,
-                "navigation_task": 2,
-                "navigation_task_resource": 1,
+                "navigation_task": 3,
+                "navigation_task_resource": 2,
                 "organization": 1,
                 "organization_knowledge_approval": 1,
                 "outcome": 1,
                 "patient_identity_link": 1,
                 "patient_message": 1,
                 "pathway_definition": 2,
-                "proposed_change": 6,
-                "reported_need": 2,
-                "resource": 1,
+                "proposed_change": 7,
+                "reported_need": 3,
+                "resource": 2,
                 "role_assignment": 4,
                 "safety_signal": 4,
                 "safety_signal_resolution": 1,
@@ -283,14 +297,14 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
                     "WHERE organization_id = :organization_id ORDER BY effective_state::text"
                 ),
                 {"organization_id": DEMO_IDS["organization"]},
-            ).scalars().all() == ["closed", "open"]
+            ).scalars().all() == ["closed", "open", "open"]
             assert session.execute(
                 text(
                     "SELECT status::text FROM navigation_task "
                     "WHERE organization_id = :organization_id ORDER BY status::text"
                 ),
                 {"organization_id": DEMO_IDS["organization"]},
-            ).scalars().all() == ["cancelled", "open"]
+            ).scalars().all() == ["cancelled", "open", "open"]
             assert session.execute(
                 text(
                     "SELECT effective_state::text FROM effective_safety_signal_state "
@@ -305,7 +319,54 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
                     "ORDER BY effective_state::text"
                 ),
                 {"organization_id": DEMO_IDS["organization"]},
-            ).all() == [("approved", 4), ("pending", 1), ("superseded", 1)]
+            ).all() == [("approved", 4), ("pending", 2), ("superseded", 1)]
+            assert session.execute(
+                text(
+                    "SELECT need.kind, need.source_submission_id, task.status::text, "
+                    "task.authorized_proposed_change_id, proposal.value_schema_id, "
+                    "proposal.value_schema_version, proposal.proposed_value, "
+                    "snapshot.resource_name_snapshot, snapshot.approved_at "
+                    "FROM reported_need AS need "
+                    "JOIN navigation_task AS task ON task.organization_id = need.organization_id "
+                    "AND task.reported_need_id = need.id "
+                    "JOIN proposed_change AS proposal "
+                    "ON proposal.organization_id = task.organization_id "
+                    "AND proposal.navigation_task_id = task.id "
+                    "JOIN navigation_task_resource AS snapshot "
+                    "ON snapshot.organization_id = proposal.organization_id "
+                    "AND snapshot.proposed_change_id = proposal.id "
+                    "WHERE need.id = :need_id AND task.id = :task_id "
+                    "AND proposal.id = :proposal_id AND snapshot.id = :snapshot_id"
+                ),
+                {
+                    "need_id": DEMO_IDS["transportation_need"],
+                    "task_id": DEMO_IDS["transportation_task"],
+                    "proposal_id": DEMO_IDS["transportation_task_proposal"],
+                    "snapshot_id": DEMO_IDS["transportation_task_resource"],
+                },
+            ).one() == (
+                "transportation",
+                DEMO_IDS["submission_v2"],
+                "open",
+                None,
+                "ojcc.authorize-navigation-task",
+                2,
+                {
+                    "title": "Arrange transportation for oncology follow-up",
+                    "resources": [
+                        {
+                            "resource_id": str(DEMO_IDS["transportation_resource"]),
+                            "name": "Synthetic community ride network",
+                            "category": "transportation",
+                            "url": "https://example.test/community-rides",
+                            "metadata": {"synthetic": True, "service_area": "demo"},
+                            "match_rationale": "Serves the synthetic patient's upcoming oncology visit.",
+                        }
+                    ],
+                },
+                "Synthetic community ride network",
+                None,
+            )
             assert session.execute(
                 text(
                     "SELECT initial_state, current_state, count(event.id) "
@@ -349,6 +410,105 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
 
             assert second_summary == first_summary
             assert second_digest == first_digest
+            assert inspect_integrity(session) == []
+        engine.dispose()
+
+
+def test_reseeding_after_closed_loop_activity_preserves_the_completed_story() -> None:
+    """A demo reseed must never reopen, erase, or duplicate an exercised journey."""
+    with _disposable_database() as database_url:
+        engine = create_engine(database_url)
+        with Session(engine) as session:
+            seed_demo(session)
+            session.commit()
+
+            record_decision(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                proposed_change_id=DEMO_IDS["transportation_task_proposal"],
+                authorized_by_user_id=DEMO_IDS["navigator_user"],
+                qualifying_role_assignment_id=None,
+                decision="approved",
+                reason=None,
+            )
+            claim_navigation_task(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                task_id=DEMO_IDS["transportation_task"],
+                actor_user_id=DEMO_IDS["navigator_user"],
+                proposed_change_id=DEMO_IDS["transportation_task_proposal"],
+                due_at=datetime.now(UTC) + timedelta(days=7),
+            )
+            start_navigation_task(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                task_id=DEMO_IDS["transportation_task"],
+                actor_user_id=DEMO_IDS["navigator_user"],
+            )
+            complete_navigation_task(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                task_id=DEMO_IDS["transportation_task"],
+                actor_user_id=DEMO_IDS["navigator_user"],
+            )
+            request_id = session.scalar(
+                select(FollowUpRequest.id).where(
+                    FollowUpRequest.organization_id == DEMO_IDS["organization"],
+                    FollowUpRequest.navigation_task_id == DEMO_IDS["transportation_task"],
+                )
+            )
+            assert request_id is not None
+            record_follow_up_response(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                actor_user_id=DEMO_IDS["patient_user"],
+                patient_id=DEMO_IDS["patient"],
+                request_id=request_id,
+                response="resolved",
+                note="Synthetic ride support worked.",
+            )
+            record_outcome(
+                session,
+                organization_id=DEMO_IDS["organization"],
+                need_id=DEMO_IDS["transportation_need"],
+                recorded_by_user_id=DEMO_IDS["navigator_user"],
+                disposition="resolved",
+                note="Synthetic follow-up confirmed resolution.",
+                idempotency_key="synthetic-transportation-closed-loop-v1",
+            )
+            session.commit()
+            completed_digest = _seed_digest(session)
+
+            reseed_summary = seed_demo(session)
+            session.commit()
+
+            assert _seed_digest(session) == completed_digest
+            assert reseed_summary.row_counts["follow_up_request"] == 1
+            assert reseed_summary.row_counts["follow_up_response"] == 1
+            assert session.execute(
+                text(
+                    "SELECT need.effective_state::text, task.status::text, proposal.effective_state::text "
+                    "FROM effective_need_state AS need "
+                    "JOIN navigation_task AS task ON task.reported_need_id = need.id "
+                    "JOIN effective_proposed_change_state AS proposal "
+                    "ON proposal.id = task.authorized_proposed_change_id "
+                    "WHERE need.id = :need_id AND task.id = :task_id"
+                ),
+                {
+                    "need_id": DEMO_IDS["transportation_need"],
+                    "task_id": DEMO_IDS["transportation_task"],
+                },
+            ).one() == ("closed", "completed", "approved")
+            assert session.scalar(
+                text(
+                    "SELECT count(*) FROM outcome WHERE organization_id = :organization_id "
+                    "AND reported_need_id = :need_id"
+                ),
+                {
+                    "organization_id": DEMO_IDS["organization"],
+                    "need_id": DEMO_IDS["transportation_need"],
+                },
+            ) == 1
             assert inspect_integrity(session) == []
         engine.dispose()
 
@@ -438,7 +598,7 @@ def test_reset_requires_explicit_safe_target_then_seeds_twice_and_audits() -> No
         with Session(engine) as session:
             assert session.scalar(text("SELECT to_regclass('public.reset_marker')")) is None
             assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "0005_workflow_knowledge_audit"
+                "0006_navigator_closed_loop"
             )
             assert inspect_integrity(session) == []
             assert session.scalar(
