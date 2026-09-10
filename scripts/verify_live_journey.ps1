@@ -108,6 +108,13 @@ try {
         finally {
             Pop-Location
         }
+        Push-Location $apiRoot
+        try {
+            Invoke-Checked { python scripts/check_integrity.py --database-url $DatabaseUrl }
+        }
+        finally {
+            Pop-Location
+        }
         Assert-PortAvailable 8011
         Assert-PortAvailable 3011
     }

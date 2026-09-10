@@ -49,7 +49,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 3 — Task command services and concurrency: complete; focused checkpoint gate `81 passed`.
 - Package 4 — Patient response, timelines and resolution safety: complete; focused checkpoint gate `67 passed`.
 - Package 5 — Seeded UI and live browser-to-database journey: complete; checkpoint gate API `443 passed`, web `34 passed`, mocked browser `3 passed`, live desktop `1 passed`, live mobile `1 passed`.
-- Package 6 — Reproducible verification and handoff: pending.
+- Package 6 — Reproducible verification and handoff: complete; final verifier exit `0` with API `455 passed`, web `34 passed`, mocked browser `3 passed`, and desktop/mobile live `1 passed` each with zero post-journey integrity violations.
 
 ## RED / GREEN evidence
 
@@ -101,6 +101,26 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 5 static checks: Ruff clean; configured Pyright scope reports `0 errors, 0 warnings`. An explicitly supplied whole-API Pyright path was discarded as an invalid gate because it overrides configured exclusions and surfaces 42 pre-existing migration/test-fixture diagnostics.
 - Package 5 full-suite RED: two legacy integration assertions still named Alembic `0005` as head. GREEN: their expectations now recognize additive head `0006_navigator_closed_loop`; the destructive downgrade still refuses before any `0005` teardown and leaves the revision at `0006`.
 - Immutable migration hashes `0001`–`0005` rechecked after the live gate and exactly match the preflight values; the protected-file diff is empty. The persistent `ojcc` database was never targeted by a reset, drop, seed, or live/API test command.
+- Package 6 harness RED: ten real-PowerShell cases showed the old verifier launched children before rejecting persistent, remote, query-bearing, missing, or shared API/live targets; did not expose the child exit code; did not isolate/restore inherited `PG*`; and skipped the busy-port/live stage. A separate live-wrapper RED observed only the two pre-run reset audits instead of a post-browser audit after each viewport.
+- Package 6 harness GREEN: `scripts/verify.ps1` requires explicit live URL/confirmation parameters, validates both API and live disposable targets before any child, refuses a shared database, preserves nonzero child failures, scopes/restores `PG*` and tool environment, and delegates the required live gate. `verify_live_journey.ps1` now performs a read-only integrity audit after each browser journey. Focused harness gate: `12 passed`.
+- Package 6 warning RED/GREEN: the first full run exposed Pyright's update notice and inherited `NO_COLOR`/Playwright noise. A regression test proved the verifier must keep the bundled lockfile Pyright core, scope only `PYRIGHT_PYTHON_IGNORE_WARNINGS=1`, remove `NO_COLOR`, and restore all prior values on failure. The final run emitted no Pyright or Node color warnings and did not install an unpinned Pyright core.
+- Package 6 timestamp RED/GREEN: one diagnostic full run found a semantically equal PostgreSQL JSON timestamp represented with five rather than six fractional digits. The audit test now compares parsed aware instants instead of ISO formatting spelling; the focused persistence test and final full suite pass.
+- Package 6 CI: the PostgreSQL service uses only the administrative `postgres` database. CI validates and creates distinct exact `ojcc_demo_c1a0000000000001` API and `ojcc_demo_c1a0000000000002` live databases, refuses reuse, migrates only the API target, and passes the live target explicitly to the verifier. YAML parsing completed successfully.
+- Package 6 ordered runbook: the API disposable reset seeded twice and audited at zero violations; Alembic reported `0006_navigator_closed_loop (head)` and no metadata drift; two OpenAPI and TypeScript generations were byte-identical with no generated diff. The final mandatory verifier exited `0`: Ruff clean, Pyright `0 errors, 0 warnings`, API integrity zero, API `455 passed in 132.80s`, ESLint clean, Vitest `34 passed`, production build passed, mocked Playwright `3 passed`, desktop live `1 passed`, mobile live `1 passed`, and both post-journey audits reported zero violations.
+- Package 6 cleanup: after both live servers released ports, exact connection checks reported zero users; only `ojcc_demo_b0d9d75509c74632bf599458d7cde301` and `ojcc_demo_809e0d91920742a4acf2e26eee1ab341` were dropped. The existing Compose PostgreSQL service remained healthy and a post-cleanup query confirmed persistent `ojcc` is still present.
+
+## Acceptance inventory self-review
+
+- Evidence — `closed_loop/test_workspace.py` and `test_timeline.py` execute correction/source separation, recurrence lineage, version mismatch, absent/null, tenant/episode exclusion and deterministic timestamp ties; covered by the final API gate and Package 2/4 ledger evidence.
+- Approval — `closed_loop/test_review.py`, `test_approvals.py`, workspace and task-command cases execute optional/explicit role IDs, revocation, wrong targets, proposal states, exact v1/v2 roots, multiple roots, self-approval and old-client compatibility; covered by Packages 2/3 and the final API gate.
+- Task — `closed_loop/test_task_commands.py`, `test_persistence.py` and Outcome tests execute exact binding/title, changed tuple/owner, due validation, skipped transitions, legacy unbound work, frozen fields, replay after time/closure and authoritative cancellation; covered by Packages 1/3 and the final API gate.
+- Follow-up — `closed_loop/test_persistence.py` and `test_follow_ups.py` execute completed-bound provenance, exactly-one creation, rollback atomicity, append-only response history, matching/changed retries, link rekey/revocation and no automatic Outcome; covered by Packages 1/4 and the final API gate.
+- Races — task and follow-up concurrency suites execute claim/claim, complete/complete, start/Outcome, complete/Outcome and response/Outcome orderings with exact final rows; covered by Packages 3/4 and the final API gate.
+- Tenant/auth — review, task, follow-up, signed-auth, tenant-isolation and privilege tests execute foreign identifiers, wrong owners, expiry/revocation, injected identity fields and `ojcc_app` write restrictions; covered by Packages 1–4 and the final API gate.
+- Timeline — `closed_loop/test_timeline.py`, UI tests and the live journey execute audience allowlists, sentinel exclusion, causal ties, actual cancellation, retained closed history and controlled nonclinical wording; covered by Packages 4/5 and all final web/live gates.
+- Operations — migration, integrity, seed and `test_verify_harness.py` execute populated 0005 upgrade, immutable hashes/bytes, guarded downgrade, corruption detection, pre/post-journey reseed, fail-closed targets, child/environment/port failures and generated stability; covered by Packages 1/5/6 and the ordered final runbook.
+- UI/live — `apps/web/tests/closed-loop.test.tsx`, the three mocked journeys and `e2e-live/closed-loop-transportation.spec.ts` execute loading/error/conflict/empty states, keyboard/mobile, one main landmark, timezone handling, duplicate suppression, real cookies/API/database, refresh/reload persistence and absence of mocked live network; covered by Packages 5/6 and the final verifier.
+- Review result: self-review only, as required without separate reviewer authorization. No unresolved Critical or Important finding remains. No independent review was performed.
 
 ## Contract hashes
 
@@ -108,6 +128,7 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - Package 2 generation completed twice with identical hashes: OpenAPI `B13F5DAE25DE119D999848559E3644B6A9D2A5398915BBE1966517CC48BFB8B0`; TypeScript `08572A570973D0B497CDC718E754CD8456D7A0AEBCB776ECCA805D6CE0B500F8`.
 - Package 3 generation completed twice with identical hashes: OpenAPI `9916699F12F2E05DD8805DBB8DEF6810705C7687F546322023000E935DCDB799`; TypeScript `86C8EF5C1893E6B0A3DF116DABF22C596FFE219C781CC71369199F6F71BA502B`. Contract review found no removed paths and exactly the claim/start/complete route additions; task status remains an explicit enum.
 - Package 4 generation completed twice with identical hashes: OpenAPI `56EB4AAB2D0E650E121091BE68737CC12B8DCD5254814ECAA1DDD1767B106882`; TypeScript `9C46A9CB6A2654ED0E41A964FD86D7F9479CCD5874EF5F0ADFF188BCF70DDC46`. Contract review found no removed paths and exactly the follow-up list, response, and patient timeline additions; timeline unions include OpenAPI discriminators and command conflicts have documented typed payloads.
+- Package 6 generation completed twice with the same final hashes: OpenAPI `56EB4AAB2D0E650E121091BE68737CC12B8DCD5254814ECAA1DDD1767B106882`; TypeScript `9C46A9CB6A2654ED0E41A964FD86D7F9479CCD5874EF5F0ADFF188BCF70DDC46`. No generated contract diff remained.
 
 ## Checkpoint commits
 
@@ -117,13 +138,17 @@ Plan: `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md
 - `2a33d37` — `feat: expose evidence and governed task proposal review`.
 - `59c0b39` — `feat: operate approved navigator tasks safely`.
 - `54c29d9` — `feat: capture patient follow-up and audience-safe journey history`.
-- Package 5 checkpoint prepared with message `feat: deliver the synthetic navigator closed-loop journey`.
+- `d4dfb8e` — `feat: deliver the synthetic navigator closed-loop journey`.
+- Package 6 checkpoint (this commit) — `chore: make closed-loop verification reproducible`.
 
 ## Decisions and conflicts
 
 - Preflight review found no material scope or contract conflict. The plan status line still says “awaiting user approval,” but the execution contract explicitly requires conversation approval, which is present; the plan itself must remain byte-identical.
 - The Package 5 full-suite head mismatch was a stale test expectation, not a scope or migration-contract conflict: additive migration `0006` is the approved head, downgrade refusal preserved `0005`, and no protected migration was edited.
+- No material Package 6 scope or contract conflict was found. The Pyright notice was resolved without changing the lock or diagnostic threshold, and the timestamp failure was a formatting-only test defect with semantically equal aware instants.
+- Independent review was not authorized, so the acceptance review was explicitly performed and recorded as self-review. No merge, deployment, branch cleanup, or reconciliation-task resumption is part of this handoff.
+- Remaining limits: seeded entry only; no automatic check-in-to-need/proposal flow; no proposal revision/reassignment; no external outreach or transportation booking; historical unbound tasks remain read-only; patient history uses controlled labels; real-data operation and production deployment remain out of scope.
 
 ## Next exact step
 
-Commit the reviewed Package 5 files explicitly and stop at that checkpoint. Package 6 remains pending and must not begin in this execution milestone.
+Keep `feature/navigator-closed-loop` and its worktree intact, and stop for the user's integration decision. Do not merge, deploy, clean up the branch/worktree, or begin another milestone.

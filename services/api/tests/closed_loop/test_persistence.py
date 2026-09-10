@@ -295,7 +295,7 @@ def test_bound_task_transitions_write_one_typed_audit_each_and_one_follow_up_req
         assert event.payload["assignee_user_id"] == str(
             approved_closed_loop_case.navigator_user_id
         )
-        assert event.payload["due_at"] == task.due_at.isoformat()
+        assert datetime.fromisoformat(event.payload["due_at"]) == task.due_at
 
     completed = next(
         event for event in events if event.event_type == "navigation_task_completed"
