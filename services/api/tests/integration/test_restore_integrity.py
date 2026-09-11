@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -11,18 +10,22 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from sqlalchemy import Connection, create_engine, text
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.integrity import IntegrityViolation, inspect_integrity
+from tests.database_support import (
+    DisposableDatabase,
+    bootstrap_database_url,
+    disposable_database,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DISPOSABLE_PREFIX = "ojcc_task7_"
 BASE_TIME = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
 
@@ -37,56 +40,29 @@ def _execute_batch(connection: Connection, sql: str, parameters: dict[str, Any])
             connection.execute(text(statement), parameters)
 
 
-def _validate_local_url(url: URL) -> None:
-    if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
-        raise ValueError("Restore-integrity tests require loopback PostgreSQL")
-
-
 @contextmanager
 def _disposable_database() -> Iterator[str]:
-    configured = make_url(settings.database_url)
-    _validate_local_url(configured)
-    disposable = configured.set(database=f"{DISPOSABLE_PREFIX}{uuid4().hex}")
-    database = disposable.database
-    assert database is not None and database.startswith(DISPOSABLE_PREFIX)
-    admin = disposable.set(database="postgres")
-    engine = create_engine(admin, isolation_level="AUTOCOMMIT")
-    created = False
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database}"'))
-        created = True
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "services/api/alembic.ini",
-                "upgrade",
-                "head",
-            ],
-            cwd=PROJECT_ROOT,
-            env=os.environ | {"DATABASE_URL": disposable.render_as_string(hide_password=False)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        yield disposable.render_as_string(hide_password=False)
-    finally:
-        if created:
-            assert database.startswith(DISPOSABLE_PREFIX)
-            with engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :database AND pid <> pg_backend_pid()"
-                    ),
-                    {"database": database},
-                )
-                connection.execute(text(f'DROP DATABASE "{database}"'))
-        engine.dispose()
+    with disposable_database(prefix=DISPOSABLE_PREFIX, migrate_to="head") as database:
+        yield database.migration_url
+
+
+def _database_target(database_url: str) -> DisposableDatabase:
+    migration_url = make_url(database_url)
+    application_url = make_url(settings.database_url).set(
+        host=migration_url.host,
+        port=migration_url.port,
+        database=migration_url.database,
+    )
+    assert migration_url.database is not None
+    return DisposableDatabase(
+        name=migration_url.database,
+        migration_url=database_url,
+        application_url=application_url.render_as_string(hide_password=False),
+    )
+
+
+def _bootstrap_target_url(database_url: str) -> str:
+    return bootstrap_database_url(_database_target(database_url))
 
 
 @pytest.fixture(scope="module")
@@ -97,7 +73,7 @@ def integrity_database_url() -> Iterator[str]:
 
 @pytest.fixture
 def connection(integrity_database_url: str) -> Iterator[Connection]:
-    engine = create_engine(integrity_database_url)
+    engine = create_engine(_bootstrap_target_url(integrity_database_url))
     with engine.connect() as connection:
         transaction = connection.begin()
         connection.execute(text("SET LOCAL session_replication_role = replica"))
@@ -666,7 +642,7 @@ def test_reports_every_forked_successor_chain(
 def test_integrity_cli_exits_nonzero_and_emits_machine_readable_violation() -> None:
     """Production break: operators cannot fail a restore pipeline on detected corruption."""
     with _disposable_database() as database_url:
-        engine = create_engine(database_url)
+        engine = create_engine(_bootstrap_target_url(database_url))
         with engine.begin() as connection:
             connection.execute(text("SET LOCAL session_replication_role = replica"))
             ids = _seed_base(connection, "cli-failure")

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import re
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -18,7 +16,6 @@ from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.db.models import (
     ApprovalDecision,
     ApprovalPolicy,
@@ -34,7 +31,6 @@ from app.db.models import (
     SyntheticPatient,
     User,
 )
-from app.db.targets import validate_database_target_pair
 from app.domain.enums import (
     ApprovalChangeType,
     ApprovalDecisionValue,
@@ -51,11 +47,15 @@ from app.domain.navigation_tasks import (
     start_navigation_task,
 )
 from app.domain.outcomes import record_outcome
+from tests.database_support import (
+    DisposableDatabase,
+    alembic_environment,
+    bootstrap_database_url,
+    disposable_database,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-DATABASE_PREFIX = "ojcc_privilege_test_"
-DATABASE_NAME_PATTERN = re.compile(r"ojcc_privilege_test_[0-9a-f]{32}")
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+DATABASE_PREFIX = "ojcc_migration_test_"
 
 MIGRATION_ROLE = "ojcc_migrator"
 APPLICATION_ROLE = "ojcc_api"
@@ -175,32 +175,6 @@ SECURITY_DEFINER_FUNCTIONS = frozenset(
     }
 )
 
-MIGRATION_0005_TABLES = (
-    "agent_run_citation",
-    "manual_review_task",
-    "navigation_task_resource",
-    "organization_knowledge_approval",
-    "workflow_run",
-    "workflow_transition_event",
-)
-MIGRATION_0005_FUNCTIONS = (
-    "append_workflow_transition_event",
-    "apply_navigation_resource_approval",
-    "guard_agent_run_citation",
-    "guard_agent_run_citation_immutable",
-    "guard_agent_run_created_at",
-    "guard_knowledge_approval_history",
-    "guard_knowledge_document_immutable",
-    "guard_manual_review_task",
-    "guard_navigation_task_resource",
-    "guard_navigation_task_resource_proposal",
-    "guard_role_assignment_knowledge_history",
-    "guard_workflow_run_lineage",
-    "reject_append_only_mutation",
-)
-MIGRATION_0005_ENUMS = ("audit_actor_type", "manual_review_task_state")
-
-
 @dataclass(frozen=True)
 class PrivilegeDatabase:
     name: str
@@ -222,25 +196,16 @@ def _psycopg_url(url: URL) -> str:
     return url.set(drivername="postgresql").render_as_string(hide_password=False)
 
 
-def _validate_base_url(url: URL, *, label: str) -> None:
-    if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
-        raise ValueError(f"{label} must use loopback PostgreSQL")
-    if url.port not in (None, 5432) or url.query:
-        raise ValueError(f"{label} must use port 5432 without query parameters")
-    if url.database != "postgres":
-        raise ValueError(f"{label} must use the postgres maintenance database")
-
-
 def _alembic_environment(*, application_url: str, migration_url: str) -> dict[str, str]:
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key.upper() not in {"DATABASE_URL", "MIGRATION_DATABASE_URL", "BOOTSTRAP_DATABASE_URL"}
-        and not key.upper().startswith("PG")
-    }
-    environment["DATABASE_URL"] = application_url
-    environment["MIGRATION_DATABASE_URL"] = migration_url
-    return environment
+    target = make_url(migration_url)
+    assert target.database is not None
+    return alembic_environment(
+        DisposableDatabase(
+            name=target.database,
+            migration_url=migration_url,
+            application_url=application_url,
+        )
+    )
 
 
 def _upgrade(*, application_url: str, migration_url: str, revision: str) -> None:
@@ -292,122 +257,17 @@ def _alembic(
     )
 
 
-def _transfer_0005_application_ownership(database: PrivilegeDatabase) -> None:
-    with psycopg.connect(_psycopg_url(make_url(database.bootstrap_url))) as connection:
-        with connection.cursor() as cursor:
-            for table_name in MIGRATION_0005_TABLES:
-                cursor.execute(
-                    sql.SQL("ALTER TABLE public.{} OWNER TO {}").format(
-                        sql.Identifier(table_name), sql.Identifier(MIGRATION_ROLE)
-                    )
-                )
-            for function_name in MIGRATION_0005_FUNCTIONS:
-                cursor.execute(
-                    sql.SQL("ALTER FUNCTION public.{}() OWNER TO {}").format(
-                        sql.Identifier(function_name), sql.Identifier(MIGRATION_ROLE)
-                    )
-                )
-            for enum_name in MIGRATION_0005_ENUMS:
-                cursor.execute(
-                    sql.SQL("ALTER TYPE public.{} OWNER TO {}").format(
-                        sql.Identifier(enum_name), sql.Identifier(MIGRATION_ROLE)
-                    )
-                )
-
-
 @contextmanager
 def _provision_privilege_database(
     *, revision: str = "head"
 ) -> Iterator[PrivilegeDatabase]:
-    bootstrap_text = os.getenv("BOOTSTRAP_DATABASE_URL")
-    if bootstrap_text is None:
-        pytest.skip("BOOTSTRAP_DATABASE_URL is required for privilege integration tests")
-    migration_text = settings.require_migration_database_url()
-    application_text = settings.database_url
-
-    validate_database_target_pair(
-        application_url=application_text,
-        migration_url=migration_text,
-    )
-    validate_database_target_pair(
-        application_url=application_text,
-        migration_url=bootstrap_text,
-    )
-    validate_database_target_pair(
-        application_url=migration_text,
-        migration_url=bootstrap_text,
-    )
-
-    bootstrap_base = make_url(bootstrap_text)
-    migration_base = make_url(migration_text)
-    application_base = make_url(application_text)
-    _validate_base_url(bootstrap_base, label="BOOTSTRAP_DATABASE_URL")
-    _validate_base_url(migration_base, label="MIGRATION_DATABASE_URL")
-    _validate_base_url(application_base, label="DATABASE_URL")
-
-    name = f"{DATABASE_PREFIX}{uuid4().hex}"
-    assert DATABASE_NAME_PATTERN.fullmatch(name)
-    database = PrivilegeDatabase(
-        name=name,
-        bootstrap_url=bootstrap_base.set(database=name).render_as_string(hide_password=False),
-        migration_url=migration_base.set(database=name).render_as_string(hide_password=False),
-        application_url=application_base.set(database=name).render_as_string(hide_password=False),
-    )
-    created = False
-    with psycopg.connect(_psycopg_url(migration_base), autocommit=True) as maintenance:
-        with maintenance.cursor() as cursor:
-            assert cursor.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
-            ).fetchone() is None
-            cursor.execute(
-                sql.SQL("CREATE DATABASE {} OWNER {}").format(
-                    sql.Identifier(name), sql.Identifier(MIGRATION_ROLE)
-                )
-            )
-    created = True
-    print(f"CREATED {name}", flush=True)
-
-    try:
-        migration_engine = create_engine(database.migration_url)
-        try:
-            with migration_engine.begin() as connection:
-                connection.execute(
-                    text(f"ALTER SCHEMA public OWNER TO {MIGRATION_ROLE}")
-                )
-        finally:
-            migration_engine.dispose()
-
-        _upgrade(
-            application_url=database.application_url,
-            migration_url=database.migration_url,
-            revision="0004_safety_approval_lifecycle",
+    with disposable_database(prefix=DATABASE_PREFIX, migrate_to=revision) as shared:
+        yield PrivilegeDatabase(
+            name=shared.name,
+            bootstrap_url=bootstrap_database_url(shared),
+            migration_url=shared.migration_url,
+            application_url=shared.application_url,
         )
-        _upgrade(
-            application_url=database.application_url,
-            migration_url=database.bootstrap_url,
-            revision="0005_workflow_knowledge_audit",
-        )
-        _transfer_0005_application_ownership(database)
-        _upgrade(
-            application_url=database.application_url,
-            migration_url=database.migration_url,
-            revision=revision,
-        )
-        yield database
-    finally:
-        if created:
-            assert DATABASE_NAME_PATTERN.fullmatch(name)
-            try:
-                with psycopg.connect(
-                    _psycopg_url(migration_base), autocommit=True
-                ) as maintenance:
-                    with maintenance.cursor() as cursor:
-                        cursor.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(name)))
-            except Exception as error:
-                print(f"LEFTOVER {name}: {type(error).__name__}", flush=True)
-                raise
-            else:
-                print(f"DROPPED {name}", flush=True)
 
 
 @pytest.fixture(scope="module")

@@ -358,7 +358,7 @@ Commit: `feat: enforce the complete application database privilege surface`
 - Produces `disposable_database(*, prefix: Literal[...], migrate_to: str | None) -> ContextManager[DisposableDatabase]`.
 - Produces `alembic_environment(database: DisposableDatabase) -> dict[str, str]` that strips inherited `PG*`, `DATABASE_URL`, and `MIGRATION_DATABASE_URL`, then sets both explicit per-database URLs.
 
-- [ ] **Step 1: Write failing support-helper safety tests**
+- [x] **Step 1: Write failing support-helper safety tests**
 
 Test exact 32-lowercase-hex suffixes for each existing prefix (`ojcc_migration_test_`, `ojcc_task5_migration_`, `ojcc_task7_`), loopback/5432/query safeguards, same-target validation, distinct usernames, no reuse, and identifier quoting. Seed the parent environment with `MIGRATION_DATABASE_URL` for another database and prove `alembic_environment` overwrites it.
 
@@ -366,13 +366,13 @@ Test cleanup by disposing only engines/connections opened by the helper and issu
 
 Expected RED: `tests.database_support` does not exist.
 
-- [ ] **Step 2: Implement the shared helper**
+- [x] **Step 2: Implement the shared helper**
 
 Generate the UUID name internally and validate it again immediately before create/drop. Use `psycopg.sql.Identifier` for `CREATE DATABASE`, `DROP DATABASE`, and configured role identifiers. Print/record only `CREATED <name>`, `DROPPED <name>`, or `LEFTOVER <name>: <reason>`; never render URLs or passwords.
 
 The helper connects to the `postgres` maintenance database through the migration credential, creates the database owned by the migration login, derives the application URL by changing only the database component, validates the pair, and refuses if the target exists. It never enumerates/drop-matches a prefix and never terminates connections.
 
-- [ ] **Step 3: Convert all six database-creating test modules**
+- [x] **Step 3: Convert all six database-creating test modules**
 
 Replace their local create/drop/Alembic helpers with `DisposableDatabase`. All subprocess environments use `alembic_environment`; no `os.environ | {'DATABASE_URL': ...}` remains. Owner-only setup/trigger-bypass uses `database.migration_url`; API/privilege behavior uses `database.application_url`.
 
@@ -384,17 +384,17 @@ rg -n "CREATE DATABASE|DROP DATABASE|pg_terminate_backend|env=os.environ.*DATABA
 
 Expected: no local duplicate database lifecycle implementation and no forced termination remain outside the shared helper's negative test fixtures.
 
-- [ ] **Step 4: Separate owner setup from runtime access in remaining database tests**
+- [x] **Step 4: Separate owner setup from runtime access in remaining database tests**
 
 For the fourteen remaining modules listed under Files, replace setup/corruption/fixture engines that write privileged seed rows or use `session_replication_role` with `settings.require_migration_database_url()`. Keep explicit read-only or runtime behavior on `settings.database_url`. Dependency-overridden domain tests may continue to use owner sessions for fixture isolation, but they must be labeled setup sessions; the dedicated Task 5 journey is the non-owner API boundary proof.
 
 Add a repository guard test that searches test subprocess calls and fails when an Alembic child sets only one URL or inherits either URL implicitly.
 
-- [ ] **Step 5: Run the migrated helper suites and record every database name**
+- [x] **Step 5: Run the migrated helper suites and record every database name**
 
 Run the six database-creating modules with `-s` so CREATED/DROPPED/LEFTOVER names are visible. Append every created name and final disposition to the ledger. A leftover is a failed gate requiring investigation; do not terminate its connections or reuse it.
 
-- [ ] **Step 6: Review and commit**
+- [x] **Step 6: Review and commit**
 
 Run Ruff, the URL/helper tests, immutable hashes, and `git diff --check`.
 

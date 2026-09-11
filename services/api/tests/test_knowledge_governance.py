@@ -24,7 +24,8 @@ TASK5_KNOWLEDGE_TABLES = {
 
 @pytest.fixture
 def connection() -> Iterator[Connection]:
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup connection isolated by a rollback."""
+    engine = create_engine(settings.require_migration_database_url())
     with engine.connect() as value:
         transaction = value.begin()
         try:
@@ -402,7 +403,7 @@ def test_role_assignment_mutation_cannot_invalidate_knowledge_provenance(
 
 def test_knowledge_approval_and_role_mutation_take_conflicting_locks() -> None:
     """Production break: a concurrent role edit invalidates an uncommitted approval."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(settings.require_migration_database_url())
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     with engine.begin() as seed_connection:
         _require_task5_schema(seed_connection)
@@ -927,7 +928,7 @@ def test_withdrawal_cannot_precede_existing_citation(connection: Connection) -> 
 
 def test_citation_and_withdrawal_take_conflicting_approval_locks() -> None:
     """Production break: citation and withdrawal can commit without serializing."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(settings.require_migration_database_url())
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     with engine.begin() as seed_connection:
         _require_task5_schema(seed_connection)

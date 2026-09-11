@@ -115,9 +115,11 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture
 def closed_loop_session() -> Iterator[Session]:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for closed-loop tests")
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup session isolated by a rollback."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for closed-loop tests")
+    engine = create_engine(setup_database_url)
     connection = engine.connect()
     transaction = connection.begin()
     session = sessionmaker(
@@ -331,9 +333,10 @@ def approved_closed_loop_case(closed_loop_session: Session) -> ClosedLoopCase:
 @pytest.fixture
 def committed_closed_loop_case() -> Iterator[tuple[Engine, ClosedLoopCase]]:
     """Committed aggregate owned by one test for real multi-connection races."""
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for closed-loop tests")
-    engine = create_engine(settings.database_url)
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for closed-loop tests")
+    engine = create_engine(setup_database_url)
     with Session(engine, expire_on_commit=False) as session:
         case = _seed_closed_loop_case(session, approve=True)
         session.commit()

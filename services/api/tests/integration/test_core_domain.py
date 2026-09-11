@@ -37,9 +37,13 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture(scope="session")
 def database_url() -> str:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for core-domain integration test")
-    return settings.database_url
+    """Return the owner-credential target used for fixture setup and rollback."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip(
+            "PostgreSQL MIGRATION_DATABASE_URL is not reachable for core-domain integration test"
+        )
+    return setup_database_url
 
 
 @pytest.fixture

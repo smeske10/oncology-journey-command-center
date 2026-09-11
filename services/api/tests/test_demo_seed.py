@@ -6,20 +6,17 @@ import hashlib
 import os
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.db.integrity import inspect_integrity
 from app.db.models import FollowUpRequest
 from app.domain.approvals import record_decision
@@ -32,9 +29,9 @@ from app.domain.navigation_tasks import (
 from app.domain.outcomes import record_outcome
 from scripts import seed_demo as seed_demo_script
 from scripts.seed_demo import DEMO_IDS, seed_demo
+from tests.database_support import disposable_database
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DISPOSABLE_PREFIX = "ojcc_task7_"
 SCOPED_TABLES = (
     "agent_run_citation",
@@ -72,56 +69,10 @@ SCOPED_TABLES = (
 )
 
 
-def _validate_local_url(url: URL) -> None:
-    if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
-        raise ValueError("Demo-seed tests require loopback PostgreSQL")
-
-
 @contextmanager
 def _disposable_database() -> Iterator[str]:
-    configured = make_url(settings.database_url)
-    _validate_local_url(configured)
-    disposable = configured.set(database=f"{DISPOSABLE_PREFIX}{uuid4().hex}")
-    database = disposable.database
-    assert database is not None and database.startswith(DISPOSABLE_PREFIX)
-    admin = disposable.set(database="postgres")
-    engine = create_engine(admin, isolation_level="AUTOCOMMIT")
-    created = False
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database}"'))
-        created = True
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "alembic",
-                "-c",
-                "services/api/alembic.ini",
-                "upgrade",
-                "head",
-            ],
-            cwd=PROJECT_ROOT,
-            env=os.environ | {"DATABASE_URL": disposable.render_as_string(hide_password=False)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        yield disposable.render_as_string(hide_password=False)
-    finally:
-        if created:
-            assert database.startswith(DISPOSABLE_PREFIX)
-            with engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :database AND pid <> pg_backend_pid()"
-                    ),
-                    {"database": database},
-                )
-                connection.execute(text(f'DROP DATABASE "{database}"'))
-        engine.dispose()
+    with disposable_database(prefix=DISPOSABLE_PREFIX, migrate_to="head") as database:
+        yield database.migration_url
 
 
 def _seed_digest(session: Session) -> str:

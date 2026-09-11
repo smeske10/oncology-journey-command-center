@@ -197,6 +197,14 @@ def _row_counts(session: Session) -> dict[str, int]:
     return counts
 
 
+def _set_seed_user_triggers(session: Session, *, enabled: bool) -> None:
+    action = "ENABLE" if enabled else "DISABLE"
+    for table_name in ROW_COUNT_TABLES:
+        session.execute(
+            text(f"ALTER TABLE public.{table_name} {action} TRIGGER USER")
+        )
+
+
 def _seed_identity_and_pathways(
     session: Session, ids: dict[str, UUID], values: dict[str, Any]
 ) -> None:
@@ -1260,7 +1268,7 @@ def seed_demo(session: Session) -> SeedSummary:
     """Insert one fixed, entirely synthetic and idempotent reconciled-domain dataset."""
     ids = DEMO_IDS
     values: dict[str, Any] = ids | TIMES
-    session.execute(text("SET LOCAL session_replication_role = replica"))
+    _set_seed_user_triggers(session, enabled=False)
     restore_trigger_enforcement = True
     try:
         _seed_identity_and_pathways(session, ids, values)
@@ -1273,7 +1281,7 @@ def seed_demo(session: Session) -> SeedSummary:
         raise
     finally:
         if restore_trigger_enforcement:
-            session.execute(text("SET LOCAL session_replication_role = origin"))
+            _set_seed_user_triggers(session, enabled=True)
     _seed_closed_loop_transportation_story(session, ids, values)
     return SeedSummary(organization_id=ids["organization"], row_counts=_row_counts(session))
 

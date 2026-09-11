@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Approved on 2026-09-11; Tasks 1–2 complete; Task 3 next.**
+Status: **Approved on 2026-09-11; Tasks 1–3 complete; Task 4 next.**
 
 ## Milestone boundary
 
@@ -136,11 +136,7 @@ All names below are synthetic UUID-suffixed databases. No connection was made to
 | `ojcc_migration_test_1c7d3d26610c4b68ad94fb3fd9cb6a1d` | leftover observed after an interrupted `localhost` diagnostic run; zero sessions; not dropped because exact provenance is uncertain |
 | `ojcc_migration_test_e51d4f44b6a4475688c57eaaf82e4753` | leftover observed after an interrupted `localhost` diagnostic run; zero sessions; not dropped because exact provenance is uncertain |
 
-## Next exact step
-
-Commit the approved plan correction, reduce the task-created local migration role from CREATEROLE to NOCREATEROLE, generate and record a new disposable database, establish 0006 through the 0005-only bootstrap bridge, then write and run the catalog-complete RED tests before implementing privilege-only migration 0007.
-
-## Task 2 — active
+## Task 2 — complete
 
 - Synthetic local `ojcc_migrator` and `ojcc_api` login roles were provisioned through the bootstrap credential with the approved non-superuser profiles.
 - Membership `ojcc_app` → `ojcc_api` was verified as INHERIT true, SET false, ADMIN false.
@@ -159,3 +155,111 @@ Commit the approved plan correction, reduce the task-created local migration rol
 - Runtime-boundary GREEN database `ojcc_privilege_test_a5053f9b99a54d568b461dea3bc10cc0`: created and dropped normally; the API login completed claim → start → complete → Outcome through trigger-authored protected writes, while direct event inserts were denied.
 - Full Task 2 GREEN databases `ojcc_privilege_test_b73226b65d4a498ab71527dba72f91c1`, `ojcc_privilege_test_9a62a330fdb44556856d334e3f025dae`, and `ojcc_privilege_test_1cd1cbf92f3948c898108e985ca8cdff`: each created and dropped normally. The 12-test suite passed fresh replay, populated preservation, failure-atomic preflight, exact ACL/function catalogs, non-owner runtime commands, head/check, and online/offline downgrade refusal.
 - Task 2 final gates: immutable migrations 0001–0006 retained their approved SHA-256 hashes; 6 immutable-hash tests passed; Ruff passed on all Task 2 Python files; `git diff --check` passed.
+
+## Task 3 — complete
+
+- Added one shared disposable-database helper with exact UUID-name validation, quoted identifiers, explicit owner/API Alembic environments, the bounded 0005 bootstrap bridge, refusal to reuse a name, and ordinary-drop cleanup that reports rather than terminates unknown sessions.
+- Converted all six database-creating modules to the shared helper. Repository search found no duplicate lifecycle or forced-termination implementation outside the helper's deliberate live-session negative test cleanup.
+- Remaining database fixtures now label and use `MIGRATION_DATABASE_URL` for privileged setup and rollback. The dedicated privilege journey continues to execute through `DATABASE_URL` as `ojcc_api`.
+- Added a repository guard that parses test subprocess calls and requires every real Alembic child to receive an explicit two-target environment. The invalid-target unit test module is the sole intentional exemption.
+- Replaced the demo seed's superuser-only `session_replication_role` switch with owner-authorized USER-trigger disable/enable over the fixed seed table allowlist. Foreign-key and system-trigger enforcement remains active.
+- The legacy 0005 concurrency test now observes lock state through the explicitly bounded bootstrap connection because PostgreSQL hides another role's query text from a non-superuser observer.
+- Core migration suite: 24 passed. Immutable audit migration cases: 7 passed. Closed-loop migration suite: 3 passed. Restore-integrity suite: 13 passed. Seeded application contract: 1 passed.
+- Shared helper plus full privilege suite: 21 passed. Immutable hashes: 6 passed. Ruff: passed.
+- `test_demo_seed.py`: 33 passed; the one reset-wrapper test failed at the intentionally not-yet-implemented Task 4 three-target propagation boundary. Its exact leftover had zero sessions and was ordinarily dropped. This is the expected RED that opens Task 4, not a Task 3 helper failure.
+
+### Task 3 disposable database record
+
+Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows marked “deliberate leftover” were intentionally held open to prove that cleanup never terminates unknown sessions, then closed and ordinarily dropped by the owning test. No persistent database was connected to or mutated.
+
+| Database | Disposition |
+|---|---|
+| `ojcc_migration_test_74fd3ac4a26b44d597f3e1edbb67b038` | dropped normally after helper development failure |
+| `ojcc_migration_test_0bfdc570438e46fd96b673722b282778` | dropped normally after helper development failure |
+| `ojcc_migration_test_e566f3e30904489aac9a51b1768d1d68` | dropped normally |
+| `ojcc_migration_test_6abc3d16f6d04ea19e69721b3493e37c` | deliberate leftover; connection closed; dropped normally by the test |
+| `ojcc_migration_test_2cf3a25d716444a09b50c6d45bcb7c3e` | dropped normally |
+| `ojcc_migration_test_c3d71b29d88e4a2b93eb97ce37c2a73d` | dropped normally |
+| `ojcc_migration_test_9c7e44a59a234d8cbc3263f55ffea36f` | dropped normally |
+| `ojcc_migration_test_27a868b64984496ab3e676c8367467d1` | dropped normally |
+| `ojcc_migration_test_f00ab6ff0cf54a6080d060513611d5c8` | dropped normally |
+| `ojcc_migration_test_2bdab45a558846ca98a34bf2ac9e742d` | dropped normally |
+| `ojcc_migration_test_26cb25ae13404afca8229c403d381e66` | dropped normally |
+| `ojcc_migration_test_0491b27f3b264f1cafcfbbb941e94528` | dropped normally |
+| `ojcc_migration_test_1773e3ee49c445b586cdc22bb522e3c2` | dropped normally |
+| `ojcc_migration_test_165630835b3a4a64a3ae8dba55c69b19` | dropped normally |
+| `ojcc_migration_test_1d2a398efe174b88ae679c9de140b7ff` | dropped normally |
+| `ojcc_migration_test_40131a766db34f6d97278d9a50e14948` | dropped normally |
+| `ojcc_migration_test_ca430752cd1c45e0bd594006ad864814` | dropped normally |
+| `ojcc_migration_test_97fd12c2a7334d50a8459bf5ee61ad86` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_da7df96cec8e4d29a5b876c27c6a8245` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_c304ce62be764d70baf9805917db02c7` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_67a5feb7c8f64b03bee546eed9c6fde3` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_94b3c930a56f4c0583aa6d32ad078f84` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_d3d78ddf8c7c4f89829b7024b504af1b` | dropped normally |
+| `ojcc_migration_test_477e5f0a02434066b2db72b806cb9c91` | dropped normally |
+| `ojcc_migration_test_d7a5009d84874f13bd50e0b018f57b75` | dropped normally |
+| `ojcc_migration_test_b5bc7977fcec4199bbaf2020bde2b970` | dropped normally |
+| `ojcc_migration_test_ea1fb7596bc2433996e73f0cfe92a9df` | dropped normally |
+| `ojcc_migration_test_cb69d748822d4b9d96872a932e844fbf` | dropped normally |
+| `ojcc_task7_63765c54f8c04f38b89797378e5a88a5` | failed seed left open; zero sessions verified; dropped normally |
+| `ojcc_task7_43d1f472ce764616b25926092f59435e` | dropped normally |
+| `ojcc_task7_20a5b64065e24fbfba1386212bb3f6e0` | dropped normally |
+| `ojcc_task7_1b6b00a75a034d0382b82575fd2ffe41` | dropped normally |
+| `ojcc_migration_test_8cc21991aa404960a9f0d4a2ca814044` | dropped normally |
+| `ojcc_migration_test_6d5210c439a944d691c863e07b93ee3a` | dropped normally |
+| `ojcc_migration_test_6f164dd0b01748af89cfd6a9e8e1b864` | dropped normally |
+| `ojcc_task5_migration_8e4777db6a8e481f8bb40ac8a9a1b1f3` | dropped normally |
+| `ojcc_task5_migration_66f12a348cb941b6af19604d3ec4f3f1` | dropped normally |
+| `ojcc_task5_migration_d391697686504f75ac2f475093acd52d` | dropped normally |
+| `ojcc_task5_migration_be17228a8abf4e07ad61d263f8c7c2c2` | dropped normally |
+| `ojcc_task5_migration_493cfd0a38984d2ca5d74099c5f22e6e` | dropped normally |
+| `ojcc_task5_migration_9c1d7a58de724245968326d51441f825` | dropped normally |
+| `ojcc_task5_migration_ab7c33e170914f7cbdf422d8ad6e9b1c` | dropped normally |
+| `ojcc_task5_migration_949eff2cb06c4783b3a8e682ab7c17a0` | dropped normally |
+| `ojcc_task5_migration_04b129c3cbc249c3a9eb2d895b86fbd5` | dropped normally |
+| `ojcc_task5_migration_91637c5bd8e74cccb296309d8b35063b` | failed test left open; zero sessions verified; dropped normally |
+| `ojcc_task5_migration_01bd97ac2b6f4c6aa4297af4ca94a619` | dropped normally |
+| `ojcc_migration_test_6d825141395f4b55ae23aef56b251f03` | dropped normally |
+| `ojcc_migration_test_35efe6d0c6d14da988370fedfa1b169a` | dropped normally |
+| `ojcc_migration_test_6cccb1fd21a94b5aaaa7ced089dafb43` | dropped normally |
+| `ojcc_migration_test_66fdce2642154ba2aa3f9921f1e2ae11` | dropped normally |
+| `ojcc_migration_test_a7360b615ab34000b8eeadc3b9edb3b9` | dropped normally |
+| `ojcc_migration_test_10f75f6d5abd4c10baf74ff2f034dafd` | dropped normally |
+| `ojcc_migration_test_470ab5ef99d5471f9c67bb911ec0d51f` | dropped normally |
+| `ojcc_migration_test_4a7c82f4e1a44d85955c66f8ed5469c0` | dropped normally |
+| `ojcc_migration_test_678d596c531d4a6aa1b0be391904facf` | dropped normally |
+| `ojcc_migration_test_f1f3a06c86a84ee9a47ef82ae0d25ce3` | dropped normally |
+| `ojcc_migration_test_3f4baa4f68904980ac71cfdb605cb218` | dropped normally |
+| `ojcc_migration_test_8af50b02e18d4f8ca34b9903ce9ceb6a` | dropped normally |
+| `ojcc_migration_test_a7c7c6f314744508b0c08c22f6592c94` | dropped normally |
+| `ojcc_migration_test_30a0082d6fa444408b720b314a6290d5` | dropped normally |
+| `ojcc_migration_test_fcd0a014804e4572be47f96360ac538c` | dropped normally |
+| `ojcc_task5_migration_84e10020b10c4ebebebd45b55a5e9996` | dropped normally |
+| `ojcc_task5_migration_cb9426cce74a44b6b75b2287b6cb59bb` | dropped normally |
+| `ojcc_task5_migration_39c3339029474f82b5bbe348d5196f05` | dropped normally |
+| `ojcc_task5_migration_5026de879ffc4f9c8930ef619773f96b` | dropped normally |
+| `ojcc_task5_migration_3c796c0d4bdb4ab8a966b8e2289fc1fa` | dropped normally |
+| `ojcc_task5_migration_b8310ce9a8d04ebfaac650802b0300fb` | dropped normally |
+| `ojcc_task5_migration_71ececd4954140c59be8a422e1f92209` | dropped normally |
+| `ojcc_migration_test_ae46a1199b6b4c7a89b062d901025c84` | dropped normally |
+| `ojcc_migration_test_3c20777a4b6141dfad986fdb8dea635a` | dropped normally |
+| `ojcc_migration_test_6d2d70fcceb449649081ea7c72ad5acc` | dropped normally |
+| `ojcc_task7_c9236f1105564ae5ae674c8a123d0d36` | dropped normally |
+| `ojcc_task7_8c3d476ec47a41c498aff2e49327c23d` | dropped normally |
+| `ojcc_task7_2937633a6fce4423a6229d81ee6cd1fd` | dropped normally after one transient concurrent replay failure |
+| `ojcc_task7_5c1ac046c09843e19beae3e83eb33dd3` | dropped normally |
+| `ojcc_task7_f284ebce38ed4c0183e1ba1455ea77b6` | dropped normally |
+| `ojcc_task7_a3e250f3d3974cde9b6ef4401d4de6c9` | dropped normally |
+| `ojcc_task7_5fbc51f5aefa4a0ab7d482b4bf88a618` | dropped normally |
+| `ojcc_task7_4e58d46b91ed42f9bae00fe48d0bf58f` | dropped normally |
+| `ojcc_task7_4fb96ab6b1a04af5bcc7e9ff0e80cce2` | expected Task 4 reset RED left open; zero sessions verified; dropped normally |
+| `ojcc_migration_test_32275bb543c84f75990d1c0fbe9bb338` | dropped normally |
+| `ojcc_migration_test_58db170f81f545ebbdd6009c98d5e2d5` | deliberate leftover; connection closed; dropped normally by the test |
+| `ojcc_migration_test_9c929ed53e954adeab869ba63c0479b3` | dropped normally |
+| `ojcc_migration_test_248d2e5b822e49e4a387ebe4fd101683` | dropped normally |
+| `ojcc_migration_test_57e1a1111f5c41049a6eb6205621bdf2` | dropped normally |
+
+## Next exact step
+
+Write the Task 4 RED tests for three-target replay/reset/seed/verify propagation, then implement the shared replay entry point and carry the bootstrap, migration, and API credentials through every local and CI workflow without exposing the bootstrap credential to the running application.

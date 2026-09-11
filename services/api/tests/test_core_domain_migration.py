@@ -1,7 +1,6 @@
 # ruff: noqa: E501
 
 import hashlib
-import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -18,6 +17,15 @@ from sqlalchemy.engine import URL, Connection, make_url
 from app.config import settings
 from app.db.base import Base
 from app.db.models import EpisodePathwayAssignment
+from tests.database_support import (
+    DisposableDatabase,
+    alembic_environment,
+    bootstrap_database_url,
+    disposable_database,
+    run_alembic,
+    upgrade_database,
+    validate_disposable_url,
+)
 
 MIGRATION_PATH = (
     Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0001_core_domain.py"
@@ -34,57 +42,37 @@ DISPOSABLE_MIGRATION_DATABASE_PREFIX = "ojcc_migration_test_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
-def _alembic_environment(migration_database_url: str) -> dict[str, str]:
+def _database_target(migration_database_url: str) -> DisposableDatabase:
     migration_url = make_url(migration_database_url)
-    application_url = migration_url.set(username=f"{migration_url.username}_runtime_target_only")
-    return os.environ | {
-        "DATABASE_URL": application_url.render_as_string(hide_password=False),
-        "MIGRATION_DATABASE_URL": migration_database_url,
-    }
+    application_url = make_url(settings.database_url).set(
+        host=migration_url.host,
+        port=migration_url.port,
+        database=migration_url.database,
+    )
+    assert migration_url.database is not None
+    return DisposableDatabase(
+        name=migration_url.database,
+        migration_url=migration_database_url,
+        application_url=application_url.render_as_string(hide_password=False),
+    )
+
+
+def _alembic_environment(migration_database_url: str) -> dict[str, str]:
+    return alembic_environment(_database_target(migration_database_url))
+
+
+def _bootstrap_target_url(migration_database_url: str) -> str:
+    return bootstrap_database_url(_database_target(migration_database_url))
 
 
 def _run_alembic(database_url: str, revision: str) -> subprocess.CompletedProcess[str]:
-    project_root = MIGRATION_PATH.parents[4]
-    environment = _alembic_environment(database_url)
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            "upgrade",
-            revision,
-        ],
-        cwd=project_root,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
+    return upgrade_database(_database_target(database_url), revision)
 
 
 def _run_alembic_without_checking(
     database_url: str, revision: str
 ) -> subprocess.CompletedProcess[str]:
-    project_root = MIGRATION_PATH.parents[4]
-    environment = _alembic_environment(database_url)
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            "upgrade",
-            revision,
-        ],
-        cwd=project_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
+    return upgrade_database(_database_target(database_url), revision, check=False)
 
 
 def _render_alembic_sql(
@@ -92,45 +80,15 @@ def _render_alembic_sql(
     command: str,
     revision_range: str,
 ) -> subprocess.CompletedProcess[str]:
-    project_root = MIGRATION_PATH.parents[4]
-    environment = _alembic_environment(database_url)
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            command,
-            revision_range,
-            "--sql",
-        ],
-        cwd=project_root,
+    return run_alembic(
+        _database_target(database_url),
+        [command, revision_range, "--sql"],
         check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
     )
 
 
 def _run_alembic_check(database_url: str) -> subprocess.CompletedProcess[str]:
-    project_root = MIGRATION_PATH.parents[4]
-    environment = _alembic_environment(database_url)
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            "check",
-        ],
-        cwd=project_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
+    return run_alembic(_database_target(database_url), ["check"], check=False)
 
 
 def _validate_loopback_postgres_url(url: URL) -> None:
@@ -141,17 +99,11 @@ def _validate_loopback_postgres_url(url: URL) -> None:
 
 
 def _validate_disposable_database_url(url: URL) -> None:
-    _validate_loopback_postgres_url(url)
-    database = url.database
-    if database is None or not database.startswith(DISPOSABLE_MIGRATION_DATABASE_PREFIX):
-        raise ValueError("Refusing to operate on a non-disposable migration test database")
-    suffix = database.removeprefix(DISPOSABLE_MIGRATION_DATABASE_PREFIX)
-    if len(suffix) != 32 or any(character not in "0123456789abcdef" for character in suffix):
-        raise ValueError("Refusing to operate on an invalid disposable migration test database")
+    validate_disposable_url(url, prefix=DISPOSABLE_MIGRATION_DATABASE_PREFIX)
 
 
 def _build_disposable_database_url() -> URL:
-    configured_url = make_url(settings.database_url)
+    configured_url = make_url(settings.require_migration_database_url())
     _validate_loopback_postgres_url(configured_url)
     disposable_url = configured_url.set(
         database=f"{DISPOSABLE_MIGRATION_DATABASE_PREFIX}{uuid4().hex}"
@@ -162,33 +114,11 @@ def _build_disposable_database_url() -> URL:
 
 @contextmanager
 def _disposable_migration_database() -> Iterator[str]:
-    disposable_url = _build_disposable_database_url()
-    _validate_disposable_database_url(disposable_url)
-    database = disposable_url.database
-    assert database is not None
-    admin_url = disposable_url.set(database="postgres")
-    _validate_loopback_postgres_url(admin_url)
-    admin_engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    created = False
-
-    try:
-        with admin_engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database}"'))
-        created = True
-        print(f"CREATED {database}", flush=True)
-        yield disposable_url.render_as_string(hide_password=False)
-    finally:
-        if created:
-            _validate_disposable_database_url(disposable_url)
-            try:
-                with admin_engine.connect() as connection:
-                    connection.execute(text(f'DROP DATABASE "{database}"'))
-            except Exception as error:
-                print(f"LEFTOVER {database}: {type(error).__name__}", flush=True)
-                raise
-            else:
-                print(f"DROPPED {database}", flush=True)
-        admin_engine.dispose()
+    with disposable_database(
+        prefix=DISPOSABLE_MIGRATION_DATABASE_PREFIX,
+        migrate_to=None,
+    ) as database:
+        yield database.migration_url
 
 
 @pytest.mark.parametrize(("filename", "expected"), IMMUTABLE_MIGRATION_SHA256.items())
@@ -215,7 +145,7 @@ def test_initial_migration_is_an_explicit_schema_snapshot() -> None:
             "-c",
             "services/api/alembic.ini",
             "upgrade",
-            "head",
+            "0006_navigator_closed_loop",
             "--sql",
         ],
         cwd=project_root,
@@ -248,13 +178,9 @@ def test_populated_upgrade_uses_a_disposable_database_not_the_configured_applica
     assert disposable_url.database != make_url(settings.database_url).database
     assert disposable_url.database is not None
     assert disposable_url.database.startswith("ojcc_migration_test_")
-    with pytest.raises(
-        ValueError, match="Refusing to operate on a non-disposable migration test database"
-    ):
+    with pytest.raises(ValueError, match="disposable database"):
         _validate_disposable_database_url(make_url(settings.database_url))
-    with pytest.raises(
-        ValueError, match="Migration test databases must use a loopback PostgreSQL URL"
-    ):
+    with pytest.raises(ValueError, match="loopback PostgreSQL"):
         _validate_disposable_database_url(disposable_url.set(host="database.example.test"))
 
 
@@ -877,7 +803,7 @@ def test_0004_fails_precisely_when_authorization_provenance_would_be_invented(
 ) -> None:
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
-        engine = create_engine(database_url)
+        engine = create_engine(_bootstrap_target_url(database_url))
         with engine.begin() as connection:
             if legacy_kind == "terminal_signal":
                 ids = {name: uuid4() for name in (
@@ -1044,7 +970,7 @@ def test_0004_fails_precisely_for_non_derivable_origin_provenance() -> None:
     """A patient/source mismatch must name the signal and require synthetic reset."""
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
-        engine = create_engine(database_url)
+        engine = create_engine(_bootstrap_target_url(database_url))
         with engine.begin() as connection:
             offending_id = _seed_offline_0004_ambiguity(connection, "non_derivable_signal")
         engine.dispose()
@@ -1075,7 +1001,7 @@ def test_0004_offline_upgrade_artifact_guards_ambiguous_rows_before_destructive_
     """Executing offline SQL must fail precisely before legacy rows or schema are discarded."""
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "0003_need_task_outcome_lifecycle")
-        engine = create_engine(database_url)
+        engine = create_engine(_bootstrap_target_url(database_url))
         with engine.begin() as connection:
             offending_id = _seed_offline_0004_ambiguity(connection, legacy_kind)
         artifact = _render_alembic_sql(
@@ -1114,7 +1040,7 @@ def test_0004_offline_upgrade_artifact_guards_ambiguous_rows_before_destructive_
 def test_0004_offline_downgrade_refuses_before_emitting_partial_teardown() -> None:
     """An irreversible downgrade must emit no trigger, view, or function teardown."""
     result = _render_alembic_sql(
-        settings.database_url,
+        settings.require_migration_database_url(),
         "downgrade",
         "0004_safety_approval_lifecycle:0003_need_task_outcome_lifecycle",
     )

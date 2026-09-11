@@ -48,9 +48,11 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture
 def db_session() -> Iterator[Session]:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for safety-signal tests")
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup session isolated by a rollback."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for safety-signal tests")
+    engine = create_engine(setup_database_url)
     connection = engine.connect()
     transaction = connection.begin()
     session = sessionmaker(
