@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Approved on 2026-09-11; implementation started in the isolated feature worktree.**
+Status: **Approved on 2026-09-11; Task 1 complete; Task 2 resumed with the approved 0005-only bootstrap bridge.**
 
 ## Milestone boundary
 
@@ -138,4 +138,14 @@ All names below are synthetic UUID-suffixed databases. No connection was made to
 
 ## Next exact step
 
-Begin Task 2 by writing the failing catalog-complete role and ownership tests against migration 0006, using newly provisioned owner/API/group roles and a fresh UUID-suffixed disposable database. Record the exact database name before migration and do not reuse either leftover name above.
+Commit the approved plan correction, reduce the task-created local migration role from CREATEROLE to NOCREATEROLE, generate and record a new disposable database, establish 0006 through the 0005-only bootstrap bridge, then write and run the catalog-complete RED tests before implementing privilege-only migration 0007.
+
+## Task 2 — active
+
+- Synthetic local `ojcc_migrator` and `ojcc_api` login roles were provisioned through the bootstrap credential with the approved non-superuser profiles.
+- Membership `ojcc_app` → `ojcc_api` was verified as INHERIT true, SET false, ADMIN false.
+- Disposable database `ojcc_privilege_test_591589cc9392494193cbb76c354a8b27`: recorded as planned before mutation, created with owner `ojcc_migrator`, migration attempt rolled back, and dropped normally with zero active sessions.
+- Fresh replay reached immutable migration 0005 and failed on `ALTER ROLE ojcc_app ... NOSUPERUSER` with PostgreSQL `InsufficientPrivilege`: only a superuser may change the SUPERUSER attribute, even when setting it false. `CREATEROLE` is insufficient.
+- This proves the approved combination “immutable 0005 + wholly non-superuser 0001→head replay” is not executable on PostgreSQL 16. No production migration was edited, and no partial revision remained in the disposable database.
+- Recommended compatibility bridge: run 0001–0004 as `ojcc_migrator`; run only immutable 0005 as the existing bootstrap superuser; immediately reassign every bootstrap-owned object in that exact fresh database to `ojcc_migrator`; remove the bootstrap credential; then run 0006→head as the non-superuser owner. Alternative: explicitly elevate `ojcc_migrator` only for 0005 and revoke SUPERUSER before 0006/0007. Both require user approval because each changes the fixed credential model.
+- User approved proceeding with the recommended 0005-only bootstrap bridge. The implementation plan now requires an explicit third bootstrap URL only for fresh replay/reset/provisioning, keeps it out of API and web environments, and removes CREATEROLE from the final migration-owner profile because 0005 no longer runs under that role.

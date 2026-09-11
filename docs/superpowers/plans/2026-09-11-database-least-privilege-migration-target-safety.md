@@ -4,7 +4,7 @@
 
 **Goal:** Make schema changes run through an explicit migration/object-owner credential while the API and complete closed-loop journey run through a distinct non-owner credential with a catalog-complete, deny-by-default PostgreSQL privilege surface and fail-closed target matching.
 
-**Architecture:** Keep immutable migrations 0001–0006 unchanged and add a privilege-only 0007. A shared URL-target module compares `MIGRATION_DATABASE_URL` and `DATABASE_URL` by PostgreSQL backend, normalized host, explicit/effective port, and database name while requiring distinct usernames; Alembic and every destructive/test wrapper call it before connecting. PostgreSQL retains `ojcc_app` as a NOLOGIN privilege group, an externally provisioned API login inherits that group without role-administration or `SET ROLE`, and a distinct non-superuser migration login owns the database, schema, tables, views, and functions.
+**Architecture:** Keep immutable migrations 0001–0006 unchanged and add a privilege-only 0007. A shared URL-target module compares `MIGRATION_DATABASE_URL` and `DATABASE_URL` by PostgreSQL backend, normalized host, explicit/effective port, and database name while requiring distinct usernames; Alembic and every destructive/test wrapper call it before connecting. PostgreSQL retains `ojcc_app` as a NOLOGIN privilege group, an externally provisioned API login inherits that group without role-administration or `SET ROLE`, and a distinct non-superuser migration login owns the database, schema, tables, views, and functions. Fresh replay uses an explicitly bounded compatibility bridge: the migration owner runs 0001–0004, the existing bootstrap superuser runs immutable 0005 only, bootstrap-owned objects in that exact database are immediately reassigned to the migration owner, and 0006 onward returns to the non-superuser owner.
 
 **Tech Stack:** Existing Python 3.12, FastAPI, SQLAlchemy 2, Alembic, psycopg 3, PostgreSQL 16, pytest, PowerShell verification scripts, GitHub Actions, Next.js 16/React 19/Playwright. No dependency upgrades or new services.
 
@@ -25,6 +25,7 @@
 - Do not add the rejected task-binding CHECK, its upgrade pre-scan/refusal, or an integrity violation for legacy unbound execution history.
 - Historical unbound tasks remain valid and readable. Open unbound tasks may be claimed only through the approved command, which binds the exact approved proposal atomically. Assigned/in-progress unbound tasks remain non-executable; start/complete still require a binding. Do not fabricate, backfill, cancel, delete, or rewrite historical authorization rows.
 - Migration files create no passwords or login credentials. Local/CI roles are provisioned explicitly before Alembic; production deployment and provider-specific provisioning are out of scope.
+- Immutable migration 0005 executes `ALTER ROLE ... NOSUPERUSER`, which PostgreSQL 16 reserves to superusers even when removing the capability. A fresh replay must therefore use the approved 0005-only bootstrap bridge; the bootstrap URL is required only by replay/reset/provisioning processes and must be removed before 0006 onward or any runtime starts.
 - A migration must not alter pre-existing role attributes to make them acceptable. It validates and refuses on unexpected capabilities or ownership.
 - Never reset, drop, seed, migrate, or otherwise mutate persistent `ojcc`. Use only new UUID-suffixed disposable databases, record every created name in the progress ledger, never reuse an uncertain database, and never force-terminate unknown connections.
 - Keep the existing npm, pip, and Next.js GitHub Actions caching unless a test proves a caching defect. No such defect is currently known.
@@ -41,14 +42,15 @@
 |---|---|---|---|
 | FastAPI runtime | `DATABASE_URL` API login | No | Non-owner, inherited `ojcc_app` privileges only |
 | Alembic online/offline | `MIGRATION_DATABASE_URL` owner plus `DATABASE_URL` only for target comparison | Yes, in the migration process | Refuse before migration when the pair differs in host, port, or database, or usernames are equal |
-| Reset | Both explicit arguments | Yes | Validate pair and disposable confirmation before any engine; schema reset/migrate/seed as owner; post-seed runtime smoke as API login |
+| Fresh replay bridge | `BOOTSTRAP_DATABASE_URL`, `MIGRATION_DATABASE_URL`, and `DATABASE_URL` | Yes, only in the bounded provisioning process | Owner runs 0001–0004; bootstrap runs 0005; bootstrap objects are reassigned; owner runs 0006 onward; bootstrap is then stripped |
+| Reset | All three explicit arguments | Yes | Validate all targets and disposable confirmation before any engine; replay through the bounded bridge; seed as owner; post-seed runtime smoke as API login |
 | Seed CLI | Both explicit arguments | Yes | Validate pair first; seed as owner because it uses trigger bypass; never fall back to process settings |
 | Integrity CLI | Explicit URL chosen by caller | No | Remains read-only; final runtime evidence runs it as API login |
 | FastAPI live web server | `DATABASE_URL` only | No | Its environment is explicitly stripped of migration/admin URLs |
 | Next live web server | Neither database URL | No | Receives only the web variables it needs |
 | Disposable-database helper | Both base URLs | Yes | Creates/migrates through owner; yields both per-database URLs; overwrites inherited values in every Alembic child |
 
-`DATABASE_URL` has no persistent-`ojcc` default. API startup requires it. `MIGRATION_DATABASE_URL` may be absent in a pure API process; any migration, reset, seed, CI provisioning, or migration-test entry point requires it explicitly.
+`DATABASE_URL` has no persistent-`ojcc` default. API startup requires it. `MIGRATION_DATABASE_URL` and `BOOTSTRAP_DATABASE_URL` are absent from a pure API process. Ordinary migrations require the owner/application pair; fresh replay and reset additionally require the bootstrap URL. All three URLs must identify the same host, port, and database with distinct usernames.
 
 The pair validator uses SQLAlchemy `make_url` and compares:
 
@@ -70,13 +72,13 @@ Passwords may differ and are never logged. URL query parameters are excluded fro
 | REPLICATION | false | false | false |
 | BYPASSRLS | false | false | false |
 | CREATEDB | local/CI true for new disposable DBs; environment-specific outside this milestone | false | false |
-| CREATEROLE | local/CI true because immutable migration 0005 creates/alters `ojcc_app`; use a controlled bootstrap arrangement outside local/CI | false | false |
+| CREATEROLE | false; immutable 0005 is handled only by the bounded bootstrap bridge | false | false |
 | Inherits `ojcc_app` | false | true | n/a |
 | May `SET ROLE ojcc_app` | false | false | n/a |
 | ADMIN OPTION on `ojcc_app` | false | false | n/a |
 | Member/SET/ADMIN path to owner role | n/a | none | none |
 
-Local/CI provisioning may create missing roles with explicit synthetic-only credentials and the exact profile above. If a same-named role already exists, provisioning queries and validates it; it does not silently add/remove SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, BYPASSRLS, LOGIN, or membership capabilities. Configured role and database identifiers are rendered with `psycopg.sql.Identifier`; catalog lookups use bound parameters. No f-string, shell interpolation, or raw environment value becomes a SQL identifier.
+Local/CI provisioning may create missing roles with explicit synthetic-only credentials and the exact profile above. If a same-named role already exists, provisioning queries and validates it; it does not silently add/remove SUPERUSER, CREATEDB, CREATEROLE, REPLICATION, BYPASSRLS, LOGIN, or membership capabilities. The separately supplied bootstrap role must already be a superuser and is never created or altered by repository code. Configured role and database identifiers are rendered with `psycopg.sql.Identifier`; catalog lookups use bound parameters. No f-string, shell interpolation, or raw environment value becomes a SQL identifier.
 
 ### 1.3 Complete application relation matrix
 
@@ -110,7 +112,7 @@ Each is owned by the migration/object-owner role and has exactly `search_path=pg
 - New revision: `0007_database_least_privilege`.
 - Down revision: `0006_navigator_closed_loop`.
 - Upgrade changes only role/database/schema/relation/function privileges and function security metadata. It creates no tables, constraints, role/login, password, authorization record, or workflow row.
-- Empty 0001→0007 and populated 0006→0007 upgrades must both succeed when the URL pair and pre-provisioned role profile are valid.
+- Empty 0001→0007 replay must succeed through the approved 0005-only bootstrap bridge; populated 0006→0007 upgrades use only the validated owner/application pair.
 - Populated upgrade fixtures include open, assigned, in-progress, completed, and cancelled unbound historical tasks. Their byte-for-byte row snapshots and the zero-violation integrity result remain unchanged.
 - URL/role/ownership preflight failure aborts before revision execution and leaves `alembic current` at 0006 with the pre-upgrade ACL snapshot unchanged.
 - 0007→0006 downgrade is refused unconditionally before emitting or executing ACL/function changes. The error states that reverting would restore owner-runtime and trigger-table write exposure and directs operators to preserve the database or restore a reviewed pre-0007 snapshot. Online and `--sql` refusal tests assert no `REVOKE`, `GRANT`, `ALTER FUNCTION`, or `UPDATE alembic_version` is emitted before the error.
@@ -234,7 +236,7 @@ Commit: `feat: separate migration and runtime database targets`
 
 - [ ] **Step 1: Write failing role/ownership tests at 0006**
 
-Provision the owner/API/group roles explicitly in the disposable fixture, migrate only to 0006, and assert the known gaps: owner URL and API URL identify the same target but different usernames; API login owns no objects; the current 0006 ACL is incomplete; API INSERT on `audit_event`/`workflow_transition_event` is currently inherited; function ownership/security metadata is captured for later comparison.
+Provision the owner/API/group roles explicitly in the disposable fixture, establish 0006 through the approved 0005-only bootstrap bridge, and assert the known gaps: owner URL and API URL identify the same target but different usernames; API login owns no objects; the current 0006 ACL is incomplete; API INSERT on `audit_event`/`workflow_transition_event` is currently inherited; function ownership/security metadata is captured for later comparison.
 
 The test must query `pg_roles`, `pg_auth_members`, `pg_database`, `pg_namespace`, `pg_class`, and `pg_proc`. It asserts all LOGIN/SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS properties, membership `USAGE`, `SET`, and `ADMIN` options, and zero owner-role membership reachable by the API login.
 
@@ -405,6 +407,7 @@ Commit: `test: isolate owner and runtime database credentials`
 **Files:**
 
 - Modify: `services/api/scripts/seed_demo.py`
+- Create: `services/api/scripts/replay_schema.py`
 - Modify: `scripts/reset_demo.ps1`
 - Modify: `scripts/verify.ps1`
 - Modify: `scripts/verify_live_journey.ps1`
@@ -417,30 +420,31 @@ Commit: `test: isolate owner and runtime database credentials`
 
 **Interfaces:**
 
-- `reset_demo.ps1 -MigrationDatabaseUrl <owner> -DatabaseUrl <api> -ConfirmDatabaseName <name>`.
+- `replay_schema.py --bootstrap-database-url <bootstrap> --migration-database-url <owner> --database-url <api> --revision <revision>`.
+- `reset_demo.ps1 -BootstrapDatabaseUrl <bootstrap> -MigrationDatabaseUrl <owner> -DatabaseUrl <api> -ConfirmDatabaseName <name>`.
 - `seed_demo.py --migration-database-url <owner> --database-url <api>`.
-- `verify.ps1 -LiveMigrationDatabaseUrl <owner> -LiveDatabaseUrl <api> -LiveConfirmDatabaseName <name>`; API pair comes from the two process environment variables.
-- `verify_live_journey.ps1` accepts the same three live arguments.
+- `verify.ps1 -LiveBootstrapDatabaseUrl <bootstrap> -LiveMigrationDatabaseUrl <owner> -LiveDatabaseUrl <api> -LiveConfirmDatabaseName <name>`; the API triple comes from the three process environment variables.
+- `verify_live_journey.ps1` accepts the same four live arguments.
 
 - [ ] **Step 1: Write failing reset/seed propagation tests**
 
-Extend `test_demo_seed.py` and `test_verify_harness.py` to prove every entry point rejects before connection when either URL is missing, usernames are equal, targets differ, confirmation differs, target is persistent/remote/query-bearing, or a dirty inherited `MIGRATION_DATABASE_URL` names another database. The fake child executables must print only target field names/current usernames, never URLs.
+Extend `test_demo_seed.py` and `test_verify_harness.py` to prove every entry point rejects before connection when a required URL is missing, any usernames are equal, targets differ, confirmation differs, target is persistent/remote/query-bearing, or a dirty inherited owner/bootstrap URL names another database. The fake child executables must print only target field names/current usernames, never URLs.
 
-Assert reset snapshots/restores both URL variables and all case-insensitive `PG*` variables in `finally`, including on a nonzero Alembic/seed/audit child exit.
+Assert reset snapshots/restores all three URL variables and all case-insensitive `PG*` variables in `finally`, including on a nonzero replay/seed/audit child exit.
 
 Expected RED: current scripts accept one URL and do not isolate `MIGRATION_DATABASE_URL`.
 
 - [ ] **Step 2: Make reset and seed explicit**
 
-`reset_demo.ps1` validates both URLs and confirmation before the drop-schema engine. It drops/recreates `public`, runs Alembic, and seeds through `MIGRATION_DATABASE_URL`; seed receives both arguments but connects only with the owner URL. Finish by running read-only integrity once through the owner during seed and once through `DATABASE_URL` to prove the API role can inspect the complete schema.
+`reset_demo.ps1` validates all three URLs and confirmation before the drop-schema engine. It drops/recreates `public`, calls `replay_schema.py`, and seeds through `MIGRATION_DATABASE_URL`; seed receives the owner/application pair but connects only with the owner URL. `replay_schema.py` runs 0001–0004 as owner, 0005 as bootstrap, reassigns every bootstrap-owned application object in the exact target to the owner, strips bootstrap, and runs 0006 through the requested revision as owner. Finish by running read-only integrity once through the owner during seed and once through `DATABASE_URL` to prove the API role can inspect the complete schema.
 
-Before each child, set both process variables to the validated exact pair. Restore both and all `PG*` variables in `finally`. No fallback to settings or inherited values.
+Before each child, set only the credentials that child needs from the validated exact triple. Restore all three URLs and all `PG*` variables in `finally`. No fallback to settings or inherited values; FastAPI and Next never receive the bootstrap URL.
 
 - [ ] **Step 3: Make the verifier and live journey explicit**
 
 `verify.ps1` validates the API environment pair and the live argument pair before installation/import/connection. It rejects shared API/live database names. Pass both live URLs to the live wrapper.
 
-For each desktop/mobile iteration, `verify_live_journey.ps1` checks ports and database inactivity through the owner URL, calls reset with both URLs, starts FastAPI with only runtime `DATABASE_URL`, and starts Next with neither database credential. The Playwright config constructs allowlisted child environments instead of spreading `process.env`.
+For each desktop/mobile iteration, `verify_live_journey.ps1` checks ports and database inactivity through the owner URL, calls reset with the validated bootstrap/owner/application triple, starts FastAPI with only runtime `DATABASE_URL`, and starts Next with no database credential. The Playwright config constructs allowlisted child environments instead of spreading `process.env`.
 
 Keep `assertDatabaseJourney()` on the API URL and add `SELECT current_user` to its output; assert it equals the decoded runtime username and differs from the owner username supplied only to the wrapper.
 
@@ -448,15 +452,15 @@ Keep `assertDatabaseJourney()` on the API URL and add `SELECT current_user` to i
 
 Keep `actions/setup-node` npm caching, `actions/setup-python` pip caching, and the Next.js build-cache step byte-for-byte unless formatting requires movement. Replace static 16-hex names with two `uuid4().hex` names exported through `GITHUB_ENV`.
 
-Use the PostgreSQL service bootstrap login only in a provisioning step. The Python uses `psycopg.sql.Identifier` to create/validate:
+Use the PostgreSQL service bootstrap login only in provisioning and the bounded 0005 replay step. The Python uses `psycopg.sql.Identifier` to create/validate:
 
-- non-superuser `ojcc_migrator` LOGIN CREATEDB CREATEROLE NOREPLICATION NOBYPASSRLS;
+- non-superuser `ojcc_migrator` LOGIN CREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 - non-superuser `ojcc_api` LOGIN NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 - `ojcc_app` NOLOGIN with no dangerous attributes;
 - membership `GRANT ojcc_app TO ojcc_api WITH INHERIT TRUE, SET FALSE, ADMIN FALSE`;
 - both new databases owned by `ojcc_migrator`.
 
-The step refuses same-named pre-existing roles with different properties and existing database names. CI then exports owner/application URL pairs for API and live targets, runs Alembic as owner after pair validation, and runs the verifier. Synthetic CI passwords remain CI-local examples; no production credential assumption or migration password is embedded.
+The step refuses same-named pre-existing roles with different properties and existing database names. CI then builds bootstrap/owner/application triples for API and live targets, uses the bootstrap credential only inside the 0005 replay bridge, strips it, and runs the verifier with owner/application pairs. Synthetic CI passwords remain CI-local examples; no production credential assumption or migration password is embedded.
 
 - [ ] **Step 5: Run harness tests and cached verification dry path**
 
@@ -573,7 +577,7 @@ Commit: `test: prove the non-owner closed-loop security boundary`
 
 **Interfaces:**
 
-- Documents local/CI role provisioning and four explicit URLs (API owner/runtime and live owner/runtime) without production-provider assumptions.
+- Documents local/CI role provisioning and six explicit URLs (API bootstrap/owner/runtime and live bootstrap/owner/runtime) without production-provider assumptions.
 - Produces final verification evidence and no deployment/merge action.
 
 - [ ] **Step 1: Write local and CI provisioning documentation**
@@ -583,7 +587,7 @@ Commit: `test: prove the non-owner closed-loop security boundary`
 - bootstrap admin is used only to create/validate roles, membership, and databases, then removed from application/migration child environments;
 - `MIGRATION_DATABASE_URL` belongs to the object owner and `DATABASE_URL` to the non-owner API login;
 - both must name identical host/port/database and different usernames;
-- immutable migration 0005's CREATEROLE consequence for replaying 0001→head;
+- immutable migration 0005's superuser-only `ALTER ROLE ... NOSUPERUSER` consequence and the bounded bootstrap bridge for replaying 0001→head;
 - provider/production roles must be provisioned in the platform's credential manager and are not created by Alembic;
 - passwords are never committed or printed;
 - API/Next runtime receives no owner/admin secret;
@@ -595,10 +599,12 @@ Include PostgreSQL 16 primary references for [role/object grants](https://www.po
 
 Generate two new `ojcc_demo_<32 lowercase hex>` names, validate each exact name and nonexistence, append both names to the ledger as `planned`, then create them as the migration owner and update the ledger to `created`. Do not use or inspect persistent `ojcc` beyond the existing service health check; never drop it.
 
-Construct four in-memory URLs without printing them:
+Construct six in-memory URLs without printing them:
 
+- API bootstrap URL (bootstrap/API database);
 - API `MIGRATION_DATABASE_URL` (owner/API database);
 - API `DATABASE_URL` (API login/API database);
+- live bootstrap URL (bootstrap/live database);
 - live owner URL (owner/live database);
 - live API URL (API login/live database).
 
@@ -608,6 +614,7 @@ With the API pair exported:
 
 ```powershell
 ./scripts/reset_demo.ps1 `
+  -BootstrapDatabaseUrl $bootstrapDatabaseUrl `
   -MigrationDatabaseUrl $env:MIGRATION_DATABASE_URL `
   -DatabaseUrl $env:DATABASE_URL `
   -ConfirmDatabaseName $apiDatabaseName
@@ -625,6 +632,7 @@ Run:
 
 ```powershell
 ./scripts/verify.ps1 `
+  -LiveBootstrapDatabaseUrl $liveBootstrapDatabaseUrl `
   -LiveMigrationDatabaseUrl $liveMigrationDatabaseUrl `
   -LiveDatabaseUrl $liveApplicationDatabaseUrl `
   -LiveConfirmDatabaseName $liveDatabaseName
