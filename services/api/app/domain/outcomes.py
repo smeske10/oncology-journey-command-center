@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.advisory_locks import acquire_transaction_lock
 from app.db.models import AuditEvent, NavigationTask, Outcome, ReportedNeed
 from app.domain.enums import NavigationTaskStatus, OutcomeDisposition
 from app.domain.needs import NeedNotFound
@@ -100,13 +101,17 @@ def record_outcome(
     validate_public_demo_text(note)
     disposition_value = OutcomeDisposition(disposition)
 
+    acquire_transaction_lock(
+        session,
+        namespace="reported_need",
+        identifier=need_id,
+    )
     need = session.scalar(
         select(ReportedNeed)
         .where(
             ReportedNeed.organization_id == organization_id,
             ReportedNeed.id == need_id,
         )
-        .with_for_update()
     )
     if need is None:
         raise NeedNotFound("Reported need not found")

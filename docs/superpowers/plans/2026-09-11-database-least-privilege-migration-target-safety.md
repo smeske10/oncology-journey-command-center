@@ -4,7 +4,7 @@
 
 **Goal:** Make schema changes run through an explicit migration/object-owner credential while the API and complete closed-loop journey run through a distinct non-owner credential with a catalog-complete, deny-by-default PostgreSQL privilege surface and fail-closed target matching.
 
-**Architecture:** Keep immutable migrations 0001–0006 unchanged and add a privilege-only 0007. A shared URL-target module compares `MIGRATION_DATABASE_URL` and `DATABASE_URL` by PostgreSQL backend, normalized host, explicit/effective port, and database name while requiring distinct usernames; Alembic and every destructive/test wrapper call it before connecting. PostgreSQL retains `ojcc_app` as a NOLOGIN privilege group, an externally provisioned API login inherits that group without role-administration or `SET ROLE`, and a distinct non-superuser migration login owns the database, schema, tables, views, and functions. Fresh replay uses an explicitly bounded compatibility bridge: the migration owner runs 0001–0004, the existing bootstrap superuser runs immutable 0005 only, bootstrap-owned objects in that exact database are immediately reassigned to the migration owner, and 0006 onward returns to the non-superuser owner.
+**Architecture:** Keep immutable migrations 0001–0006 unchanged and add a privilege-only 0007. A shared URL-target module compares `MIGRATION_DATABASE_URL` and `DATABASE_URL` by PostgreSQL backend, normalized host, explicit/effective port, and database name while requiring distinct usernames; Alembic and every destructive/test wrapper call it before connecting. PostgreSQL retains `ojcc_app` as a NOLOGIN privilege group, an externally provisioned API login inherits that group without role-administration or `SET ROLE`, and a distinct non-superuser migration login owns the database, schema, tables, views, and functions. Fresh replay uses an explicitly bounded compatibility bridge: the migration owner runs 0001–0004, the existing bootstrap superuser runs immutable 0005 only, the exact allowlist of application objects created by 0005 is immediately reassigned to the migration owner, and 0006 onward returns to the non-superuser owner.
 
 **Tech Stack:** Existing Python 3.12, FastAPI, SQLAlchemy 2, Alembic, psycopg 3, PostgreSQL 16, pytest, PowerShell verification scripts, GitHub Actions, Next.js 16/React 19/Playwright. No dependency upgrades or new services.
 
@@ -234,7 +234,7 @@ Commit: `feat: separate migration and runtime database targets`
 - Produces Alembic revision `0007_database_least_privilege`.
 - Produces catalog constants for the exact 33-table, four-view, and function matrices in §1.
 
-- [ ] **Step 1: Write failing role/ownership tests at 0006**
+- [x] **Step 1: Write failing role/ownership tests at 0006**
 
 Provision the owner/API/group roles explicitly in the disposable fixture, establish 0006 through the approved 0005-only bootstrap bridge, and assert the known gaps: owner URL and API URL identify the same target but different usernames; API login owns no objects; the current 0006 ACL is incomplete; API INSERT on `audit_event`/`workflow_transition_event` is currently inherited; function ownership/security metadata is captured for later comparison.
 
@@ -244,7 +244,7 @@ Run: `python -m pytest services/api/tests/integration/test_database_privileges.p
 
 Expected RED: the new test module or 0007 expectations are absent.
 
-- [ ] **Step 2: Write the complete relation/view privilege matrix test**
+- [x] **Step 2: Write the complete relation/view privilege matrix test**
 
 Generate the actual object set from `pg_class` for `public` and compare exact set equality before checking privileges. For every table/view, check all seven table-like privileges:
 
@@ -268,7 +268,7 @@ Also assert PUBLIC has none, no grant option exists in `information_schema.role_
 
 Expected RED at 0006: object-set or ACL equality fails.
 
-- [ ] **Step 3: Write the database/schema/function matrix tests**
+- [x] **Step 3: Write the database/schema/function matrix tests**
 
 Assert API group/login database privileges are CONNECT true, CREATE/TEMP false; public schema USAGE true/CREATE false; PUBLIC database/schema privileges false. Enumerate `pg_proc` exact names/signatures and assert:
 
@@ -281,7 +281,7 @@ Assert API group/login database privileges are CONNECT true, CREATE/TEMP false; 
 
 Expected RED at 0006: PUBLIC/default and `ojcc_app` execution assertions fail.
 
-- [ ] **Step 4: Implement 0007 without role or data mutation**
+- [x] **Step 4: Implement 0007 without role or data mutation**
 
 At the beginning of `upgrade()`, query and validate the role/ownership profile with bound values derived from the validated URL pair. Refuse before any ACL statement when the owner is superuser/replication/bypass-RLS, the API login has any dangerous capability, the API can SET/ADMIN the group or reach the owner role, or any application object is not owned by the migration login. Query and report `rolcreatedb`/`rolcreaterole`; require the local/CI fixture profile in tests, but do not rewrite a role to meet it.
 
@@ -296,7 +296,7 @@ Do not create/alter/grant membership to a login role. Do not add any task constr
 
 Implement `downgrade()` as the unconditional refusal specified in §1.5 before any `op.execute` call.
 
-- [ ] **Step 5: Prove trigger-authored writes still work without app INSERT/EXECUTE**
+- [x] **Step 5: Prove trigger-authored writes still work without app INSERT/EXECUTE**
 
 Connect as the API login and perform an allowed task transition plus Outcome close through existing services. Assert the trigger inserts `follow_up_request`, `audit_event`, and any required transition row even though direct `has_table_privilege(..., 'INSERT')` and direct trigger-function EXECUTE are false. Direct attempts to insert the two event tables must raise `InsufficientPrivilege`.
 
@@ -304,7 +304,7 @@ Run: `python -m pytest services/api/tests/integration/test_database_privileges.p
 
 Expected GREEN: all catalog and trigger-boundary assertions pass.
 
-- [ ] **Step 6: Add exact upgrade/refusal/version tests**
+- [x] **Step 6: Add exact upgrade/refusal/version tests**
 
 In `closed_loop/test_migration.py`, test:
 
@@ -318,7 +318,7 @@ In `closed_loop/test_migration.py`, test:
 
 In the populated fixture, insert unbound tasks in every historical status under trigger-bypass, capture all columns, upgrade, and assert exact equality and zero new integrity violation. Assert the migration contains none of `ck_navigation_task_binding_required`, `_require_bindable_task_history`, or `unbound_executing_navigation_task`.
 
-- [ ] **Step 7: Review, record, and commit**
+- [x] **Step 7: Review, record, and commit**
 
 Run focused privilege/migration tests, Ruff, immutable hashes, and `git diff --check`. Record role profile and version evidence without credentials.
 
@@ -436,7 +436,7 @@ Expected RED: current scripts accept one URL and do not isolate `MIGRATION_DATAB
 
 - [ ] **Step 2: Make reset and seed explicit**
 
-`reset_demo.ps1` validates all three URLs and confirmation before the drop-schema engine. It drops/recreates `public`, calls `replay_schema.py`, and seeds through `MIGRATION_DATABASE_URL`; seed receives the owner/application pair but connects only with the owner URL. `replay_schema.py` runs 0001–0004 as owner, 0005 as bootstrap, reassigns every bootstrap-owned application object in the exact target to the owner, strips bootstrap, and runs 0006 through the requested revision as owner. Finish by running read-only integrity once through the owner during seed and once through `DATABASE_URL` to prove the API role can inspect the complete schema.
+`reset_demo.ps1` validates all three URLs and confirmation before the drop-schema engine. It drops/recreates `public`, calls `replay_schema.py`, and seeds through `MIGRATION_DATABASE_URL`; seed receives the owner/application pair but connects only with the owner URL. `replay_schema.py` runs 0001–0004 as owner, 0005 as bootstrap, reassigns the exact allowlist of application tables, functions, and enums created by 0005 in the target to the owner, strips bootstrap, and runs 0006 through the requested revision as owner. Finish by running read-only integrity once through the owner during seed and once through `DATABASE_URL` to prove the API role can inspect the complete schema.
 
 Before each child, set only the credentials that child needs from the validated exact triple. Restore all three URLs and all `PG*` variables in `finally`. No fallback to settings or inherited values; FastAPI and Next never receive the bootstrap URL.
 

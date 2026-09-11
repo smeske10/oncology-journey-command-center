@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.db.advisory_locks import acquire_transaction_lock
 from app.db.models import (
     FollowUpRequest,
     NavigationTask,
@@ -72,6 +73,11 @@ def claim_navigation_task(
 ) -> TaskCommandResult:
     normalized_due_at = _normalize_aware_datetime(due_at)
     preliminary = _visible_task(session, organization_id=organization_id, task_id=task_id)
+    acquire_transaction_lock(
+        session,
+        namespace="reported_need",
+        identifier=preliminary.reported_need_id,
+    )
     need = _lock_need_for_task(session, preliminary)
     closure_exists = _need_has_outcome(session, need)
 
@@ -81,7 +87,6 @@ def claim_navigation_task(
             ProposedChange.organization_id == organization_id,
             ProposedChange.id == proposed_change_id,
         )
-        .with_for_update()
     )
     if proposal is None:
         raise TaskNotFound("Navigation task command target not found")
@@ -196,6 +201,11 @@ def _transition_navigation_task(
     command: Literal["start", "complete"],
 ) -> TaskCommandResult:
     preliminary = _visible_task(session, organization_id=organization_id, task_id=task_id)
+    acquire_transaction_lock(
+        session,
+        namespace="reported_need",
+        identifier=preliminary.reported_need_id,
+    )
     need = _lock_need_for_task(session, preliminary)
     closure_exists = _need_has_outcome(session, need)
     task = session.scalar(
@@ -275,7 +285,6 @@ def _lock_need_for_task(session: Session, task: NavigationTask) -> ReportedNeed:
             ReportedNeed.patient_id == task.patient_id,
             ReportedNeed.id == task.reported_need_id,
         )
-        .with_for_update()
     )
     if need is None:
         raise TaskNotFound("Navigation task command target not found")
@@ -310,7 +319,6 @@ def _lock_current_navigator_authority(
         )
         .order_by(RoleAssignment.granted_at.desc(), RoleAssignment.id.asc())
         .limit(1)
-        .with_for_update()
     )
     if assignment is None:
         raise TaskForbidden("Current navigator authority is required")
