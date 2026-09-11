@@ -87,6 +87,55 @@ Rejected for this milestone: the draft binding CHECK, its upgrade pre-scan/refus
 - `DATABASE_URL` and `MIGRATION_DATABASE_URL` were both absent from the parent environment at the checkpoint; no inherited target was trusted.
 - No database is needed for Task 1's pure URL/settings work. Fresh UUID-suffixed disposable databases will be created only when a database-backed task first requires them, and each exact name and disposition will be recorded here.
 
+## Task 1 — complete
+
+Implemented the immutable migration guard, pure database-target parser and pair validator, fail-closed settings contract, and Alembic owner-target selection with online connected-identity verification.
+
+### Test-first evidence
+
+- Baseline guard: `python -m pytest tests/test_core_domain_migration.py -k immutable -q` → 6 passed.
+- URL contract RED: `python -m pytest tests/test_database_targets.py -q` → 15 intended failures because `app.db.targets` was absent.
+- URL contract GREEN: the same command → 15 passed after the pure target implementation.
+- Settings RED: `python -m pytest tests/test_database_targets.py -k settings -q` → 4 intended failures for the missing required/optional credential behavior.
+- Settings GREEN: the full target file → 19 passed after the settings implementation.
+- Alembic RED: `python -m pytest tests/test_database_targets.py -k alembic -q` → 3 intended failures and 1 pass because the old environment ignored `MIGRATION_DATABASE_URL`.
+- Alembic GREEN: the full target file → 23 passed after owner-target validation and selection.
+- Online transaction regression RED: the first database-backed migration test migrated without error but its schema was absent (`NoSuchTableError`) because the connected-identity preflight opened an implicit transaction that was rolled back on connection close.
+- Online transaction regression GREEN: ending that read-only preflight transaction before Alembic begins its transaction made the same test pass.
+- Complete Task 1 focused gate: `python -m pytest tests/test_database_targets.py tests/test_core_domain_migration.py -q -s` → 47 passed in 42.54 seconds.
+- Ruff on all Task 1 Python files → passed.
+- `git diff --check` → passed.
+
+### Environment diagnosis
+
+On this Windows host, `localhost` stalled before a TCP session while `127.0.0.1` reached the same healthy PostgreSQL service immediately. The database-backed gate therefore used the plan-approved numeric loopback spelling consistently for both credentials. No host aliases were treated as equivalent by application code.
+
+### Disposable database record
+
+All names below are synthetic UUID-suffixed databases. No connection was made to persistent `ojcc`; its configured URL was used only as the source of the local synthetic owner credential and replaced with `postgres` or a fresh generated database name before connection.
+
+| Database | Disposition |
+|---|---|
+| `ojcc_migration_test_492015350bb64031b29bc15f5a9fe15d` | dropped normally after the failing transaction-regression test |
+| `ojcc_migration_test_2a0e7278c4b949d682270652d6c08f66` | dropped normally after the regression fix passed |
+| `ojcc_migration_test_6e87ca3d8fad4498a746201e65e8a265` | dropped normally |
+| `ojcc_migration_test_44f43a6cb9eb47f3b967195630dd7ac4` | dropped normally |
+| `ojcc_migration_test_fffeb1caadcc4876972e76cd37bc2561` | dropped normally |
+| `ojcc_migration_test_58a90b9fb0d5449f9f72175968eee8f8` | dropped normally |
+| `ojcc_migration_test_3f195c54489f47fbb06b4321c4eb3f95` | dropped normally |
+| `ojcc_migration_test_f7cab902c7234ebb8d1c4c1a05d93ad7` | dropped normally |
+| `ojcc_migration_test_a955d839264c4b2baf4d1db1dedae679` | dropped normally |
+| `ojcc_migration_test_5662382a75fc47b99b29bdddfe6f1204` | dropped normally |
+| `ojcc_migration_test_f716faf1296f4c0eaf162c15535e72ed` | dropped normally |
+| `ojcc_migration_test_74d81de157de43099b8f035bdb4ca2db` | dropped normally |
+| `ojcc_migration_test_01bd6d821fb74a3089ca40de33b18fd9` | dropped normally |
+| `ojcc_migration_test_49df5f75f2f24a00a3e458bac2e55d57` | dropped normally |
+| `ojcc_migration_test_27aedf90f5224d8b9abec9e2d1df137d` | dropped normally |
+| `ojcc_migration_test_d446ebfa532b4c6da5732837bdace7d1` | dropped normally |
+| `ojcc_migration_test_f333b119a7c24793b33f423c3388e041` | dropped normally |
+| `ojcc_migration_test_1c7d3d26610c4b68ad94fb3fd9cb6a1d` | leftover observed after an interrupted `localhost` diagnostic run; zero sessions; not dropped because exact provenance is uncertain |
+| `ojcc_migration_test_e51d4f44b6a4475688c57eaaf82e4753` | leftover observed after an interrupted `localhost` diagnostic run; zero sessions; not dropped because exact provenance is uncertain |
+
 ## Next exact step
 
-Commit the approved plan and ledger checkpoint, then begin Task 1 by expanding the immutable migration snapshot test from one accepted migration to all six. Do not create or mutate any database until a database-backed test requires a fresh disposable target.
+Begin Task 2 by writing the failing catalog-complete role and ownership tests against migration 0006, using newly provisioned owner/API/group roles and a fresh UUID-suffixed disposable database. Record the exact database name before migration and do not reuse either leftover name above.

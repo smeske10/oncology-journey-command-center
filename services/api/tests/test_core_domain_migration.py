@@ -22,16 +22,30 @@ from app.db.models import EpisodePathwayAssignment
 MIGRATION_PATH = (
     Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0001_core_domain.py"
 )
-EXPECTED_INITIAL_MIGRATION_SHA256 = (
-    "a177b32040c760e52ffd64872f61104f2064968aa6981295c54728e518cb6391"
-)
+IMMUTABLE_MIGRATION_SHA256 = {
+    "0001_core_domain.py": "a177b32040c760e52ffd64872f61104f2064968aa6981295c54728e518cb6391",
+    "0002_identity_pathway_submission.py": "6fdf3c15fdf51cb9c3729f7f6d0458b51c88eeee8119a10a1084a425f78f5648",
+    "0003_need_task_outcome_lifecycle.py": "25641a9831bf6cce4198cc60636d60a03058ecc179752d32328c7513bcb6b556",
+    "0004_safety_approval_lifecycle.py": "301eae2be84c8685b14b0335525fa011cc88015f654cef95212327cf4cee6704",
+    "0005_workflow_knowledge_audit.py": "c81f81976dd82fde31eb70b1a271205938b9dc1ecae34e84e5780d09c3fdd5cc",
+    "0006_navigator_closed_loop.py": "9b325c30e7bf0ab82925adbcfc2462546866ed07355e8fef740ac1832ee5f91b",
+}
 DISPOSABLE_MIGRATION_DATABASE_PREFIX = "ojcc_migration_test_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
+def _alembic_environment(migration_database_url: str) -> dict[str, str]:
+    migration_url = make_url(migration_database_url)
+    application_url = migration_url.set(username=f"{migration_url.username}_runtime_target_only")
+    return os.environ | {
+        "DATABASE_URL": application_url.render_as_string(hide_password=False),
+        "MIGRATION_DATABASE_URL": migration_database_url,
+    }
+
+
 def _run_alembic(database_url: str, revision: str) -> subprocess.CompletedProcess[str]:
     project_root = MIGRATION_PATH.parents[4]
-    environment = os.environ | {"DATABASE_URL": database_url}
+    environment = _alembic_environment(database_url)
     return subprocess.run(
         [
             sys.executable,
@@ -54,7 +68,7 @@ def _run_alembic_without_checking(
     database_url: str, revision: str
 ) -> subprocess.CompletedProcess[str]:
     project_root = MIGRATION_PATH.parents[4]
-    environment = os.environ | {"DATABASE_URL": database_url}
+    environment = _alembic_environment(database_url)
     return subprocess.run(
         [
             sys.executable,
@@ -79,7 +93,7 @@ def _render_alembic_sql(
     revision_range: str,
 ) -> subprocess.CompletedProcess[str]:
     project_root = MIGRATION_PATH.parents[4]
-    environment = os.environ | {"DATABASE_URL": database_url}
+    environment = _alembic_environment(database_url)
     return subprocess.run(
         [
             sys.executable,
@@ -101,7 +115,7 @@ def _render_alembic_sql(
 
 def _run_alembic_check(database_url: str) -> subprocess.CompletedProcess[str]:
     project_root = MIGRATION_PATH.parents[4]
-    environment = os.environ | {"DATABASE_URL": database_url}
+    environment = _alembic_environment(database_url)
     return subprocess.run(
         [
             sys.executable,
@@ -161,29 +175,31 @@ def _disposable_migration_database() -> Iterator[str]:
         with admin_engine.connect() as connection:
             connection.execute(text(f'CREATE DATABASE "{database}"'))
         created = True
+        print(f"CREATED {database}", flush=True)
         yield disposable_url.render_as_string(hide_password=False)
     finally:
         if created:
             _validate_disposable_database_url(disposable_url)
-            with admin_engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) "
-                        "FROM pg_stat_activity "
-                        "WHERE datname = :database AND pid <> pg_backend_pid()"
-                    ),
-                    {"database": database},
-                )
-                connection.execute(text(f'DROP DATABASE "{database}"'))
+            try:
+                with admin_engine.connect() as connection:
+                    connection.execute(text(f'DROP DATABASE "{database}"'))
+            except Exception as error:
+                print(f"LEFTOVER {database}: {type(error).__name__}", flush=True)
+                raise
+            else:
+                print(f"DROPPED {database}", flush=True)
         admin_engine.dispose()
 
 
-def test_initial_migration_is_an_immutable_explicit_schema_snapshot() -> None:
+@pytest.mark.parametrize(("filename", "expected"), IMMUTABLE_MIGRATION_SHA256.items())
+def test_accepted_migration_bytes_are_immutable(filename: str, expected: str) -> None:
+    path = MIGRATION_PATH.parent / filename
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
+
+
+def test_initial_migration_is_an_explicit_schema_snapshot() -> None:
     source = MIGRATION_PATH.read_text(encoding="utf-8")
 
-    assert (
-        hashlib.sha256(MIGRATION_PATH.read_bytes()).hexdigest() == EXPECTED_INITIAL_MIGRATION_SHA256
-    )
     assert "app.db.models" not in source
     assert "app.db.base" not in source
     assert "Base.metadata" not in source
@@ -206,6 +222,9 @@ def test_initial_migration_is_an_immutable_explicit_schema_snapshot() -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=_alembic_environment(
+            "postgresql://snapshot_owner:snapshot-secret@target.invalid/ojcc_snapshot"
+        ),
     )
     sql = result.stdout
     migration_sources = "\n".join(
