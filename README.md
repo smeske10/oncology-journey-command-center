@@ -39,66 +39,22 @@ the name repeated as confirmation. It refuses persistent `ojcc`, remote hosts, u
 query parameters, and target/confirmation mismatches before creating an engine or dropping a
 schema.
 
-Provision the fixed local roles from the bootstrap account. The block creates missing roles and
+Provision the fixed local roles from the bootstrap account. The command creates missing roles and
 refuses an existing role with unexpected capabilities; it does not silently repair role drift.
 
 ```powershell
-$roleSql = @'
-DO $provision$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_migrator') THEN
-        CREATE ROLE ojcc_migrator LOGIN CREATEDB NOCREATEROLE NOSUPERUSER
-            NOREPLICATION NOBYPASSRLS INHERIT PASSWORD 'migrator-local-synthetic-only';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_api') THEN
-        CREATE ROLE ojcc_api LOGIN NOCREATEDB NOCREATEROLE NOSUPERUSER
-            NOREPLICATION NOBYPASSRLS INHERIT PASSWORD 'api-local-synthetic-only';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_app') THEN
-        CREATE ROLE ojcc_app NOLOGIN NOCREATEDB NOCREATEROLE NOSUPERUSER
-            NOREPLICATION NOBYPASSRLS INHERIT;
-    END IF;
-    IF EXISTS (
-        SELECT 1 FROM pg_roles
-        WHERE (rolname = 'ojcc_migrator' AND
-               (NOT rolcanlogin OR NOT rolcreatedb OR rolcreaterole OR rolsuper OR
-                rolreplication OR rolbypassrls OR NOT rolinherit))
-           OR (rolname = 'ojcc_api' AND
-               (NOT rolcanlogin OR rolcreatedb OR rolcreaterole OR rolsuper OR
-                rolreplication OR rolbypassrls OR NOT rolinherit))
-           OR (rolname = 'ojcc_app' AND
-               (rolcanlogin OR rolcreatedb OR rolcreaterole OR rolsuper OR
-                rolreplication OR rolbypassrls OR NOT rolinherit))
-    ) THEN
-        RAISE EXCEPTION 'Existing OJCC role has unexpected capabilities';
-    END IF;
-END
-$provision$;
-
-DO $membership$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_auth_members membership
-        JOIN pg_roles granted ON granted.oid = membership.roleid
-        JOIN pg_roles member ON member.oid = membership.member
-        WHERE granted.rolname = 'ojcc_app' AND member.rolname = 'ojcc_api'
-    ) THEN
-        GRANT ojcc_app TO ojcc_api WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;
-    ELSIF NOT EXISTS (
-        SELECT 1 FROM pg_auth_members membership
-        JOIN pg_roles granted ON granted.oid = membership.roleid
-        JOIN pg_roles member ON member.oid = membership.member
-        WHERE granted.rolname = 'ojcc_app' AND member.rolname = 'ojcc_api'
-          AND membership.inherit_option AND NOT membership.set_option
-          AND NOT membership.admin_option
-    ) THEN
-        RAISE EXCEPTION 'Existing ojcc_app membership has unexpected options';
-    END IF;
-END
-$membership$;
-'@
-$roleSql | docker compose exec -T db psql -v ON_ERROR_STOP=1 -U ojcc -d postgres
+$provisioningBootstrapUrl = `
+    "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/postgres"
+Push-Location .\services\api
+python -m scripts.provision_database_roles `
+    --bootstrap-database-url $provisioningBootstrapUrl `
+    --migration-role ojcc_migrator `
+    --migration-password migrator-local-synthetic-only `
+    --application-role ojcc_api `
+    --application-password api-local-synthetic-only `
+    --application-group ojcc_app
 if ($LASTEXITCODE -ne 0) { throw "Local role provisioning failed" }
+Pop-Location
 
 $apiDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
 $liveDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"

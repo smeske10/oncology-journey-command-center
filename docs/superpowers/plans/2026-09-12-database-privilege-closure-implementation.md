@@ -118,12 +118,12 @@
 - Adds a bootstrap-only CLI accepting explicit migration/API/group names and login passwords, creating missing roles and the one exact membership while rejecting existing drift.
 - Local instructions and CI invoke the same command; database creation and environment export remain in their existing orchestration.
 
-- [ ] Write behavior tests against an isolated PostgreSQL fixture for missing roles, already-valid roles, role-attribute drift, membership-option drift, and extra outgoing memberships.
-- [ ] Run and confirm the command is missing.
-- [ ] Implement identifier-safe creation and exact-graph validation with no repair of pre-existing drift.
-- [ ] Replace duplicated README/CI role SQL with invocations of the command while retaining unique database creation and CI variable export.
-- [ ] Update harness tests to execute/inspect entry-point behavior rather than compare duplicated source snippets.
-- [ ] Run focused provisioning and harness tests, formatting, immutable hashes, and diff checks; update the ledger and commit this task.
+- [x] Write behavior tests against an isolated PostgreSQL fixture for missing roles, already-valid roles, role-attribute drift, membership-option drift, and extra outgoing memberships.
+- [x] Run and confirm the command is missing.
+- [x] Implement identifier-safe creation and exact-graph validation with no repair of pre-existing drift.
+- [x] Replace duplicated README/CI role SQL with invocations of the command while retaining unique database creation and CI variable export.
+- [x] Update harness tests to execute/inspect entry-point behavior rather than compare duplicated source snippets.
+- [x] Run focused provisioning and harness tests, formatting, immutable hashes, and diff checks; update the ledger and commit this task.
 
 ### Task 6: Complete the Corrective Security Gate
 

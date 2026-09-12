@@ -618,12 +618,15 @@ def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
 
 def test_ci_provisions_uuid_databases_and_distinct_roles_without_cache_regression() -> None:
     workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    readme = (PROJECT_ROOT / "README.md").read_text()
 
     assert 'tuple(f"ojcc_demo_{uuid4().hex}" for _ in range(2))' in workflow
     assert "sql.Identifier(name)" in workflow
     assert "ojcc_migrator" in workflow
     assert "ojcc_api" in workflow
-    assert "WITH INHERIT TRUE, SET FALSE, ADMIN FALSE" in workflow
+    assert "python -m scripts.provision_database_roles" in workflow
+    assert "expected_roles =" not in workflow
+    assert "python -m scripts.provision_database_roles" in readme
     for field in (
         "BOOTSTRAP_DATABASE_URL",
         "MIGRATION_DATABASE_URL",

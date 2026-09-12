@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Tasks 1–4 complete; corrective Task 5 next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–5 complete; corrective final gate next.**
 
 ## Milestone boundary
 
@@ -352,12 +352,11 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Implement corrective Task 5 from the
+Run corrective Task 6 from the
 [Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
-consolidate fail-closed role provisioning into one callable command used by local instructions and
-CI, then prove creation, idempotence, and drift refusal behavior. Push and PR remain after the
-corrective verification gates and independent review; merge, deployment, worktree removal, and
-deferred milestones remain out of scope.
+execute the complete corrective security gate, immutable migration check, and full repository
+verifier, then perform the independent read-only review. Push and PR remain after those gates;
+merge, deployment, worktree removal, and deferred milestones remain out of scope.
 
 ### Pre-PR corrective design — implementation pending
 
@@ -445,6 +444,20 @@ deferred milestones remain out of scope.
   Pyright passed. Real empty-database execution reached an attested 0007, while deliberate
   stage-three sequence drift retained the committed 0005 stage and rolled back only stage three.
   Both `ojcc_task7_` databases reported ordinary cleanup.
+
+## Corrective Task 5 — complete
+
+- Added one bootstrap-only provisioning command that creates missing owner, API, and group roles
+  with identifier-safe SQL, creates the single approved membership, and validates all existing
+  profiles and outgoing memberships before mutation.
+- Existing capability drift, membership-option drift, and any extra outgoing membership are
+  rejected without repair. Incoming members remain outside this target-specific boundary.
+- Local setup and CI now invoke the shared command. CI retains its existing UUID database creation,
+  URL export, and npm/pip/Next.js cache blocks.
+- RED evidence: the behavior test failed because `scripts.provision_database_roles` did not exist.
+- GREEN evidence: four real cluster-role behavior cases plus the CI/local entry-point check passed
+  as 5 tests in 4.30 seconds; Ruff passed and CI YAML parsed. Every test used UUID-derived role
+  names and removed only those recorded fixture roles in `finally`.
 
 ## Task 6 — complete
 
