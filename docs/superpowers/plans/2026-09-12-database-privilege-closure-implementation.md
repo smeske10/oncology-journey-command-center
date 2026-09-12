@@ -36,14 +36,14 @@
 - Produces immutable tuples for `APPLICATION_GROUP`, relation grants, function security modes, `APPLICATION_RELKINDS`, and revision identifiers.
 - Produces query/result validation that rejects any extra outgoing membership and unexpected `(name, relkind)` catalog row before mutation.
 
-- [ ] Write a unit test with literal expected object sets that fails until `v0007` exists and the catalog query consumes all six kinds `r,p,v,m,S,f`.
-- [ ] Run the unit test and confirm the missing contract/query behavior is the failure.
-- [ ] Add the dependency-free frozen contract and import it by exact version from migration 0007.
-- [ ] Write integration tests that grant an extra direct role to the API, add transitive outgoing membership through `ojcc_app`, and create unexpected sequence/foreign-table objects; capture revision, ACL, and membership state before upgrade.
-- [ ] Run each integration test at revision 0006 and confirm 0007 currently accepts or misclassifies the drift.
-- [ ] Implement exact outgoing membership and `(name, kind, owner)` validation, including extension-dependency exclusion and operator-facing object/kind errors.
-- [ ] Run the focused unit and integration tests and confirm every refusal preserves revision 0006 and captured state.
-- [ ] Run formatting, immutable-hash, and diff checks; record RED/GREEN evidence in the progress ledger and commit this task.
+- [x] Write a unit test with literal expected object sets that fails until `v0007` exists and the catalog query consumes all six kinds `r,p,v,m,S,f`.
+- [x] Run the unit test and confirm the missing contract/query behavior is the failure.
+- [x] Add the dependency-free frozen contract and import it by exact version from migration 0007.
+- [x] Write integration tests that grant an extra direct role to the API, add transitive outgoing membership through `ojcc_app`, and create unexpected sequence/foreign-table objects; capture revision, ACL, and membership state before upgrade.
+- [x] Run each integration test at revision 0006 and confirm 0007 currently accepts or misclassifies the drift.
+- [x] Implement exact outgoing membership and `(name, kind, owner)` validation, including extension-dependency exclusion and operator-facing object/kind errors.
+- [x] Run the focused unit and integration tests and confirm every refusal preserves revision 0006 and captured state.
+- [x] Run formatting, immutable-hash, and diff checks; record RED/GREEN evidence in the progress ledger and commit this task.
 
 ### Task 2: Add Executing Offline Preflight to Migration 0007
 

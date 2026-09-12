@@ -6,6 +6,11 @@ import sqlalchemy as sa
 
 from alembic import op
 from app.config import settings
+from app.db.privilege_contracts import v0007
+from app.db.privilege_validation import (
+    validate_exact_outgoing_memberships,
+    validate_v0007_relation_catalog,
+)
 from app.db.targets import validate_database_target_pair
 
 revision: str = "0007_database_least_privilege"
@@ -13,95 +18,16 @@ down_revision: str | None = "0006_navigator_closed_loop"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-APPLICATION_GROUP = "ojcc_app"
-
-SELECT_ONLY_RELATIONS = (
-    "agent_run",
-    "agent_run_citation",
-    "approval_policy",
-    "audit_event",
-    "care_episode",
-    "check_in_definition",
-    "episode_pathway_assignment",
-    "follow_up_request",
-    "knowledge_document",
-    "manual_review_task",
-    "navigation_task_resource",
-    "organization",
-    "organization_knowledge_approval",
-    "pathway_definition",
-    "patient_identity_link",
-    "patient_message",
-    "proposed_value_schema",
-    "reported_need",
-    "resource",
-    "role_assignment",
-    "signal_rule",
-    "synthetic_patient",
-    "user_account",
-    "workflow_run",
-    "workflow_transition_event",
-)
-INSERT_RELATIONS = (
-    "approval_decision",
-    "check_in_submission",
-    "follow_up_response",
-    "outcome",
-    "proposed_change",
-    "safety_signal_resolution",
-)
-UPDATE_RELATIONS = ("navigation_task", "safety_signal")
-APPLICATION_VIEWS = (
-    "active_check_in_submission",
-    "effective_need_state",
-    "effective_proposed_change_state",
-    "effective_safety_signal_state",
-)
-APPLICATION_RELATIONS = (
-    *SELECT_ONLY_RELATIONS,
-    *INSERT_RELATIONS,
-    *UPDATE_RELATIONS,
-    *APPLICATION_VIEWS,
-)
-CATALOG_RELATIONS = (*APPLICATION_RELATIONS, "alembic_version")
-
-SECURITY_DEFINER_FUNCTIONS = (
-    "append_workflow_transition_event",
-    "apply_final_approval_decision",
-    "apply_navigation_resource_approval",
-    "close_reported_need_from_outcome",
-    "guard_approval_decision",
-    "guard_bound_navigation_task_delete",
-    "guard_follow_up_request_insert",
-    "guard_follow_up_response_insert",
-    "guard_navigation_task_lifecycle",
-    "guard_navigation_task_resource_proposal",
-    "guard_patient_identity_link_response_history",
-    "guard_proposed_change_revision",
-    "guard_safety_signal_resolution",
-    "record_navigation_task_transition",
-)
-SECURITY_INVOKER_FUNCTIONS = (
-    "guard_agent_run_citation",
-    "guard_agent_run_citation_immutable",
-    "guard_agent_run_created_at",
-    "guard_knowledge_approval_history",
-    "guard_knowledge_document_immutable",
-    "guard_manual_review_task",
-    "guard_navigation_task_resource",
-    "guard_reported_need_identity_update",
-    "guard_reported_need_reopening",
-    "guard_role_assignment_approval_history",
-    "guard_role_assignment_knowledge_history",
-    "guard_safety_signal_lifecycle",
-    "guard_workflow_run_lineage",
-    "reject_append_only_mutation",
-    "reject_approval_policy_mutation",
-    "reject_proposed_value_schema_mutation",
-    "reject_signal_rule_mutation",
-    "safety_severity_rank",
-)
-APPLICATION_FUNCTIONS = (*SECURITY_DEFINER_FUNCTIONS, *SECURITY_INVOKER_FUNCTIONS)
+APPLICATION_GROUP = v0007.APPLICATION_GROUP
+SELECT_ONLY_RELATIONS = v0007.SELECT_ONLY_RELATIONS
+INSERT_RELATIONS = v0007.INSERT_RELATIONS
+UPDATE_RELATIONS = v0007.UPDATE_RELATIONS
+APPLICATION_VIEWS = v0007.APPLICATION_VIEWS
+APPLICATION_RELATIONS = v0007.APPLICATION_RELATIONS
+CATALOG_RELATIONS = v0007.CATALOG_RELATIONS
+SECURITY_DEFINER_FUNCTIONS = v0007.SECURITY_DEFINER_FUNCTIONS
+SECURITY_INVOKER_FUNCTIONS = v0007.SECURITY_INVOKER_FUNCTIONS
+APPLICATION_FUNCTIONS = v0007.APPLICATION_FUNCTIONS
 
 
 def _function_identity(function_name: str) -> str:
@@ -181,51 +107,11 @@ def _validate_role_profile(
     ):
         raise RuntimeError("application group must be a capability-free NOLOGIN role")
 
-    membership = bind.execute(
-        sa.text(
-            "SELECT membership.inherit_option, membership.set_option, "
-            "membership.admin_option FROM pg_auth_members membership "
-            "JOIN pg_roles member ON member.oid = membership.member "
-            "JOIN pg_roles granted ON granted.oid = membership.roleid "
-            "WHERE member.rolname = :application_role "
-            "AND granted.rolname = :application_group"
-        ),
-        {
-            "application_role": application_role,
-            "application_group": APPLICATION_GROUP,
-        },
-    ).one_or_none()
-    if membership is None or tuple(membership) != (True, False, False):
-        raise RuntimeError(
-            "application role must inherit the application group without SET or ADMIN"
-        )
-
-    owner_is_reachable = bind.scalar(
-        sa.text(
-            "WITH RECURSIVE memberships(roleid) AS ("
-            "SELECT membership.roleid FROM pg_auth_members membership "
-            "JOIN pg_roles member ON member.oid = membership.member "
-            "WHERE member.rolname = :application_role "
-            "UNION SELECT membership.roleid FROM pg_auth_members membership "
-            "JOIN memberships prior ON prior.roleid = membership.member"
-            ") SELECT EXISTS (SELECT 1 FROM memberships "
-            "JOIN pg_roles role ON role.oid = memberships.roleid "
-            "WHERE role.rolname = :migration_role)"
-        ),
-        {"application_role": application_role, "migration_role": migration_role},
+    validate_exact_outgoing_memberships(
+        bind,
+        migration_role=migration_role,
+        application_role=application_role,
     )
-    if owner_is_reachable:
-        raise RuntimeError("application role must not have a membership path to the owner")
-
-    owner_inherits_group = bind.scalar(
-        sa.text("SELECT pg_has_role(:migration_role, :application_group, 'USAGE')"),
-        {
-            "migration_role": migration_role,
-            "application_group": APPLICATION_GROUP,
-        },
-    )
-    if owner_inherits_group:
-        raise RuntimeError("migration owner must not inherit the application group")
 
 
 def _validate_ownership(
@@ -248,26 +134,7 @@ def _validate_ownership(
     ):
         raise RuntimeError("migration login must own the target database and public schema")
 
-    relations = {
-        row.relname: row.owner
-        for row in bind.execute(
-            sa.text(
-                "SELECT class.relname, owner.rolname AS owner FROM pg_class class "
-                "JOIN pg_namespace namespace ON namespace.oid = class.relnamespace "
-                "JOIN pg_roles owner ON owner.oid = class.relowner "
-                "WHERE namespace.nspname = 'public' "
-                "AND class.relkind IN ('r', 'p', 'v', 'm') "
-                "AND NOT EXISTS (SELECT 1 FROM pg_depend dependency "
-                "WHERE dependency.classid = 'pg_class'::regclass "
-                "AND dependency.objid = class.oid AND dependency.deptype = 'e')"
-            )
-        )
-    }
-    if set(relations) != set(CATALOG_RELATIONS):
-        raise RuntimeError("public application relation set does not match revision 0006")
-    wrong_relations = sorted(name for name, owner in relations.items() if owner != migration_role)
-    if wrong_relations:
-        raise RuntimeError(f"migration owner does not own relations: {wrong_relations}")
+    validate_v0007_relation_catalog(bind, migration_role=migration_role)
 
     functions = {
         (row.proname, row.identity_arguments): row.owner

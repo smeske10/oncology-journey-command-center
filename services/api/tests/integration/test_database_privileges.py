@@ -856,7 +856,7 @@ def _acl_snapshot(database: PrivilegeDatabase) -> tuple[tuple[object, ...], ...]
                         "FROM pg_class class JOIN pg_namespace namespace "
                         "ON namespace.oid = class.relnamespace "
                         "WHERE namespace.nspname = 'public' "
-                        "AND class.relkind IN ('r', 'p', 'v', 'm') "
+                        "AND class.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') "
                         "UNION ALL SELECT 'function', proc.oid::regprocedure::text, "
                         "proc.proacl::text FROM pg_proc proc "
                         "JOIN pg_namespace namespace ON namespace.oid = proc.pronamespace "
@@ -1080,6 +1080,143 @@ def test_invalid_ownership_preflight_preserves_0006_version_and_acl() -> None:
         assert "migration owner does not own relations" in result.stderr
         assert _acl_snapshot(database) == before
 
+        engine = create_engine(database.migration_url)
+        try:
+            with engine.connect() as connection:
+                assert connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                ) == "0006_navigator_closed_loop"
+        finally:
+            engine.dispose()
+
+
+@pytest.mark.parametrize("member_role", [APPLICATION_ROLE, APPLICATION_GROUP, MIGRATION_ROLE])
+def test_unexpected_outgoing_membership_preserves_0006_version_and_acl(
+    member_role: str,
+) -> None:
+    with _provision_privilege_database(
+        revision="0006_navigator_closed_loop"
+    ) as database:
+        extra_role = f"ojcc_test_extra_{uuid4().hex}"
+        before = _acl_snapshot(database)
+        try:
+            with psycopg.connect(
+                _psycopg_url(make_url(database.bootstrap_url)), autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        sql.SQL("CREATE ROLE {} NOLOGIN").format(
+                            sql.Identifier(extra_role)
+                        )
+                    )
+                    cursor.execute(
+                        sql.SQL(
+                            "GRANT {} TO {} WITH INHERIT FALSE, SET FALSE, ADMIN FALSE"
+                        ).format(
+                            sql.Identifier(extra_role), sql.Identifier(member_role)
+                        )
+                    )
+
+            result = _alembic(
+                application_url=database.application_url,
+                migration_url=database.migration_url,
+                arguments=["upgrade", "head"],
+                check=False,
+            )
+
+            assert result.returncode != 0
+            assert "unexpected outgoing role membership" in result.stderr
+            assert _acl_snapshot(database) == before
+            engine = create_engine(database.migration_url)
+            try:
+                with engine.connect() as connection:
+                    assert connection.scalar(
+                        text("SELECT version_num FROM alembic_version")
+                    ) == "0006_navigator_closed_loop"
+            finally:
+                engine.dispose()
+        finally:
+            with psycopg.connect(
+                _psycopg_url(make_url(database.bootstrap_url)), autocommit=True
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        sql.SQL("REVOKE {} FROM {}").format(
+                            sql.Identifier(extra_role), sql.Identifier(member_role)
+                        )
+                    )
+                    cursor.execute(
+                        sql.SQL("DROP ROLE {}").format(sql.Identifier(extra_role))
+                    )
+
+
+@pytest.mark.parametrize("object_kind", ["sequence", "foreign table"])
+def test_unexpected_relation_kind_preserves_0006_version_and_acl(
+    object_kind: str,
+) -> None:
+    with _provision_privilege_database(
+        revision="0006_navigator_closed_loop"
+    ) as database:
+        object_name = f"unexpected_{object_kind.replace(' ', '_')}_{uuid4().hex}"
+        with psycopg.connect(
+            _psycopg_url(make_url(database.bootstrap_url)), autocommit=True
+        ) as bootstrap:
+            if object_kind == "foreign table":
+                bootstrap.execute("CREATE EXTENSION postgres_fdw")
+                bootstrap.execute(
+                    sql.SQL("GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO {}").format(
+                        sql.Identifier(MIGRATION_ROLE)
+                    )
+                )
+
+        with psycopg.connect(
+            _psycopg_url(make_url(database.migration_url)), autocommit=True
+        ) as owner:
+            if object_kind == "sequence":
+                owner.execute(
+                    sql.SQL("CREATE SEQUENCE public.{}").format(
+                        sql.Identifier(object_name)
+                    )
+                )
+                owner.execute(
+                    sql.SQL("GRANT SELECT, USAGE ON SEQUENCE public.{} TO {}").format(
+                        sql.Identifier(object_name), sql.Identifier(APPLICATION_ROLE)
+                    )
+                )
+            else:
+                server_name = f"unexpected_server_{uuid4().hex}"
+                owner.execute(
+                    sql.SQL(
+                        "CREATE SERVER {} FOREIGN DATA WRAPPER postgres_fdw "
+                        "OPTIONS (host '127.0.0.1', dbname 'postgres')"
+                    ).format(sql.Identifier(server_name))
+                )
+                owner.execute(
+                    sql.SQL(
+                        "CREATE FOREIGN TABLE public.{} (id integer) SERVER {} "
+                        "OPTIONS (table_name 'pg_class')"
+                    ).format(
+                        sql.Identifier(object_name), sql.Identifier(server_name)
+                    )
+                )
+                owner.execute(
+                    sql.SQL("GRANT SELECT ON TABLE public.{} TO {}").format(
+                        sql.Identifier(object_name), sql.Identifier(APPLICATION_ROLE)
+                    )
+                )
+
+        before = _acl_snapshot(database)
+        result = _alembic(
+            application_url=database.application_url,
+            migration_url=database.migration_url,
+            arguments=["upgrade", "head"],
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert object_name in result.stderr
+        assert "review catalog drift before retrying" in result.stderr
+        assert _acl_snapshot(database) == before
         engine = create_engine(database.migration_url)
         try:
             with engine.connect() as connection:

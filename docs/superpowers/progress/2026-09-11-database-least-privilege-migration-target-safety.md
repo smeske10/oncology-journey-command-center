@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 complete; pre-PR corrective design revised on 2026-09-12; corrective implementation pending.**
+Status: **Original Tasks 1–6 and corrective Task 1 complete; corrective Task 2 next.**
 
 ## Milestone boundary
 
@@ -352,12 +352,12 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Prepare the task-by-task implementation pass from the revised
-[Database Privilege Closure Design](../specs/2026-09-12-database-privilege-closure-design.md),
-then implement and verify its corrective scope on this branch. Do not repeat completed original
-tasks or treat their passing results as verification of the new behavior. Push and PR remain after
-the corrective verification gates and independent review; merge, deployment, worktree removal,
-and deferred milestones remain out of scope.
+Implement corrective Task 2 from the
+[Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
+add execution-time preflight to offline migration 0007, then prove valid execution and atomic
+refusal from revision 0006. Push and PR remain after the corrective verification gates and
+independent review; merge, deployment, worktree removal, and deferred milestones remain out of
+scope.
 
 ### Pre-PR corrective design — implementation pending
 
@@ -374,6 +374,23 @@ and deferred milestones remain out of scope.
   tests, and version/ACL preservation assertions. Cluster-wide role fixtures require isolation.
 - This document revision changes no application code or database state. All Task 6 evidence below
   predates these corrective requirements; the new tests and final gate have not yet been run.
+
+## Corrective Task 1 — complete
+
+- Added the connection-free, versioned `v0007` contract and an independently literal-pinned unit
+  expectation for its application relation surface.
+- Migration 0007 now validates the complete outgoing membership rows for the API login,
+  `ojcc_app`, and migration owner. The only accepted row is API → `ojcc_app` with INHERIT true,
+  SET false, and ADMIN false.
+- The application catalog scan now consumes exactly relation kinds `r`, `p`, `v`, `m`, `S`, and
+  `f`, compares `(name, kind)` pairs, retains extension dependency exclusion, and reports the
+  unexpected object and kind with an operator review remedy.
+- RED evidence: the contract test failed because the versioned module was absent; an all-options-
+  false extra API membership upgraded successfully; and a mutation omitting sequence/foreign-table
+  kinds let an API-granted sequence upgrade successfully.
+- GREEN evidence: the focused contract and privilege gate passed 20 tests in 46.19 seconds; Ruff
+  passed. The three membership cases and real sequence/`postgres_fdw` foreign-table cases each used
+  a fresh recorded disposable database and were dropped normally.
 
 ## Task 6 — complete
 
