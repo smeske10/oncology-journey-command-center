@@ -211,3 +211,35 @@ def test_offline_replay_later_stage_refusal_keeps_earlier_stages(
                 ) == "agent_run_citation"
         finally:
             owner_engine.dispose()
+
+
+def test_offline_replay_base_requires_empty_application_schema(
+    tmp_path: Path,
+) -> None:
+    with disposable_database(prefix="ojcc_task7_") as database:
+        output_directory = tmp_path / "nonempty-base-bundle"
+        render_offline_bundle(
+            bootstrap_database_url=bootstrap_database_url(database),
+            migration_database_url=database.migration_url,
+            database_url=database.application_url,
+            revision="head",
+            output_directory=output_directory,
+        )
+        with psycopg.connect(
+            _psycopg_url(database.migration_url), autocommit=True
+        ) as connection:
+            connection.execute(
+                "CREATE FUNCTION public.unexpected_preexisting() RETURNS integer "
+                "LANGUAGE sql AS 'SELECT 1'"
+            )
+
+        with pytest.raises(
+            psycopg.errors.RaiseException,
+            match="empty application schema",
+        ):
+            _execute_artifact(database.migration_url, output_directory / "01-owner.sql")
+
+        with psycopg.connect(_psycopg_url(database.migration_url)) as connection:
+            assert connection.execute(
+                "SELECT to_regclass('public.alembic_version')"
+            ).fetchone() == (None,)
