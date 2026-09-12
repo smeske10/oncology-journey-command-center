@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -43,6 +43,7 @@ from app.domain.enums import (
     UserRole,
 )
 from app.fhir.check_in_mapper import map_check_in_to_fhir_bundle
+from tests.database_support import user_triggers_disabled
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -402,28 +403,27 @@ def test_fhir_repository_returns_only_qualifying_approved_authorizers(
     )
     db_session.add_all([approved_decision, declined_decision])
     db_session.flush()
-    db_session.execute(text("SET LOCAL session_replication_role = replica"))
-    wrong_role_decision = ApprovalDecision(
-        organization_id=organization.id,
-        proposed_change_id=wrong_role_proposal.id,
-        authorized_by_user_id=wrong_role_authorizer.id,
-        qualifying_role_assignment_id=wrong_role.id,
-        qualifying_role_snapshot=UserRole.ADMINISTRATOR,
-        decision=ApprovalDecisionValue.APPROVED,
-        authorized_at=now,
-    )
-    disallowed_self_approval = ApprovalDecision(
-        organization_id=organization.id,
-        proposed_change_id=self_approval_proposal.id,
-        authorized_by_user_id=proposer.id,
-        qualifying_role_assignment_id=proposer_role.id,
-        qualifying_role_snapshot=UserRole.NAVIGATOR,
-        decision=ApprovalDecisionValue.APPROVED,
-        authorized_at=now,
-    )
-    db_session.add_all([wrong_role_decision, disallowed_self_approval])
-    db_session.flush()
-    db_session.execute(text("SET LOCAL session_replication_role = origin"))
+    with user_triggers_disabled(db_session, "approval_decision"):
+        wrong_role_decision = ApprovalDecision(
+            organization_id=organization.id,
+            proposed_change_id=wrong_role_proposal.id,
+            authorized_by_user_id=wrong_role_authorizer.id,
+            qualifying_role_assignment_id=wrong_role.id,
+            qualifying_role_snapshot=UserRole.ADMINISTRATOR,
+            decision=ApprovalDecisionValue.APPROVED,
+            authorized_at=now,
+        )
+        disallowed_self_approval = ApprovalDecision(
+            organization_id=organization.id,
+            proposed_change_id=self_approval_proposal.id,
+            authorized_by_user_id=proposer.id,
+            qualifying_role_assignment_id=proposer_role.id,
+            qualifying_role_snapshot=UserRole.NAVIGATOR,
+            decision=ApprovalDecisionValue.APPROVED,
+            authorized_at=now,
+        )
+        db_session.add_all([wrong_role_decision, disallowed_self_approval])
+        db_session.flush()
 
     repository = SqlAlchemyFhirRepository(db_session)
     proposal_records = repository.list_signal_proposals(

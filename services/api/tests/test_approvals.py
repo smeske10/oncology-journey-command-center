@@ -14,7 +14,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
-from test_safety_signals import _seed_signal
 
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
@@ -25,6 +24,7 @@ from app.db.session import get_session
 from app.domain.enums import UserRole
 from app.main import app
 from tests.database_support import user_triggers_disabled
+from tests.test_safety_signals import _seed_signal
 
 
 def _database_is_reachable(database_url: str) -> bool:

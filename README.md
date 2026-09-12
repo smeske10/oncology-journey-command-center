@@ -9,10 +9,10 @@ A public portfolio demonstration of a synthetic-data oncology navigation workflo
 3. Install the Playwright browser with `npm exec --workspace apps/web playwright install chromium`.
 4. Install API dependencies with `python -m pip install --require-hashes -r .\\services\\api\\requirements.lock`, then install the local API without re-resolving dependencies using `python -m pip install --no-deps --no-build-isolation -e .\\services\\api`.
 5. Start the local database with `docker compose up -d db`.
-6. Create two different explicitly named disposable demo databases as described below. Reset the
-   API database and set `DATABASE_URL` to it; reserve the second database for the live browser gate.
-7. Run the full verification pipeline with both mandatory live-database arguments:
-   `.\\scripts\\verify.ps1 -LiveDatabaseUrl $liveDatabaseUrl -LiveConfirmDatabaseName $liveDatabaseName`.
+6. Provision the local owner/API roles and two explicitly named disposable demo databases as
+   described below. Reset the API database; reserve the second database for the live browser gate.
+7. Run the full verifier with the live bootstrap, owner, API, and confirmation arguments shown
+   below.
 
 The API health endpoint is available at `GET /health` and returns `{"status":"ok"}`.
 
@@ -22,46 +22,150 @@ The API health endpoint is available at `GET /health` and returns `{"status":"ok
 
 ### Deterministic synthetic reset
 
-The reset is destructive and therefore accepts only an explicit loopback PostgreSQL URL whose
-database name is `ojcc_demo_<8-32 lowercase hex>` or `ojcc_task7_<8-32 lowercase hex>`. The
-database name must also be repeated as confirmation. It refuses the persistent `ojcc` database,
-remote hosts, omitted or unexpected ports, all URL query parameters, and confirmation mismatches
-before creating a database engine or dropping any schema.
+The application, migration process, and bootstrap process use different credentials:
+
+- `DATABASE_URL` is the non-owner `ojcc_api` login. It inherits the narrow `ojcc_app` privilege
+  group but cannot administer or `SET ROLE` to that group.
+- `MIGRATION_DATABASE_URL` is the non-superuser `ojcc_migrator` object owner. Locally and in CI it
+  may create disposable databases, but it cannot create roles or become the bootstrap role.
+- `BOOTSTRAP_DATABASE_URL` is the existing PostgreSQL administrator. It is used only to provision
+  roles/databases and to replay immutable migration 0005, then removed from migration and runtime
+  child environments.
+
+The owner and API URLs must use different usernames and the same normalized host, port, and exact
+database name. The reset validates all three URLs before connecting. It accepts only an explicit
+loopback target named `ojcc_demo_<8-32 lowercase hex>` or `ojcc_task7_<8-32 lowercase hex>`, with
+the name repeated as confirmation. It refuses persistent `ojcc`, remote hosts, unexpected ports,
+query parameters, and target/confirmation mismatches before creating an engine or dropping a
+schema.
+
+Provision the fixed local roles from the bootstrap account. The block creates missing roles and
+refuses an existing role with unexpected capabilities; it does not silently repair role drift.
 
 ```powershell
+$roleSql = @'
+DO $provision$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_migrator') THEN
+        CREATE ROLE ojcc_migrator LOGIN CREATEDB NOCREATEROLE NOSUPERUSER
+            NOREPLICATION NOBYPASSRLS INHERIT PASSWORD 'migrator-local-synthetic-only';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_api') THEN
+        CREATE ROLE ojcc_api LOGIN NOCREATEDB NOCREATEROLE NOSUPERUSER
+            NOREPLICATION NOBYPASSRLS INHERIT PASSWORD 'api-local-synthetic-only';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ojcc_app') THEN
+        CREATE ROLE ojcc_app NOLOGIN NOCREATEDB NOCREATEROLE NOSUPERUSER
+            NOREPLICATION NOBYPASSRLS INHERIT;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM pg_roles
+        WHERE (rolname = 'ojcc_migrator' AND
+               (NOT rolcanlogin OR NOT rolcreatedb OR rolcreaterole OR rolsuper OR
+                rolreplication OR rolbypassrls OR NOT rolinherit))
+           OR (rolname = 'ojcc_api' AND
+               (NOT rolcanlogin OR rolcreatedb OR rolcreaterole OR rolsuper OR
+                rolreplication OR rolbypassrls OR NOT rolinherit))
+           OR (rolname = 'ojcc_app' AND
+               (rolcanlogin OR rolcreatedb OR rolcreaterole OR rolsuper OR
+                rolreplication OR rolbypassrls OR NOT rolinherit))
+    ) THEN
+        RAISE EXCEPTION 'Existing OJCC role has unexpected capabilities';
+    END IF;
+END
+$provision$;
+
+DO $membership$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted ON granted.oid = membership.roleid
+        JOIN pg_roles member ON member.oid = membership.member
+        WHERE granted.rolname = 'ojcc_app' AND member.rolname = 'ojcc_api'
+    ) THEN
+        GRANT ojcc_app TO ojcc_api WITH INHERIT TRUE, SET FALSE, ADMIN FALSE;
+    ELSIF NOT EXISTS (
+        SELECT 1 FROM pg_auth_members membership
+        JOIN pg_roles granted ON granted.oid = membership.roleid
+        JOIN pg_roles member ON member.oid = membership.member
+        WHERE granted.rolname = 'ojcc_app' AND member.rolname = 'ojcc_api'
+          AND membership.inherit_option AND NOT membership.set_option
+          AND NOT membership.admin_option
+    ) THEN
+        RAISE EXCEPTION 'Existing ojcc_app membership has unexpected options';
+    END IF;
+END
+$membership$;
+'@
+$roleSql | docker compose exec -T db psql -v ON_ERROR_STOP=1 -U ojcc -d postgres
+if ($LASTEXITCODE -ne 0) { throw "Local role provisioning failed" }
+
 $apiDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
 $liveDatabaseName = "ojcc_demo_$([guid]::NewGuid().ToString('N'))"
 if ($apiDatabaseName -eq $liveDatabaseName) { throw "Database names must be different" }
-docker compose exec -T db createdb -U ojcc $apiDatabaseName
+docker compose exec -T db createdb -U ojcc -O ojcc_migrator $apiDatabaseName
 if ($LASTEXITCODE -ne 0) { throw "API database creation failed" }
-docker compose exec -T db createdb -U ojcc $liveDatabaseName
+docker compose exec -T db createdb -U ojcc -O ojcc_migrator $liveDatabaseName
 if ($LASTEXITCODE -ne 0) { throw "Live database creation failed" }
-$apiDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$apiDatabaseName"
-$liveDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$liveDatabaseName"
-.\\scripts\\reset_demo.ps1 -DatabaseUrl $apiDatabaseUrl -ConfirmDatabaseName $apiDatabaseName
-$env:DATABASE_URL = $apiDatabaseUrl
+$bootstrapDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$apiDatabaseName"
+$migrationDatabaseUrl = "postgresql+psycopg://ojcc_migrator:migrator-local-synthetic-only@127.0.0.1:5432/$apiDatabaseName"
+$applicationDatabaseUrl = "postgresql+psycopg://ojcc_api:api-local-synthetic-only@127.0.0.1:5432/$apiDatabaseName"
+$liveBootstrapDatabaseUrl = "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/$liveDatabaseName"
+$liveMigrationDatabaseUrl = "postgresql+psycopg://ojcc_migrator:migrator-local-synthetic-only@127.0.0.1:5432/$liveDatabaseName"
+$liveApplicationDatabaseUrl = "postgresql+psycopg://ojcc_api:api-local-synthetic-only@127.0.0.1:5432/$liveDatabaseName"
+.\\scripts\\reset_demo.ps1 `
+    -BootstrapDatabaseUrl $bootstrapDatabaseUrl `
+    -MigrationDatabaseUrl $migrationDatabaseUrl `
+    -DatabaseUrl $applicationDatabaseUrl `
+    -ConfirmDatabaseName $apiDatabaseName
+$env:BOOTSTRAP_DATABASE_URL = $bootstrapDatabaseUrl
+$env:MIGRATION_DATABASE_URL = $migrationDatabaseUrl
+$env:DATABASE_URL = $applicationDatabaseUrl
 $env:DEMO_ORGANIZATION_ID = "aeb456d4-3728-5f64-ac05-afed26cd0edc"
 .\\scripts\\verify.ps1 `
-    -LiveDatabaseUrl $liveDatabaseUrl `
+    -LiveBootstrapDatabaseUrl $liveBootstrapDatabaseUrl `
+    -LiveMigrationDatabaseUrl $liveMigrationDatabaseUrl `
+    -LiveDatabaseUrl $liveApplicationDatabaseUrl `
     -LiveConfirmDatabaseName $liveDatabaseName
 ```
 
-The reset recreates the schema at Alembic head, runs the entirely synthetic fixed seed twice to
-prove idempotency, and finishes with the read-only integrity audit. The seed includes separate
-platform-user and patient identities, historical roles, pathway/submission versions, open and
-closed work, every safety state, approval history, workflow and knowledge lineage, and user,
-agent, policy, and system audit actors.
+The reset recreates the schema at Alembic head, runs the synthetic fixed seed twice to prove
+idempotency, and finishes with read-only integrity audits as both owner and API login. Fresh replay
+runs migrations 0001–0004 as the owner. Immutable 0005 contains an `ALTER ROLE ... NOSUPERUSER`
+statement that PostgreSQL 16 allows only a superuser to execute, even when removing that
+capability, so the reset runs only 0005 through the bootstrap bridge, transfers its exact object
+allowlist to the owner, removes the bootstrap URL, and returns to the owner for 0006 onward. It
+never uses broad `REASSIGN OWNED`.
+
+The seed includes separate platform-user and patient identities, historical roles,
+pathway/submission versions, open and closed work, every safety state, approval history, workflow
+and knowledge lineage, and user, agent, policy, and system audit actors.
 
 The reset and standalone seed temporarily remove every inherited process environment variable
 whose name begins with `PG` (case-insensitive) before constructing an engine or starting migration,
 seed, and audit child processes, then restore the exact prior values in `finally`. This prevents
 libpq environment routing from overriding the single explicit, validated loopback URL.
 
-The full verifier applies the same fail-closed validation to both targets before importing the API
-or running a child process. It refuses missing, persistent, remote, query-bearing, mismatched, or
-shared API/live targets. The live stage alone owns resets of the live database; it runs the real
-cookie-authenticated browser-to-PostgreSQL journey sequentially at desktop and mobile widths and
-audits integrity after each journey. It never resets the API test database.
+The full verifier applies the same fail-closed validation to both credential triples before
+importing the API or running a child process. It refuses missing, persistent, remote,
+query-bearing, mismatched, or shared API/live targets. The live stage alone owns resets of the live
+database; it runs FastAPI with only the API URL, gives Next.js no database credential, exercises
+the real cookie-authenticated browser-to-PostgreSQL journey sequentially at desktop and mobile
+widths, and audits integrity as the API login after each journey. It never resets the API test
+database.
+
+CI provisions and validates the same three roles before Alembic, generates two unique disposable
+database names, and exports separate API/live credential triples. Outside this synthetic local/CI
+workflow, provision roles and secrets in the database provider's credential manager; Alembic does
+not create logins or passwords. Never commit or print a real password, and never provide the owner
+or bootstrap URL to an API or web runtime. Cleanup uses ordinary `DROP DATABASE` only after owned
+processes stop; if any connection or ownership is uncertain, leave the database for explicit
+operator review rather than terminating sessions.
+
+PostgreSQL 16 references: [object and role grants](https://www.postgresql.org/docs/16/sql-grant.html),
+[database and schema privilege meanings](https://www.postgresql.org/docs/16/ddl-priv.html),
+[role membership options](https://www.postgresql.org/docs/16/role-membership.html), and
+[safe `SECURITY DEFINER` configuration](https://www.postgresql.org/docs/16/sql-createfunction.html).
 
 ### Delivered closed-loop demonstration
 

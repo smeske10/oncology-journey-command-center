@@ -4,10 +4,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import inspect, select, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import (
     AuditEvent,
     FollowUpRequest,
@@ -648,63 +649,72 @@ def test_audit_failure_rolls_back_task_transition(
 
 
 def test_ojcc_app_can_append_guarded_response_but_cannot_rewrite_history(
-    closed_loop_session: Session,
-    approved_closed_loop_case: Any,
+    committed_closed_loop_case: tuple[Any, Any],
 ) -> None:
     """The least-privilege application role uses the guarded append surface."""
-    _task, request = _complete_bound_task(
-        closed_loop_session, approved_closed_loop_case
-    )
+    migration_engine, approved_closed_loop_case = committed_closed_loop_case
+    with Session(migration_engine, expire_on_commit=False) as setup_session:
+        _task, request = _complete_bound_task(setup_session, approved_closed_loop_case)
+        setup_session.commit()
+
     response_id = uuid4()
-    closed_loop_session.execute(text("SET LOCAL ROLE ojcc_app"))
+    application_engine = create_engine(settings.database_url)
     try:
-        submitted_at = closed_loop_session.execute(
-            text(
-                """
-                INSERT INTO follow_up_response
-                    (id, organization_id, follow_up_request_id,
-                     submitted_by_user_id, patient_identity_link_id,
-                     response, note, submitted_at)
-                VALUES
-                    (:id, :organization_id, :request_id,
-                     :user_id, :link_id,
-                     'resolved', NULL, '2000-01-01T00:00:00Z')
-                RETURNING submitted_at
-                """
-            ),
-            {
-                "id": response_id,
-                "organization_id": approved_closed_loop_case.organization_id,
-                "request_id": request.id,
-                "user_id": approved_closed_loop_case.patient_user_id,
-                "link_id": approved_closed_loop_case.patient_identity_link_id,
-            },
-        ).scalar_one()
-        assert submitted_at >= request.requested_at
-
-        with pytest.raises(DBAPIError, match="permission denied|append-only"):
-            with closed_loop_session.begin_nested():
-                closed_loop_session.execute(
-                    text("UPDATE follow_up_response SET note = 'rewrite' WHERE id = :id"),
-                    {"id": response_id},
-                )
-
-        with pytest.raises(DBAPIError, match="permission denied"):
-            with closed_loop_session.begin_nested():
-                closed_loop_session.execute(
+        with application_engine.connect() as application_connection:
+            transaction = application_connection.begin()
+            try:
+                submitted_at = application_connection.execute(
                     text(
                         """
-                        INSERT INTO follow_up_request
-                            (id, organization_id, patient_id, care_episode_id,
-                             reported_need_id, navigation_task_id,
-                             requested_by_user_id, requested_at, prompt_version)
-                        SELECT :id, organization_id, patient_id, care_episode_id,
-                               reported_need_id, navigation_task_id,
-                               requested_by_user_id, requested_at, prompt_version
-                        FROM follow_up_request WHERE id = :request_id
+                        INSERT INTO follow_up_response
+                            (id, organization_id, follow_up_request_id,
+                             submitted_by_user_id, patient_identity_link_id,
+                             response, note, submitted_at)
+                        VALUES
+                            (:id, :organization_id, :request_id,
+                             :user_id, :link_id,
+                             'resolved', NULL, '2000-01-01T00:00:00Z')
+                        RETURNING submitted_at
                         """
                     ),
-                    {"id": uuid4(), "request_id": request.id},
-                )
+                    {
+                        "id": response_id,
+                        "organization_id": approved_closed_loop_case.organization_id,
+                        "request_id": request.id,
+                        "user_id": approved_closed_loop_case.patient_user_id,
+                        "link_id": approved_closed_loop_case.patient_identity_link_id,
+                    },
+                ).scalar_one()
+                assert submitted_at >= request.requested_at
+
+                with pytest.raises(DBAPIError, match="permission denied|append-only"):
+                    with application_connection.begin_nested():
+                        application_connection.execute(
+                            text(
+                                "UPDATE follow_up_response SET note = 'rewrite' "
+                                "WHERE id = :id"
+                            ),
+                            {"id": response_id},
+                        )
+
+                with pytest.raises(DBAPIError, match="permission denied"):
+                    with application_connection.begin_nested():
+                        application_connection.execute(
+                            text(
+                                """
+                                INSERT INTO follow_up_request
+                                    (id, organization_id, patient_id, care_episode_id,
+                                     reported_need_id, navigation_task_id,
+                                     requested_by_user_id, requested_at, prompt_version)
+                                SELECT :id, organization_id, patient_id, care_episode_id,
+                                       reported_need_id, navigation_task_id,
+                                       requested_by_user_id, requested_at, prompt_version
+                                FROM follow_up_request WHERE id = :request_id
+                                """
+                            ),
+                            {"id": uuid4(), "request_id": request.id},
+                        )
+            finally:
+                transaction.rollback()
     finally:
-        closed_loop_session.execute(text("RESET ROLE"))
+        application_engine.dispose()

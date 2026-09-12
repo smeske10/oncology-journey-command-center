@@ -19,9 +19,12 @@ function platformEnvironment(): NodeJS.ProcessEnv {
     "APPDATA",
     "CI",
   ];
-  return Object.fromEntries(
-    allowed.flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
-  );
+  return {
+    NODE_ENV: process.env.NODE_ENV,
+    ...Object.fromEntries(
+      allowed.flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
+    ),
+  };
 }
 
 test("persists the synthetic transportation journey from review through closure", async ({ browser }) => {

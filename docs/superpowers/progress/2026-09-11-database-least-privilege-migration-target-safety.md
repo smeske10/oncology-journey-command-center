@@ -352,4 +352,54 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Document the three-credential local/CI provisioning contract, provision the two planned final-gate databases, run reset/version/schema-generation and the complete cached verifier, rerun targeted security evidence, clean up only recorded disposable databases, and stop for integration review.
+Stop for integration review. Do not merge, push, deploy, remove the worktree, or begin the
+deferred milestone without a new user decision.
+
+## Task 6 — complete
+
+- Documented bootstrap, migration-owner, application-login, and group-role provisioning; exact
+  API/live target separation; the immutable-0005 bootstrap bridge; runtime secret isolation;
+  provider credential management; and no-force cleanup. `.env.example` now contains only blank
+  database URL slots and distinct synthetic local role examples.
+- Reset replayed the API database to `0007_database_least_privilege (head)`, seeded twice with
+  identical counts, and returned zero integrity violations as both owner and API login. Alembic
+  `current` reported head and `check` reported `No new upgrade operations detected`.
+- OpenAPI and TypeScript contracts were generated twice with stable hashes and no generated
+  contract diff.
+- The first complete regression exposed legacy tests that assumed the migration owner could use
+  `SET ROLE` or the superuser-only `session_replication_role`. Deliberate invalid-row fixtures now
+  use explicit bootstrap-only rollback connections; ordinary mutation/cleanup fixtures use the
+  identifier-validated owner-safe user-trigger helper; and the guarded follow-up test connects
+  through the actual API credential. App privilege assertions now match the approved direct-write
+  matrix, where audit and workflow-transition history are read-only.
+- Installing the locked web workspace exposed a Next.js `ProcessEnv` augmentation requiring an
+  explicit `NODE_ENV` member. The Playwright child allowlist now includes that field without
+  forwarding database or unrelated process secrets.
+- Final complete `scripts/verify.ps1` gate: Ruff passed; Pyright reported zero errors; API integrity
+  was clean; 520 API tests passed in 221.58 seconds; ESLint passed; 34 Vitest tests passed; the
+  production Next.js build passed; 3 mocked Playwright journeys passed; real desktop and mobile
+  cookie-authenticated browser-to-PostgreSQL journeys each passed; every pre/post live integrity
+  audit reported zero violations.
+- Final targeted security gate passed 20 tests: all six immutable migration hashes, complete
+  relation/function/database/schema catalog coverage, role and ownership checks, populated
+  upgrade/failure-atomicity/head/downgrade-refusal coverage, the real non-owner API journey, and
+  the full negative direct-SQL boundary. Its four databases were all dropped normally:
+  `ojcc_migration_test_d7bb965b84454f26847e0ea1036b61ba`,
+  `ojcc_migration_test_6e746526035643d3b5e79261cfc40e7b`,
+  `ojcc_migration_test_1905c9a6a59547dfade3595765a0c77f`, and
+  `ojcc_task7_dab6e1ec0c8e4ab09a4aa78900de47a1`.
+- Final catalog evidence: `ojcc_migrator` is LOGIN/INHERIT/CREATEDB and otherwise non-privileged;
+  `ojcc_api` is LOGIN/INHERIT without CREATEDB; `ojcc_app` is NOLOGIN/INHERIT; none is superuser,
+  CREATEROLE, replication, or BYPASSRLS. API membership is INHERIT true, SET false, ADMIN false.
+  The group has 37 SELECT, 6 INSERT, 2 UPDATE, zero DELETE relation grants and one direct function
+  EXECUTE grant. All 34 public tables are owner-owned. Runtime `current_user` and `session_user`
+  were both `ojcc_api`.
+- `git diff --check` passed before final cleanup. No persistent `ojcc` database was inspected,
+  reset, or dropped; no session was terminated.
+
+### Final-gate owned database record
+
+| Database | Purpose | Disposition |
+|---|---|---|
+| `ojcc_demo_0a86123af492466481211bba59c36307` | API/reset/full pytest gate | owner and zero sessions reverified; dropped normally |
+| `ojcc_demo_89395435125f41f8b22df3ff06182e28` | live desktop/mobile browser gate | owner and zero sessions reverified; dropped normally |

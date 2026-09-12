@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,22 @@ TASK5_KNOWLEDGE_TABLES = {
 def connection() -> Iterator[Connection]:
     """Owner-credential setup connection isolated by a rollback."""
     engine = create_engine(settings.require_migration_database_url())
+    with engine.connect() as value:
+        transaction = value.begin()
+        try:
+            yield value
+        finally:
+            transaction.rollback()
+    engine.dispose()
+
+
+@pytest.fixture
+def corruption_connection() -> Iterator[Connection]:
+    """Bootstrap-only rollback fixture for deliberately orphaned legacy rows."""
+    bootstrap_database_url = os.getenv("BOOTSTRAP_DATABASE_URL")
+    if bootstrap_database_url is None or not bootstrap_database_url.strip():
+        pytest.skip("BOOTSTRAP_DATABASE_URL is required for deliberate corruption tests")
+    engine = create_engine(bootstrap_database_url)
     with engine.connect() as value:
         transaction = value.begin()
         try:
@@ -1115,9 +1132,10 @@ def _seed_navigation_authorization(connection: Connection) -> dict[str, UUID]:
 
 
 def test_navigation_resource_match_is_proposal_authorized_before_later_delivery(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: resource approval drifts from its proposal or delivery is conflated."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_navigation_authorization(connection)
     match_id = uuid4()
@@ -1194,10 +1212,11 @@ def test_navigation_resource_match_is_proposal_authorized_before_later_delivery(
     ids=("delete", "rekey"),
 )
 def test_approved_navigation_resource_evidence_cannot_delete_or_rekey(
-    connection: Connection,
+    corruption_connection: Connection,
     statement: str,
 ) -> None:
     """Production break: approved resource evidence is deleted or given a new identity."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_navigation_authorization(connection)
     match_id = uuid4()
@@ -1247,9 +1266,10 @@ def test_approved_navigation_resource_evidence_cannot_delete_or_rekey(
 
 
 def test_navigation_task_cannot_be_approved_with_unmaterialized_resource_links(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: approval succeeds while a proposed resource link is missing."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_navigation_authorization(connection)
 
@@ -1275,9 +1295,10 @@ def test_navigation_task_cannot_be_approved_with_unmaterialized_resource_links(
 
 
 def test_navigation_resource_must_be_listed_in_the_authorizing_proposal(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: a resource can be attached outside the exact approved value."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_navigation_authorization(connection)
     unproposed_resource_id = uuid4()
@@ -1313,9 +1334,10 @@ def test_navigation_resource_must_be_listed_in_the_authorizing_proposal(
 
 
 def test_navigation_proposal_rejects_duplicate_resource_ids(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: duplicate resource IDs make final materialization impossible."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_navigation_authorization(connection)
     proposed_at = datetime(2026, 8, 18, 0, 2, tzinfo=UTC)
@@ -1356,9 +1378,10 @@ def test_navigation_proposal_rejects_duplicate_resource_ids(
 
 
 def test_live_postgresql_rejects_cross_tenant_knowledge_and_resource_edges(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: a Task 5 evidence/resource child crosses a tenant boundary."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     approved_at = datetime(2026, 8, 18, tzinfo=UTC)
     first_knowledge = _seed_approved_document(connection, approved_at=approved_at)

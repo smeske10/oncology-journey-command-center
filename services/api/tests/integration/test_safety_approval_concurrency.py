@@ -12,6 +12,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
+from tests.database_support import user_triggers_disabled
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -171,33 +172,41 @@ def _cleanup(database_url: str, ids: dict[str, UUID]) -> None:
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
-            connection.execute(text("SET session_replication_role = replica"))
-            for table in (
-                "approval_decision", "safety_signal_resolution", "safety_signal",
-                "proposed_change", "approval_policy", "signal_rule", "check_in_submission",
+            tables = (
+                "approval_decision", "safety_signal_resolution", "proposed_change",
+                "safety_signal", "approval_policy", "signal_rule", "check_in_submission",
                 "care_episode", "check_in_definition", "pathway_definition", "role_assignment",
                 "synthetic_patient", "user_account", "organization",
-            ):
-                if table == "user_account":
-                    continue
-                column = "id" if table == "organization" else "organization_id"
+            )
+            with user_triggers_disabled(connection, *tables):
                 connection.execute(
-                    text(f"DELETE FROM {table} WHERE {column} = :organization_id"),
+                    text(
+                        "UPDATE safety_signal SET dismissal_proposed_change_id = NULL, "
+                        "current_severity_override_proposed_change_id = NULL "
+                        "WHERE organization_id = :organization_id"
+                    ),
                     {"organization_id": ids["organization"]},
                 )
-            connection.execute(
-                text(
-                    "DELETE FROM user_account WHERE id IN "
-                    "(:proposer, :approver, :second_approver, :patient_author)"
-                ),
-                {
-                    "proposer": ids["proposer"],
-                    "approver": ids["approver"],
-                    "second_approver": ids["second_approver"],
-                    "patient_author": ids["patient_author"],
-                },
-            )
-            connection.execute(text("SET session_replication_role = origin"))
+                for table in tables:
+                    if table == "user_account":
+                        continue
+                    column = "id" if table == "organization" else "organization_id"
+                    connection.execute(
+                        text(f"DELETE FROM {table} WHERE {column} = :organization_id"),
+                        {"organization_id": ids["organization"]},
+                    )
+                connection.execute(
+                    text(
+                        "DELETE FROM user_account WHERE id IN "
+                        "(:proposer, :approver, :second_approver, :patient_author)"
+                    ),
+                    {
+                        "proposer": ids["proposer"],
+                        "approver": ids["approver"],
+                        "second_approver": ids["second_approver"],
+                        "patient_author": ids["patient_author"],
+                    },
+                )
     finally:
         engine.dispose()
 
