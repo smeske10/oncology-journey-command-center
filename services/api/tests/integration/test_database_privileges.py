@@ -596,12 +596,12 @@ def test_relation_and_view_privileges_match_the_complete_matrix(catalog: Connect
 
     for role in (APPLICATION_GROUP, APPLICATION_ROLE):
         for privilege in TABLE_PRIVILEGES:
-            assert not _has_table_privilege(
+            assert _has_table_privilege(
                 catalog,
                 role=role,
                 relation="alembic_version",
                 privilege=privilege,
-            )
+            ) is (privilege == "SELECT")
     for relation in APPLICATION_TABLES | APPLICATION_VIEWS | {"alembic_version"}:
         for privilege in TABLE_PRIVILEGES:
             assert not _public_has_table_privilege(

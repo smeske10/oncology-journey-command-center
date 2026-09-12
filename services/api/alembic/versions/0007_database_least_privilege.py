@@ -503,7 +503,7 @@ def _configure_relations() -> None:
             f"REVOKE ALL PRIVILEGES ON TABLE public.{relation_name} FROM PUBLIC, ojcc_app"
         )
 
-    for relation_name in (*SELECT_ONLY_RELATIONS, *APPLICATION_VIEWS):
+    for relation_name in v0007.RUNTIME_SELECT_RELATIONS:
         op.execute(f"GRANT SELECT ON TABLE public.{relation_name} TO ojcc_app")
     for relation_name in INSERT_RELATIONS:
         op.execute(

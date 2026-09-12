@@ -78,12 +78,12 @@
 - Produces `attest_runtime_database(connection, target)` and a sanitized `RuntimePrivilegeBoundaryError` with stable boundary identifiers.
 - Produces an application lifespan that acquires one engine connection, attests revision 0007, closes it, and aborts startup on mismatch.
 
-- [ ] Write unit/integration tests for valid API credentials and each misconfiguration class: owner/bootstrap login, extra outgoing membership, direct relation privilege, column privilege, and direct function privilege.
-- [ ] Run them and confirm startup currently serves or lacks the attestation interface.
-- [ ] Implement effective database/schema/relation/function checks using the frozen v0007 contract, including direct, inherited, PUBLIC, column, and grant-option exposure.
-- [ ] Integrate attestation into FastAPI lifespan while keeping module import and OpenAPI export connection-free.
-- [ ] Launch the real Uvicorn subprocess in tests: assert valid startup serves the unchanged health response; invalid startup exits nonzero with its stable boundary identifier and without URL/password/driver details.
-- [ ] Run focused runtime and health tests, formatting, types, immutable hashes, and diff checks; update the ledger and commit this task.
+- [x] Write unit/integration tests for valid API credentials and each misconfiguration class: owner/bootstrap login, extra outgoing membership, direct relation privilege, column privilege, and direct function privilege.
+- [x] Run them and confirm startup currently serves or lacks the attestation interface.
+- [x] Implement effective database/schema/relation/function checks using the frozen v0007 contract, including direct, inherited, PUBLIC, column, and grant-option exposure.
+- [x] Integrate attestation into FastAPI lifespan while keeping module import and OpenAPI export connection-free.
+- [x] Launch the real Uvicorn subprocess in tests: assert valid startup serves the unchanged health response; invalid startup exits nonzero with its stable boundary identifier and without URL/password/driver details.
+- [x] Run focused runtime and health tests, formatting, types, immutable hashes, and diff checks; update the ledger and commit this task.
 
 ### Task 4: Produce and Execute the Three-Stage Offline Replay Bundle
 

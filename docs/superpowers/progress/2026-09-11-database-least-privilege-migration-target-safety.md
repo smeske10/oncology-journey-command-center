@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Tasks 1–2 complete; corrective Task 3 next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–3 complete; corrective Task 4 next.**
 
 ## Milestone boundary
 
@@ -352,12 +352,12 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Implement corrective Task 3 from the
+Implement corrective Task 4 from the
 [Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
-add fail-closed runtime database attestation to the FastAPI startup lifespan and prove real process
-startup/refusal behavior without changing liveness or import behavior. Push and PR remain after the
-corrective verification gates and independent review; merge, deployment, worktree removal, and
-deferred milestones remain out of scope.
+generate and execute the fresh owner/bootstrap/owner offline replay bundle with per-stage identity,
+revision, ownership-transfer, and rollback guarantees. Push and PR remain after the corrective
+verification gates and independent review; merge, deployment, worktree removal, and deferred
+milestones remain out of scope.
 
 ### Pre-PR corrective design — implementation pending
 
@@ -409,6 +409,26 @@ deferred milestones remain out of scope.
 - GREEN evidence: the final focused offline generation, membership-equivalence, execution, and
   downgrade gate passed 35 tests in 53.31 seconds; Ruff passed. Every new disposable database
   reported ordinary cleanup.
+
+## Corrective Task 3 — complete
+
+- Added a sanitized runtime attestation boundary selected explicitly for the frozen v0007 contract.
+  It verifies connected identity/database, schema revision, login/group profiles, exact outgoing
+  memberships, non-ownership, catalog shape, and effective database, schema, relation, column, and
+  function privileges including inherited/PUBLIC exposure and grant options.
+- FastAPI runs the snapshot once in its startup lifespan and disposes the engine on startup failure
+  and shutdown. Module import and OpenAPI generation remain connection-free; `/health` remains the
+  unchanged liveness response and is never served by a rejected process.
+- The group receives read-only access to `alembic_version` so the runtime login can attest the exact
+  schema revision without receiving owner credentials or any new write capability.
+- RED evidence: the runtime attestation module was absent, owner credentials remained able to keep
+  Uvicorn running, and the first valid attestation exposed that the runtime could not read the
+  otherwise protected Alembic revision table.
+- GREEN evidence: 13 focused direct and real-process tests passed in 58.03 seconds, covering valid
+  startup, owner/bootstrap rejection, extra membership, direct relation/column/function grants,
+  sanitized errors, health, connection-free import/OpenAPI, and the revised read-only relation
+  matrix. Ruff passed after import normalization. Each disposable database reported ordinary
+  cleanup.
 
 ## Task 6 — complete
 

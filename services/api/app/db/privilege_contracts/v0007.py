@@ -54,6 +54,10 @@ APPLICATION_RELATIONS = (
     *APPLICATION_VIEWS,
 )
 CATALOG_RELATIONS = (*APPLICATION_RELATIONS, "alembic_version")
+RUNTIME_SELECT_RELATIONS = (
+    *APPLICATION_RELATIONS,
+    "alembic_version",
+)
 EXPECTED_RELATION_KINDS = tuple(
     (name, "v" if name in APPLICATION_VIEWS else "r") for name in CATALOG_RELATIONS
 )
@@ -95,3 +99,17 @@ SECURITY_INVOKER_FUNCTIONS = (
     "safety_severity_rank",
 )
 APPLICATION_FUNCTIONS = (*SECURITY_DEFINER_FUNCTIONS, *SECURITY_INVOKER_FUNCTIONS)
+FUNCTION_IDENTITIES = tuple(
+    (name, "value safety_severity" if name == "safety_severity_rank" else "")
+    for name in APPLICATION_FUNCTIONS
+)
+TABLE_PRIVILEGES = (
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "TRUNCATE",
+    "REFERENCES",
+    "TRIGGER",
+)
+COLUMN_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "REFERENCES")
