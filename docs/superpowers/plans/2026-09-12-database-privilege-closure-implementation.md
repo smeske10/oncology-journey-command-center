@@ -134,10 +134,10 @@
 **Interfaces:**
 - Produces the final evidence record and marks the design implemented only after fresh complete verification.
 
-- [ ] Run all focused membership, catalog, offline execution, runtime startup, replay, provisioning, and independent-contract tests.
-- [ ] Recompute and compare SHA-256 hashes for migrations 0001–0006.
-- [ ] Run the complete privilege/non-owner security gate and full `scripts/verify.ps1` repository verifier.
-- [ ] Run Ruff, Pyright, web lint/tests/build, `git diff --check`, and a credential/sentinel scan.
-- [ ] Review the final diff line-by-line against every design verification item; record exact test counts, disposable database cleanup, and any intentional limits.
-- [ ] Mark the design implemented and commit the final documentation/evidence update.
-- [ ] Use `superpowers:finishing-a-development-branch` to present the integration choices; do not merge, deploy, or remove the worktree without the user's selection.
+- [x] Run all focused membership, catalog, offline execution, runtime startup, replay, provisioning, and independent-contract tests.
+- [x] Recompute and compare SHA-256 hashes for migrations 0001–0006.
+- [x] Run the complete privilege/non-owner security gate and full `scripts/verify.ps1` repository verifier.
+- [x] Run Ruff, Pyright, web lint/tests/build, `git diff --check`, and a credential/sentinel scan.
+- [x] Review the final diff line-by-line against every design verification item; record exact test counts, disposable database cleanup, and any intentional limits.
+- [x] Mark the design implemented and commit the final documentation/evidence update.
+- [x] Use `superpowers:finishing-a-development-branch` to present the integration choices; do not merge, deploy, or remove the worktree without the user's selection.

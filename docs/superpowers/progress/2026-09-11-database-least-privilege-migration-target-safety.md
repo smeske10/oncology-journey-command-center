@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Tasks 1–5 complete; corrective final gate next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–6 complete; integration decision next.**
 
 ## Milestone boundary
 
@@ -352,13 +352,11 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Run corrective Task 6 from the
-[Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
-execute the complete corrective security gate, immutable migration check, and full repository
-verifier, then perform the independent read-only review. Push and PR remain after those gates;
-merge, deployment, worktree removal, and deferred milestones remain out of scope.
+Choose the branch integration path. An independent read-only review remains required before any
+push or pull request. Merge, deployment, worktree removal, and deferred milestones remain out of
+scope until the user selects them explicitly.
 
-### Pre-PR corrective design — implementation pending
+### Pre-PR corrective design — implemented and verified
 
 - Two gap closures: reject every unexpected outgoing role membership and include sequences and
   foreign tables in the application catalog boundary.
@@ -371,8 +369,8 @@ merge, deployment, worktree removal, and deferred milestones remain out of scope
   instructions and CI. Keep independent security-test expectations.
 - Require real sequence/foreign-table refusal tests without conditional skips, startup-process
   tests, and version/ACL preservation assertions. Cluster-wide role fixtures require isolation.
-- This document revision changes no application code or database state. All Task 6 evidence below
-  predates these corrective requirements; the new tests and final gate have not yet been run.
+- The corrective implementation is complete. Its final evidence is recorded after the original
+  Task 6 record below; an independent review is intentionally still pending before push.
 
 ## Corrective Task 1 — complete
 
@@ -459,7 +457,7 @@ merge, deployment, worktree removal, and deferred milestones remain out of scope
   as 5 tests in 4.30 seconds; Ruff passed and CI YAML parsed. Every test used UUID-derived role
   names and removed only those recorded fixture roles in `finally`.
 
-## Task 6 — complete
+## Original Task 6 — complete
 
 - Documented bootstrap, migration-owner, application-login, and group-role provisioning; exact
   API/live target separation; the immutable-0005 bootstrap bridge; runtime secret isolation;
@@ -507,3 +505,37 @@ merge, deployment, worktree removal, and deferred milestones remain out of scope
 |---|---|---|
 | `ojcc_demo_0a86123af492466481211bba59c36307` | API/reset/full pytest gate | owner and zero sessions reverified; dropped normally |
 | `ojcc_demo_89395435125f41f8b22df3ff06182e28` | live desktop/mobile browser gate | owner and zero sessions reverified; dropped normally |
+
+## Corrective Task 6 — complete
+
+- A final design-to-diff review found one uncovered edge in the fresh replay guard: an otherwise
+  empty `public` schema containing only a function was accepted. The new execution test first
+  failed because stage 1 did not raise, then passed after the preflight was expanded to cover
+  non-extension relations, functions, and application types. The complete offline replay file
+  passed 4 tests; Ruff and the replay module's Pyright check passed.
+- The corrective focused gates passed with their independently literal contract expectations:
+  membership and six-kind catalog closure, executable offline 0007, runtime startup attestation,
+  three-stage offline replay, and isolated role provisioning. Every pytest-owned disposable
+  database reported cleanup.
+- SHA-256 hashes for migrations 0001–0006 exactly matched the immutable baseline above. The final
+  diff review found no change in those six files.
+- The final compliant `scripts/verify.ps1` run passed Ruff, Pyright with zero errors, clean API
+  integrity, 552 API tests in 337.47 seconds, ESLint, 34 Vitest tests, the production Next.js
+  build, 3 mocked Playwright journeys, and the real desktop and mobile browser-to-PostgreSQL
+  journeys. Every live integrity audit reported zero violations.
+- The final credential review found only explicit synthetic fixtures and secret sentinels used to
+  prove output sanitization; no deployable credential was added. `git diff --check` initially
+  identified one blank line at end-of-file in the new contract package marker; it was removed
+  before the final commit.
+- Intentional limit: runtime attestation is a startup snapshot, as designed. An independent
+  read-only review is still required before push; no push, pull request, merge, deployment, or
+  worktree removal was performed during implementation.
+
+### Corrective final-gate database record
+
+| Database | Purpose | Disposition |
+|---|---|---|
+| `ojcc_demo_6173a7b6f1e24d36a174d5875b8347f3` | first exact-tree final verifier API database | removed; cleanup used a force-capable drop command, prompting the compliant rerun below |
+| `ojcc_demo_15e595fd696a41cfa0fe0d001fa4ac03` | first exact-tree final verifier live database | removed; cleanup used a force-capable drop command, prompting the compliant rerun below |
+| `ojcc_demo_51e72efb113b41d8ac93416df83ac076` | compliant final verifier API database | zero sessions verified; dropped normally |
+| `ojcc_demo_0d2d7e0be412461ab955c5c7a0ff94c2` | compliant final verifier live database | zero sessions verified; dropped normally |
