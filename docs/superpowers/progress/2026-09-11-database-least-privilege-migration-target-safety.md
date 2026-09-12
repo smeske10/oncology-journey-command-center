@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Approved on 2026-09-11; Tasks 1–4 complete; Task 5 next.**
+Status: **Original Tasks 1–6 complete; pre-PR corrective design revised on 2026-09-12; corrective implementation pending.**
 
 ## Milestone boundary
 
@@ -352,8 +352,28 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Stop for integration review. Do not merge, push, deploy, remove the worktree, or begin the
-deferred milestone without a new user decision.
+Prepare the task-by-task implementation pass from the revised
+[Database Privilege Closure Design](../specs/2026-09-12-database-privilege-closure-design.md),
+then implement and verify its corrective scope on this branch. Do not repeat completed original
+tasks or treat their passing results as verification of the new behavior. Push and PR remain after
+the corrective verification gates and independent review; merge, deployment, worktree removal,
+and deferred milestones remain out of scope.
+
+### Pre-PR corrective design — implementation pending
+
+- Two gap closures: reject every unexpected outgoing role membership and include sequences and
+  foreign tables in the application catalog boundary.
+- Two new capabilities: fail-closed runtime attestation at startup and execution-time preflight
+  for offline SQL. Runtime attestation is a startup snapshot; `/health` remains liveness only.
+- Fresh offline execution is an owner/bootstrap/owner three-stage bundle, with ownership transfer
+  inside the bootstrap transaction. Atomicity is per stage, not across the whole bundle. Raw fresh
+  Alembic SQL is inspection-only; the supported bundle must be executed in tests.
+- Supporting work: freeze the v0007 contract and share one provisioning script between local
+  instructions and CI. Keep independent security-test expectations.
+- Require real sequence/foreign-table refusal tests without conditional skips, startup-process
+  tests, and version/ACL preservation assertions. Cluster-wide role fixtures require isolation.
+- This document revision changes no application code or database state. All Task 6 evidence below
+  predates these corrective requirements; the new tests and final gate have not yet been run.
 
 ## Task 6 — complete
 

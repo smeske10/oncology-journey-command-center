@@ -10,6 +10,15 @@
 
 **Spec:** `docs/product-design.md` §§7.3, 8.2, 8.5, 8.10–8.12, 9.3, 11.1, 11.5, and 14; the delivered closed-loop contract in `docs/superpowers/plans/2026-09-08-navigator-closed-loop-implementation.md`; and the fixed milestone constraints in this plan.
 
+**2026-09-12 handoff:** Tasks 1–6 below are the completed original implementation; retain their
+details as historical context. Pre-PR review identified corrective work that is not implemented
+yet. The [Database Privilege Closure Design](../specs/2026-09-12-database-privilege-closure-design.md)
+governs the next implementation pass, including exact membership/catalog closure, runtime startup
+attestation, executable offline replay, and versioned shared metadata. Where it refines this plan's
+offline or validation behavior, follow the closure design. Existing safety constraints and immutable
+migration baselines remain in force. Prior passing tests are not evidence that these new acceptance
+criteria pass.
+
 ## Global Constraints
 
 - The approved base is merge commit `47aa43c5cc7a307140e5317240f20d58dbb8b6f5` (PR #6) on `feature/database-least-privilege` in `.worktrees/database-least-privilege`.
