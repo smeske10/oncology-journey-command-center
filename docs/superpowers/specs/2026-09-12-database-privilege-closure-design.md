@@ -1,7 +1,7 @@
 # Database Privilege Closure Design
 
 **Date:** 2026-09-12
-**Status:** Implemented and verified; independent review required before push
+**Status:** Implemented, independently reviewed, and verified; ready for pull request
 **Branch:** `feature/database-least-privilege`
 
 ## Purpose
@@ -139,6 +139,14 @@ name or use of a foreign-data wrapper. Installing `postgres_fdw` and creating a 
 using it are separate steps. Extension-owned supporting objects remain outside the application
 object allowlist; they must not provide unreviewed effective API access in the scoped schema.
 
+The required `btree_gist` extension is pinned at version 1.7. PostgreSQL installations may leave
+its bootstrap-owned functions with the extension's default PUBLIC EXECUTE privilege. Runtime
+attestation accepts only that exact versioned PUBLIC EXECUTE compatibility surface; direct API or
+group grants, grant options, other extension versions, and every other effective extension
+relation, column, sequence, or function privilege are rejected. Migration 0007 revokes PUBLIC,
+group, and direct API extension-object privileges when the migration role owns those objects, but
+does not claim it can rewrite bootstrap-owned extension ACLs.
+
 Require executing tests for an API-granted sequence and an API-granted foreign table in the
 supported `postgres:16-alpine` environment used by Compose and CI. Verify `postgres_fdw`
 availability as a test-environment prerequisite. Install it only in a recorded disposable database
@@ -211,6 +219,10 @@ Development follows red-green cycles for these observable assertions:
    properties, valid existing roles remain valid, and drifted existing roles are rejected. CI and
    README use that script. Independent security expectations detect an erroneous contract edit;
    the v0007 freeze check prevents future runtime changes from changing historical replay.
+7. Independent read-only review findings are closed with RED/GREEN evidence for extension-object
+   privilege coverage, SQLAlchemy traceback-context sanitization, standalone offline target-name
+   validation, and exact-one-row replay revision validation. A second read-only review must find
+   no remaining actionable issue before push.
 
 Role grants are cluster-wide even when their test databases are disposable. Use an isolated test
 PostgreSQL service, isolated fixture role names, and a serialized fixture where the fixed

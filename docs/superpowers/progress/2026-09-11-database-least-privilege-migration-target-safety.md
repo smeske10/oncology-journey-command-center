@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Tasks 1–6 complete; integration decision next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–7 complete; independently reviewed and ready for pull request.**
 
 ## Milestone boundary
 
@@ -539,3 +539,43 @@ scope until the user selects them explicitly.
 | `ojcc_demo_15e595fd696a41cfa0fe0d001fa4ac03` | first exact-tree final verifier live database | removed; cleanup used a force-capable drop command, prompting the compliant rerun below |
 | `ojcc_demo_51e72efb113b41d8ac93416df83ac076` | compliant final verifier API database | zero sessions verified; dropped normally |
 | `ojcc_demo_0d2d7e0be412461ab955c5c7a0ff94c2` | compliant final verifier live database | zero sessions verified; dropped normally |
+
+## Corrective Task 7 — complete
+
+- The required independent read-only review found four Important gaps: effective privileges on
+  extension-owned objects were not attested; sanitized SQLAlchemy failures retained their original
+  exception in formatted traceback context; standalone offline 0007 SQL did not bind execution to
+  its configured database; and replay stages accepted an existing but empty `alembic_version`
+  table. The review performed no database mutation.
+- Each finding was reproduced before implementation. The formatted-traceback sentinel, empty
+  revision table, wrong offline target, and extension relation/column/sequence/function privilege
+  tests all failed against the prior tree and passed after the bounded corrections.
+- Runtime attestation now covers extension-owned relations of all six scoped kinds, columns,
+  sequences, functions, effective privileges, direct/group ACLs, and grant options. The only
+  compatibility exception is PUBLIC EXECUTE on required `btree_gist` version 1.7; direct or group
+  execution, grant options, other versions, and other effective extension access fail closed.
+  Migration 0007 opportunistically revokes extension ACLs only when the migration role owns the
+  object, avoiding false claims about bootstrap-owned extension functions.
+- SQLAlchemy query failures now raise the stable sanitized boundary error with suppressed exception
+  context. Standalone offline SQL validates `current_database()` before mutation. Non-base replay
+  stages require exactly one row containing the expected starting revision.
+- The complete affected security collection passed 78 tests in 183.42 seconds. The additional
+  unapproved-PUBLIC-extension and expanded frozen-contract checks passed 3 tests in 5.72 seconds.
+  Ruff passed, Pyright reported zero errors and warnings, `git diff --check` passed, and migrations
+  0001–0006 retained their recorded SHA-256 hashes. The corrections were committed as `059231e`.
+- The same independent reviewer re-reviewed `6a2f5b8..059231e` and reported no remaining actionable
+  findings. The reviewer confirmed all four gaps were closed and performed only read-only
+  compatibility probes.
+- The final exact-tree `scripts/verify.ps1` gate passed Ruff; Pyright with zero errors; clean API
+  integrity; 560 API tests in 392.13 seconds; ESLint; 34 Vitest tests; the production Next.js build;
+  3 mocked Playwright journeys; and real desktop and mobile browser-to-PostgreSQL journeys. Every
+  pre/post live integrity audit reported zero violations.
+- Persistent `ojcc` was not inspected, reset, or dropped. No database session was terminated and
+  no force-capable drop was used in this final gate.
+
+### Independent-review final-gate database record
+
+| Database | Purpose | Disposition |
+|---|---|---|
+| `ojcc_demo_b8ea4f7f35c94bca91fb46e31fe38d63` | final exact-tree API/reset/full pytest gate | owner and zero sessions reverified; dropped normally |
+| `ojcc_demo_1d6fa3cf5b884aa1a8147ed077cff46d` | final exact-tree live desktop/mobile browser gate | owner and zero sessions reverified; dropped normally |

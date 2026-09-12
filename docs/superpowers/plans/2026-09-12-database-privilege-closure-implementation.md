@@ -141,3 +141,28 @@
 - [x] Review the final diff line-by-line against every design verification item; record exact test counts, disposable database cleanup, and any intentional limits.
 - [x] Mark the design implemented and commit the final documentation/evidence update.
 - [x] Use `superpowers:finishing-a-development-branch` to present the integration choices; do not merge, deploy, or remove the worktree without the user's selection.
+
+### Task 7: Close Independent Review Findings
+
+**Files:**
+- Modify: `services/api/alembic/versions/0007_database_least_privilege.py`
+- Modify: `services/api/app/db/privilege_attestation.py`
+- Modify: `services/api/app/db/privilege_contracts/v0007.py`
+- Modify: `services/api/scripts/replay_schema.py`
+- Modify: focused unit and integration tests for each boundary
+- Modify: this plan, the design, and the progress ledger
+
+**Interfaces:**
+- Extends runtime attestation to extension-owned relations, columns, sequences, functions, and
+  grant options with one version-pinned `btree_gist` PUBLIC EXECUTE compatibility rule.
+- Suppresses underlying SQLAlchemy traceback context, binds standalone offline SQL to its target
+  database, and requires exactly one expected Alembic revision row between replay stages.
+
+- [x] Reproduce all four independent-review findings with focused failing tests.
+- [x] Implement each bounded correction and pass the focused regression tests.
+- [x] Expand the independently literal v0007 freeze test to cover functions and privilege metadata.
+- [x] Run the complete affected security collection, Ruff, Pyright, immutable migration hashes,
+  and `git diff --check`; commit the corrections as `059231e`.
+- [x] Obtain an independent read-only re-review with no remaining actionable findings.
+- [x] Run the final exact-tree repository verifier and record the complete evidence and ordinary
+  disposable-database cleanup in the progress ledger.
