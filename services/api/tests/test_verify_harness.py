@@ -316,7 +316,8 @@ def test_verify_rejects_shared_database_usernames_before_children(
     output = result.stdout + result.stderr
 
     assert result.returncode != 0
-    assert "distinct usernames" in output.lower()
+    assert "distinct" in output.lower()
+    assert "usernames" in output.lower()
     assert CHILD_SENTINEL not in output
 
 

@@ -143,16 +143,20 @@ def _run_reset(
 
 def _database_triple(target_url: str) -> tuple[str, str, str]:
     target = make_url(target_url)
+
+    def with_configured_credentials(variable_name: str) -> str:
+        configured = make_url(os.environ[variable_name])
+        return (
+            target.set(
+                username=configured.username,
+                password=configured.password,
+            ).render_as_string(hide_password=False)
+        )
+
     return (
-        target.set(username="ojcc", password="local-synthetic-only").render_as_string(
-            hide_password=False
-        ),
-        target.set(
-            username="ojcc_migrator", password="migrator-local-synthetic-only"
-        ).render_as_string(hide_password=False),
-        target.set(username="ojcc_api", password="api-local-synthetic-only").render_as_string(
-            hide_password=False
-        ),
+        with_configured_credentials("BOOTSTRAP_DATABASE_URL"),
+        with_configured_credentials("MIGRATION_DATABASE_URL"),
+        with_configured_credentials("DATABASE_URL"),
     )
 
 
