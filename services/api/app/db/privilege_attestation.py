@@ -267,6 +267,129 @@ def _attest_functions(connection: sa.Connection, *, application_role: str) -> No
             )
 
 
+def _attest_extension_privileges(
+    connection: sa.Connection, *, application_role: str
+) -> None:
+    extension_relations = connection.execute(
+        sa.text(
+            "SELECT class.oid, class.relname, class.relkind FROM pg_class class "
+            "JOIN pg_namespace namespace ON namespace.oid = class.relnamespace "
+            "WHERE namespace.nspname = 'public' "
+            "AND class.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') "
+            "AND EXISTS (SELECT 1 FROM pg_depend dependency "
+            "WHERE dependency.classid = 'pg_class'::regclass "
+            "AND dependency.objid = class.oid AND dependency.deptype = 'e')"
+        )
+    )
+    for row in extension_relations:
+        if row.relkind == "S":
+            for privilege in ("USAGE", "SELECT", "UPDATE"):
+                actual, grantable = connection.execute(
+                    sa.text(
+                        "SELECT has_sequence_privilege(:role, :oid, :privilege), "
+                        "has_sequence_privilege(:role, :oid, :grantable)"
+                    ),
+                    {
+                        "role": application_role,
+                        "oid": row.oid,
+                        "privilege": privilege,
+                        "grantable": f"{privilege} WITH GRANT OPTION",
+                    },
+                ).one()
+                if actual or grantable:
+                    _reject(
+                        "extension_privileges",
+                        f"effective extension sequence privilege is not approved for {row.relname}",
+                    )
+            continue
+
+        for privilege in v0007.TABLE_PRIVILEGES:
+            actual, grantable = connection.execute(
+                sa.text(
+                    "SELECT has_table_privilege(:role, :oid, :privilege), "
+                    "has_table_privilege(:role, :oid, :grantable)"
+                ),
+                {
+                    "role": application_role,
+                    "oid": row.oid,
+                    "privilege": privilege,
+                    "grantable": f"{privilege} WITH GRANT OPTION",
+                },
+            ).one()
+            if actual or grantable:
+                _reject(
+                    "extension_privileges",
+                    f"effective extension relation privilege is not approved for {row.relname}",
+                )
+        columns = connection.execute(
+            sa.text(
+                "SELECT attnum FROM pg_attribute WHERE attrelid = :oid "
+                "AND attnum > 0 AND NOT attisdropped"
+            ),
+            {"oid": row.oid},
+        )
+        for column in columns:
+            for privilege in v0007.COLUMN_PRIVILEGES:
+                actual, grantable = connection.execute(
+                    sa.text(
+                        "SELECT has_column_privilege(:role, :oid, :attnum, :privilege), "
+                        "has_column_privilege(:role, :oid, :attnum, :grantable)"
+                    ),
+                    {
+                        "role": application_role,
+                        "oid": row.oid,
+                        "attnum": column.attnum,
+                        "privilege": privilege,
+                        "grantable": f"{privilege} WITH GRANT OPTION",
+                    },
+                ).one()
+                if actual or grantable:
+                    _reject(
+                        "extension_privileges",
+                        f"effective extension column privilege is not approved for {row.relname}",
+                    )
+
+    extension_functions = connection.execute(
+        sa.text(
+            "SELECT proc.oid, proc.proname, extension.extname, extension.extversion "
+            "FROM pg_proc proc "
+            "JOIN pg_namespace namespace ON namespace.oid = proc.pronamespace "
+            "JOIN pg_depend dependency ON dependency.classid = 'pg_proc'::regclass "
+            "AND dependency.objid = proc.oid AND dependency.deptype = 'e' "
+            "JOIN pg_extension extension ON extension.oid = dependency.refobjid "
+            "WHERE namespace.nspname = 'public' "
+        )
+    )
+    for row in extension_functions:
+        execute, grantable, public_execute, direct_execute = connection.execute(
+            sa.text(
+                "SELECT has_function_privilege(:role, :oid, 'EXECUTE'), "
+                "has_function_privilege(:role, :oid, 'EXECUTE WITH GRANT OPTION'), "
+                "has_function_privilege('public', :oid, 'EXECUTE'), "
+                "EXISTS (SELECT 1 FROM aclexplode(coalesce("
+                "(SELECT proacl FROM pg_proc WHERE oid = :oid), "
+                "acldefault('f', (SELECT proowner FROM pg_proc WHERE oid = :oid)))) acl "
+                "JOIN pg_roles grantee ON grantee.oid = acl.grantee "
+                "WHERE grantee.rolname IN (:role, :group) "
+                "AND acl.privilege_type = 'EXECUTE')"
+            ),
+            {
+                "role": application_role,
+                "group": v0007.APPLICATION_GROUP,
+                "oid": row.oid,
+            },
+        ).one()
+        approved_public = (
+            row.extname,
+            row.extversion,
+        ) in v0007.APPROVED_PUBLIC_EXECUTE_EXTENSIONS and bool(public_execute)
+        if grantable or direct_execute or (execute and not approved_public):
+            _reject(
+                "extension_privileges",
+                f"effective extension function privilege is not approved for {row.proname}",
+            )
+
+
 def attest_runtime_database(
     connection: sa.Connection, *, target: DatabaseTarget
 ) -> None:
@@ -278,7 +401,11 @@ def attest_runtime_database(
         _attest_catalog(connection)
         _attest_scoped_privileges(connection, application_role=target.username)
         _attest_functions(connection, application_role=target.username)
+        _attest_extension_privileges(connection, application_role=target.username)
     except RuntimePrivilegeBoundaryError:
         raise
     except SQLAlchemyError:
-        _reject("unavailable", "database attestation could not be completed")
+        raise RuntimePrivilegeBoundaryError(
+            "runtime_database_boundary.unavailable",
+            "database attestation could not be completed",
+        ) from None

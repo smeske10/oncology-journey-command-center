@@ -6,6 +6,7 @@ def test_v0007_contract_keeps_the_independently_reviewed_object_surface() -> Non
     assert v0007.REVISION == "0007_database_least_privilege"
     assert v0007.APPLICATION_GROUP == "ojcc_app"
     assert v0007.APPLICATION_RELKINDS == ("r", "p", "v", "m", "S", "f")
+    assert v0007.APPROVED_PUBLIC_EXECUTE_EXTENSIONS == (("btree_gist", "1.7"),)
     assert set(v0007.SELECT_ONLY_RELATIONS) == {
         "agent_run",
         "agent_run_citation",
@@ -48,6 +49,60 @@ def test_v0007_contract_keeps_the_independently_reviewed_object_surface() -> Non
         "effective_proposed_change_state",
         "effective_safety_signal_state",
     }
+    assert set(v0007.SECURITY_DEFINER_FUNCTIONS) == {
+        "append_workflow_transition_event",
+        "apply_final_approval_decision",
+        "apply_navigation_resource_approval",
+        "close_reported_need_from_outcome",
+        "guard_approval_decision",
+        "guard_bound_navigation_task_delete",
+        "guard_follow_up_request_insert",
+        "guard_follow_up_response_insert",
+        "guard_navigation_task_lifecycle",
+        "guard_navigation_task_resource_proposal",
+        "guard_patient_identity_link_response_history",
+        "guard_proposed_change_revision",
+        "guard_safety_signal_resolution",
+        "record_navigation_task_transition",
+    }
+    assert set(v0007.SECURITY_INVOKER_FUNCTIONS) == {
+        "guard_agent_run_citation",
+        "guard_agent_run_citation_immutable",
+        "guard_agent_run_created_at",
+        "guard_knowledge_approval_history",
+        "guard_knowledge_document_immutable",
+        "guard_manual_review_task",
+        "guard_navigation_task_resource",
+        "guard_reported_need_identity_update",
+        "guard_reported_need_reopening",
+        "guard_role_assignment_approval_history",
+        "guard_role_assignment_knowledge_history",
+        "guard_safety_signal_lifecycle",
+        "guard_workflow_run_lineage",
+        "reject_append_only_mutation",
+        "reject_approval_policy_mutation",
+        "reject_proposed_value_schema_mutation",
+        "reject_signal_rule_mutation",
+        "safety_severity_rank",
+    }
+    assert {
+        identity for identity in v0007.FUNCTION_IDENTITIES if identity[1]
+    } == {("safety_severity_rank", "value safety_severity")}
+    assert all(
+        arguments == ""
+        for name, arguments in v0007.FUNCTION_IDENTITIES
+        if name != "safety_severity_rank"
+    )
+    assert v0007.TABLE_PRIVILEGES == (
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+    )
+    assert v0007.COLUMN_PRIVILEGES == ("SELECT", "INSERT", "UPDATE", "REFERENCES")
 
 
 def test_application_relation_scan_binds_every_supported_relkind() -> None:

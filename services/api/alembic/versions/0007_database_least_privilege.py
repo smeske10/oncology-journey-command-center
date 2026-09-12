@@ -54,10 +54,13 @@ def _offline_expected_functions() -> str:
     return ",\n                ".join(values)
 
 
-def _emit_offline_preflight(*, migration_role: str, application_role: str) -> None:
+def _emit_offline_preflight(
+    *, migration_role: str, application_role: str, target_database: str
+) -> None:
     migration_literal = _sql_literal(migration_role)
     application_literal = _sql_literal(application_role)
     group_literal = _sql_literal(APPLICATION_GROUP)
+    database_literal = _sql_literal(target_database)
     expected_relations = _offline_expected_relations()
     expected_functions = _offline_expected_functions()
     op.execute(
@@ -68,9 +71,14 @@ def _emit_offline_preflight(*, migration_role: str, application_role: str) -> No
             migration_role constant text := {migration_literal};
             application_role constant text := {application_literal};
             application_group constant text := {group_literal};
+            target_database constant text := {database_literal};
             drift_name text;
             drift_kind text;
         BEGIN
+            IF current_database() <> target_database THEN
+                RAISE EXCEPTION 'database privilege preflight target database mismatch';
+            END IF;
+
             IF migration_role = application_role
                OR migration_role = application_group
                OR application_role = application_group THEN
@@ -475,6 +483,67 @@ def _revoke_dynamic_application_privileges() -> None:
     )
 
 
+def _configure_extension_privileges() -> None:
+    op.execute(
+        """
+        DO $ojcc$
+        DECLARE
+            application_role text := current_setting('ojcc.application_role');
+            relation_record record;
+            function_oid oid;
+        BEGIN
+            FOR relation_record IN
+                SELECT class.relname, class.relkind FROM pg_class class
+                JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+                WHERE namespace.nspname = 'public'
+                  AND class.relowner = current_user::regrole
+                  AND class.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+                  AND EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_class'::regclass
+                        AND dependency.objid = class.oid
+                        AND dependency.deptype = 'e'
+                  )
+            LOOP
+                IF relation_record.relkind = 'S' THEN
+                    EXECUTE format(
+                        'REVOKE ALL PRIVILEGES ON SEQUENCE public.%I '
+                        'FROM PUBLIC, ojcc_app, %I',
+                        relation_record.relname, application_role
+                    );
+                ELSE
+                    EXECUTE format(
+                        'REVOKE ALL PRIVILEGES ON TABLE public.%I '
+                        'FROM PUBLIC, ojcc_app, %I',
+                        relation_record.relname, application_role
+                    );
+                END IF;
+            END LOOP;
+
+            FOR function_oid IN
+                SELECT proc.oid FROM pg_proc proc
+                JOIN pg_namespace namespace ON namespace.oid = proc.pronamespace
+                WHERE namespace.nspname = 'public'
+                  AND proc.proowner = current_user::regrole
+                  AND EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_proc'::regclass
+                        AND dependency.objid = proc.oid
+                        AND dependency.deptype = 'e'
+                  )
+            LOOP
+                EXECUTE format(
+                    'REVOKE ALL PRIVILEGES ON FUNCTION %s '
+                    'FROM PUBLIC, ojcc_app, %I',
+                    function_oid::regprocedure, application_role
+                );
+            END LOOP;
+        END
+        $ojcc$
+        """
+    )
+
+
 def _configure_database_and_schema() -> None:
     op.execute(
         """
@@ -551,6 +620,7 @@ def upgrade() -> None:
         _emit_offline_preflight(
             migration_role=migration_target.username,
             application_role=application_target.username,
+            target_database=migration_target.database,
         )
         op.execute(
             "SELECT set_config('ojcc.application_role', "
@@ -572,6 +642,7 @@ def upgrade() -> None:
 
     _revoke_dynamic_application_privileges()
     _configure_database_and_schema()
+    _configure_extension_privileges()
     _configure_relations()
     _configure_functions()
 

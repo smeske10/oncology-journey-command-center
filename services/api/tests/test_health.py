@@ -2,9 +2,14 @@ import asyncio
 import os
 import subprocess
 import sys
+import traceback
 
 import httpx
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.db.privilege_attestation import attest_runtime_database
+from app.db.targets import parse_database_target
 from app.main import app
 
 
@@ -55,3 +60,22 @@ def test_application_import_and_openapi_export_do_not_connect() -> None:
     assert result.returncode == 0, result.stderr
     assert "Oncology Journey Command Center API" in result.stdout
     assert "import-secret-sentinel" not in f"{result.stdout}\n{result.stderr}"
+
+
+def test_runtime_attestation_suppresses_driver_exception_context() -> None:
+    sentinel = "query-driver-secret-sentinel"
+
+    class FailingConnection:
+        def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise SQLAlchemyError(sentinel)
+
+    target = parse_database_target(
+        "postgresql://runtime:synthetic@localhost/ojcc_test",
+        label="DATABASE_URL",
+    )
+    with pytest.raises(RuntimeError) as caught:
+        attest_runtime_database(FailingConnection(), target=target)  # type: ignore[arg-type]
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert "runtime_database_boundary.unavailable" in rendered
+    assert sentinel not in rendered

@@ -160,6 +160,101 @@ def test_direct_runtime_grant_fails_attestation(
     assert "postgresql" not in output.casefold()
 
 
+@pytest.mark.parametrize(
+    ("object_kind", "create_sql", "add_sql", "grant_sql"),
+    [
+        (
+            "relation",
+            "CREATE TABLE public.review_extension_relation (id integer)",
+            "ALTER EXTENSION postgres_fdw ADD TABLE public.review_extension_relation",
+            "GRANT SELECT ON TABLE public.review_extension_relation TO ojcc_api",
+        ),
+        (
+            "column",
+            "CREATE TABLE public.review_extension_column (id integer)",
+            "ALTER EXTENSION postgres_fdw ADD TABLE public.review_extension_column",
+            "GRANT UPDATE (id) ON TABLE public.review_extension_column TO ojcc_api",
+        ),
+        (
+            "sequence",
+            "CREATE SEQUENCE public.review_extension_sequence",
+            "ALTER EXTENSION postgres_fdw ADD SEQUENCE public.review_extension_sequence",
+            "GRANT USAGE ON SEQUENCE public.review_extension_sequence TO ojcc_api",
+        ),
+        (
+            "function",
+            None,
+            None,
+            "GRANT EXECUTE ON FUNCTION public.postgres_fdw_handler() TO ojcc_api",
+        ),
+    ],
+)
+def test_extension_owned_runtime_privilege_fails_attestation(
+    runtime_database: DisposableDatabase,
+    object_kind: str,
+    create_sql: str | None,
+    add_sql: str | None,
+    grant_sql: str,
+) -> None:
+    bootstrap_dsn = make_url(bootstrap_database_url(runtime_database)).set(
+        drivername="postgresql"
+    ).render_as_string(hide_password=False)
+    with psycopg.connect(bootstrap_dsn, autocommit=True) as connection:
+        connection.execute("CREATE EXTENSION postgres_fdw WITH SCHEMA public")
+        connection.execute(
+            "REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public "
+            "FROM PUBLIC, ojcc_api"
+        )
+        if create_sql is not None and add_sql is not None:
+            connection.execute(create_sql)
+            connection.execute(add_sql)
+        connection.execute(grant_sql)
+
+    target = parse_database_target(
+        runtime_database.application_url, label="DATABASE_URL"
+    )
+    engine = create_engine(runtime_database.application_url)
+    try:
+        with engine.connect() as connection:
+            with pytest.raises(
+                RuntimePrivilegeBoundaryError,
+                match=(
+                    "runtime_database_boundary.extension_privileges: "
+                    f"effective extension {object_kind} privilege"
+                ),
+            ):
+                attest_runtime_database(connection, target=target)
+    finally:
+        engine.dispose()
+
+
+def test_public_execute_on_unapproved_extension_fails_attestation(
+    runtime_database: DisposableDatabase,
+) -> None:
+    bootstrap_dsn = make_url(bootstrap_database_url(runtime_database)).set(
+        drivername="postgresql"
+    ).render_as_string(hide_password=False)
+    with psycopg.connect(bootstrap_dsn, autocommit=True) as connection:
+        connection.execute("CREATE EXTENSION postgres_fdw WITH SCHEMA public")
+
+    target = parse_database_target(
+        runtime_database.application_url, label="DATABASE_URL"
+    )
+    engine = create_engine(runtime_database.application_url)
+    try:
+        with engine.connect() as connection:
+            with pytest.raises(
+                RuntimePrivilegeBoundaryError,
+                match=(
+                    "runtime_database_boundary.extension_privileges: "
+                    "effective extension function privilege"
+                ),
+            ):
+                attest_runtime_database(connection, target=target)
+    finally:
+        engine.dispose()
+
+
 def test_extra_runtime_membership_fails_attestation(
     runtime_database: DisposableDatabase,
 ) -> None:

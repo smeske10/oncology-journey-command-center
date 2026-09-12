@@ -4,6 +4,7 @@ REVISION = "0007_database_least_privilege"
 PREVIOUS_REVISION = "0006_navigator_closed_loop"
 APPLICATION_GROUP = "ojcc_app"
 APPLICATION_RELKINDS = ("r", "p", "v", "m", "S", "f")
+APPROVED_PUBLIC_EXECUTE_EXTENSIONS = (("btree_gist", "1.7"),)
 
 SELECT_ONLY_RELATIONS = (
     "agent_run",

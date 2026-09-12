@@ -243,3 +243,35 @@ def test_offline_replay_base_requires_empty_application_schema(
             assert connection.execute(
                 "SELECT to_regclass('public.alembic_version')"
             ).fetchone() == (None,)
+
+
+def test_offline_replay_rejects_an_empty_existing_revision_table(
+    tmp_path: Path,
+) -> None:
+    with disposable_database(prefix="ojcc_task7_") as database:
+        bootstrap_url = bootstrap_database_url(database)
+        output_directory = tmp_path / "empty-revision-bundle"
+        render_offline_bundle(
+            bootstrap_database_url=bootstrap_url,
+            migration_database_url=database.migration_url,
+            database_url=database.application_url,
+            revision="head",
+            output_directory=output_directory,
+        )
+        _execute_artifact(database.migration_url, output_directory / "01-owner.sql")
+        with psycopg.connect(_psycopg_url(bootstrap_url), autocommit=True) as connection:
+            connection.execute("DELETE FROM public.alembic_version")
+
+        with pytest.raises(
+            psycopg.errors.RaiseException,
+            match="requires revision 0004_safety_approval_lifecycle",
+        ):
+            _execute_artifact(bootstrap_url, output_directory / "02-bootstrap.sql")
+
+        with psycopg.connect(_psycopg_url(database.migration_url)) as connection:
+            assert connection.execute(
+                "SELECT count(*) FROM public.alembic_version"
+            ).fetchone() == (0,)
+            assert connection.execute(
+                "SELECT to_regclass('public.agent_run_citation')"
+            ).fetchone() == (None,)

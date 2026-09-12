@@ -1269,6 +1269,39 @@ def test_offline_0007_artifact_executes_from_revision_0006() -> None:
         assert version == ("0007_database_least_privilege",)
 
 
+def test_offline_0007_artifact_rejects_a_different_database_target() -> None:
+    with (
+        _provision_privilege_database(
+            revision="0006_navigator_closed_loop"
+        ) as rendered_for,
+        _provision_privilege_database(
+            revision="0006_navigator_closed_loop"
+        ) as executed_against,
+    ):
+        artifact = _offline_0007_artifact(rendered_for)
+        before = _acl_snapshot(executed_against)
+
+        with pytest.raises(
+            psycopg.errors.RaiseException,
+            match="target database mismatch",
+        ):
+            with psycopg.connect(
+                _psycopg_url(make_url(executed_against.migration_url)),
+                autocommit=True,
+            ) as connection:
+                connection.execute(artifact)
+
+        assert _acl_snapshot(executed_against) == before
+        engine = create_engine(executed_against.migration_url)
+        try:
+            with engine.connect() as connection:
+                assert connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                ) == "0006_navigator_closed_loop"
+        finally:
+            engine.dispose()
+
+
 @pytest.mark.parametrize("object_kind", ["sequence", "foreign table"])
 def test_offline_0007_artifact_rolls_back_catalog_drift(object_kind: str) -> None:
     with _provision_privilege_database(

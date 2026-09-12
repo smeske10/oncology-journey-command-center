@@ -172,8 +172,9 @@ def _stage_preflight(
         if start_revision == "base"
         else (
             "IF to_regclass('public.alembic_version') IS NULL OR "
-            "(SELECT version_num FROM public.alembic_version) <> "
-            f"{_sql_literal(start_revision)} THEN\n"
+            "(SELECT count(*) FROM public.alembic_version) <> 1 OR "
+            "NOT EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num = "
+            f"{_sql_literal(start_revision)}) THEN\n"
             f"        RAISE EXCEPTION 'offline replay stage requires revision {start_revision}';\n"
             "    END IF;"
         )
