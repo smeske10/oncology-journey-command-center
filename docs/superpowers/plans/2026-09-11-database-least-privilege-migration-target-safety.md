@@ -426,7 +426,7 @@ Commit: `test: isolate owner and runtime database credentials`
 - `verify.ps1 -LiveBootstrapDatabaseUrl <bootstrap> -LiveMigrationDatabaseUrl <owner> -LiveDatabaseUrl <api> -LiveConfirmDatabaseName <name>`; the API triple comes from the three process environment variables.
 - `verify_live_journey.ps1` accepts the same four live arguments.
 
-- [ ] **Step 1: Write failing reset/seed propagation tests**
+- [x] **Step 1: Write failing reset/seed propagation tests**
 
 Extend `test_demo_seed.py` and `test_verify_harness.py` to prove every entry point rejects before connection when a required URL is missing, any usernames are equal, targets differ, confirmation differs, target is persistent/remote/query-bearing, or a dirty inherited owner/bootstrap URL names another database. The fake child executables must print only target field names/current usernames, never URLs.
 
@@ -434,13 +434,13 @@ Assert reset snapshots/restores all three URL variables and all case-insensitive
 
 Expected RED: current scripts accept one URL and do not isolate `MIGRATION_DATABASE_URL`.
 
-- [ ] **Step 2: Make reset and seed explicit**
+- [x] **Step 2: Make reset and seed explicit**
 
 `reset_demo.ps1` validates all three URLs and confirmation before the drop-schema engine. It drops/recreates `public`, calls `replay_schema.py`, and seeds through `MIGRATION_DATABASE_URL`; seed receives the owner/application pair but connects only with the owner URL. `replay_schema.py` runs 0001–0004 as owner, 0005 as bootstrap, reassigns the exact allowlist of application tables, functions, and enums created by 0005 in the target to the owner, strips bootstrap, and runs 0006 through the requested revision as owner. Finish by running read-only integrity once through the owner during seed and once through `DATABASE_URL` to prove the API role can inspect the complete schema.
 
 Before each child, set only the credentials that child needs from the validated exact triple. Restore all three URLs and all `PG*` variables in `finally`. No fallback to settings or inherited values; FastAPI and Next never receive the bootstrap URL.
 
-- [ ] **Step 3: Make the verifier and live journey explicit**
+- [x] **Step 3: Make the verifier and live journey explicit**
 
 `verify.ps1` validates the API environment pair and the live argument pair before installation/import/connection. It rejects shared API/live database names. Pass both live URLs to the live wrapper.
 
@@ -448,7 +448,7 @@ For each desktop/mobile iteration, `verify_live_journey.ps1` checks ports and da
 
 Keep `assertDatabaseJourney()` on the API URL and add `SELECT current_user` to its output; assert it equals the decoded runtime username and differs from the owner username supplied only to the wrapper.
 
-- [ ] **Step 4: Provision distinct CI roles and UUID databases without changing caches**
+- [x] **Step 4: Provision distinct CI roles and UUID databases without changing caches**
 
 Keep `actions/setup-node` npm caching, `actions/setup-python` pip caching, and the Next.js build-cache step byte-for-byte unless formatting requires movement. Replace static 16-hex names with two `uuid4().hex` names exported through `GITHUB_ENV`.
 
@@ -462,7 +462,7 @@ Use the PostgreSQL service bootstrap login only in provisioning and the bounded 
 
 The step refuses same-named pre-existing roles with different properties and existing database names. CI then builds bootstrap/owner/application triples for API and live targets, uses the bootstrap credential only inside the 0005 replay bridge, strips it, and runs the verifier with owner/application pairs. Synthetic CI passwords remain CI-local examples; no production credential assumption or migration password is embedded.
 
-- [ ] **Step 5: Run harness tests and cached verification dry path**
+- [x] **Step 5: Run harness tests and cached verification dry path**
 
 Run:
 
@@ -472,7 +472,7 @@ python -m pytest services/api/tests/test_database_targets.py services/api/tests/
 
 Expected GREEN: all failure paths are pre-connection and environment restoration is exact. Inspect `.github/workflows/ci.yml` to confirm the three cache blocks remain.
 
-- [ ] **Step 6: Review, record, and commit**
+- [x] **Step 6: Review, record, and commit**
 
 Run PowerShell parser checks on all three scripts, Ruff on seed/tests, web lint for the Playwright files, immutable hashes, and `git diff --check`.
 

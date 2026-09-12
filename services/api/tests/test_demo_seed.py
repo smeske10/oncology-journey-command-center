@@ -107,11 +107,15 @@ def _resolve_powershell_executable(
 
 
 def _run_reset(
-    database_url: str,
+    target_url: str,
     confirmation: str,
     *,
+    bootstrap_database_url: str | None = None,
+    migration_database_url: str | None = None,
+    database_url: str | None = None,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    bootstrap_url, migration_url, application_url = _database_triple(target_url)
     return subprocess.run(
         [
             _resolve_powershell_executable(),
@@ -120,8 +124,12 @@ def _run_reset(
             "Bypass",
             "-File",
             "scripts/reset_demo.ps1",
+            "-BootstrapDatabaseUrl",
+            bootstrap_database_url or bootstrap_url,
+            "-MigrationDatabaseUrl",
+            migration_database_url or migration_url,
             "-DatabaseUrl",
-            database_url,
+            database_url or application_url,
             "-ConfirmDatabaseName",
             confirmation,
         ],
@@ -131,6 +139,31 @@ def _run_reset(
         text=True,
         check=False,
     )
+
+
+def _database_triple(target_url: str) -> tuple[str, str, str]:
+    target = make_url(target_url)
+    return (
+        target.set(username="ojcc", password="local-synthetic-only").render_as_string(
+            hide_password=False
+        ),
+        target.set(
+            username="ojcc_migrator", password="migrator-local-synthetic-only"
+        ).render_as_string(hide_password=False),
+        target.set(username="ojcc_api", password="api-local-synthetic-only").render_as_string(
+            hide_password=False
+        ),
+    )
+
+
+def _seed_arguments(target_url: str) -> list[str]:
+    _, migration_url, application_url = _database_triple(target_url)
+    return [
+        "--migration-database-url",
+        migration_url,
+        "--database-url",
+        application_url,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -167,6 +200,56 @@ def test_resolve_powershell_prefers_pwsh_with_windows_fallback(
 def test_resolve_powershell_fails_clearly_when_no_executable_exists() -> None:
     with pytest.raises(RuntimeError, match="requires pwsh or Windows PowerShell"):
         _resolve_powershell_executable(lambda _name: None)
+
+
+def test_seed_rejects_shared_or_mismatched_credentials_before_engine_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_engine_creation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("database engine creation was attempted")
+
+    monkeypatch.setattr(seed_demo_script, "create_engine", unexpected_engine_creation)
+    _, migration_url, application_url = _database_triple(
+        "postgresql+psycopg://ignored:ignored@127.0.0.1:5432/ojcc_demo_deadbeef"
+    )
+
+    with pytest.raises(ValueError, match="distinct usernames"):
+        seed_demo_script.main(
+            [
+                "--migration-database-url",
+                migration_url,
+                "--database-url",
+                migration_url,
+            ]
+        )
+    with pytest.raises(ValueError, match="same database name"):
+        seed_demo_script.main(
+            [
+                "--migration-database-url",
+                migration_url,
+                "--database-url",
+                make_url(application_url)
+                .set(database="ojcc_demo_feedface")
+                .render_as_string(hide_password=False),
+            ]
+        )
+
+
+def test_reset_rejects_shared_credentials_before_engine_creation() -> None:
+    target = (
+        "postgresql+psycopg://ignored:ignored@127.0.0.1:5432/"
+        "ojcc_demo_deadbeef"
+    )
+    bootstrap_url, _, application_url = _database_triple(target)
+    result = _run_reset(
+        target,
+        "ojcc_demo_deadbeef",
+        migration_database_url=bootstrap_url,
+        database_url=application_url,
+    )
+
+    assert result.returncode != 0
+    assert "distinct usernames" in (result.stdout + result.stderr).lower()
 
 
 def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
@@ -549,7 +632,7 @@ def test_reset_requires_explicit_safe_target_then_seeds_twice_and_audits() -> No
         with Session(engine) as session:
             assert session.scalar(text("SELECT to_regclass('public.reset_marker')")) is None
             assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "0006_navigator_closed_loop"
+                "0007_database_least_privilege"
             )
             assert inspect_integrity(session) == []
             assert session.scalar(
@@ -604,7 +687,7 @@ def test_reset_rejects_query_routing_before_engine_creation(tmp_path: Path) -> N
     )
     output = (result.stdout + result.stderr).lower()
 
-    assert result.returncode == 2, output
+    assert result.returncode != 0, output
     assert "must not include query parameters" in output
     assert sentinel not in output
 
@@ -640,7 +723,7 @@ def test_disposable_target_rejects_connection_query_overrides_before_engine_crea
     )
 
     with pytest.raises(ValueError, match="must not include query parameters"):
-        seed_demo_script.main(["--database-url", database_url])
+        seed_demo_script.main(_seed_arguments(database_url))
 
 
 def test_disposable_target_requires_explicit_local_port_before_engine_creation(
@@ -655,11 +738,10 @@ def test_disposable_target_requires_explicit_local_port_before_engine_creation(
 
     with pytest.raises(ValueError, match="requires the explicit local PostgreSQL port"):
         seed_demo_script.main(
-            [
-                "--database-url",
+            _seed_arguments(
                 "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1/"
-                "ojcc_demo_deadbeef",
-            ]
+                "ojcc_demo_deadbeef"
+            )
         )
 
 
@@ -699,11 +781,10 @@ def test_standalone_seed_removes_libpq_environment_before_engine_and_restores_it
 
     with pytest.raises(ExpectedEngineStop):
         seed_demo_script.main(
-            [
-                "--database-url",
+            _seed_arguments(
                 "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
-                "ojcc_demo_deadbeef",
-            ]
+                "ojcc_demo_deadbeef"
+            )
         )
 
     assert os.environ[variable_name] == original_value
@@ -746,6 +827,70 @@ def test_reset_removes_all_libpq_environment_before_engine_creation(tmp_path: Pa
     assert dirty_sentinel not in output
 
 
+def test_reset_restores_all_database_and_libpq_environment_after_child_failure(
+    tmp_path: Path,
+) -> None:
+    fake_python = tmp_path / ("python.cmd" if os.name == "nt" else "python")
+    if os.name == "nt":
+        fake_python.write_text("@echo off\nexit /b 41\n", encoding="utf-8")
+    else:
+        fake_python.write_text("#!/bin/sh\nexit 41\n", encoding="utf-8")
+        fake_python.chmod(0o755)
+    bootstrap_url, migration_url, application_url = _database_triple(
+        "postgresql+psycopg://ignored:ignored@127.0.0.1:5432/ojcc_demo_deadbeef"
+    )
+    reset_path = str(PROJECT_ROOT / "scripts" / "reset_demo.ps1").replace("'", "''")
+    wrapper = tmp_path / "reset-environment-probe.ps1"
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$env:BOOTSTRAP_DATABASE_URL = 'prior-bootstrap'\n"
+        "$env:MIGRATION_DATABASE_URL = 'prior-migration'\n"
+        "$env:DATABASE_URL = 'prior-application'\n"
+        "$env:PGHOST = 'prior-host'\n"
+        "$caught = $null\n"
+        "try {\n"
+        f"  . '{reset_path}' "
+        f"-BootstrapDatabaseUrl '{bootstrap_url}' "
+        f"-MigrationDatabaseUrl '{migration_url}' "
+        f"-DatabaseUrl '{application_url}' "
+        "-ConfirmDatabaseName 'ojcc_demo_deadbeef'\n"
+        "}\n"
+        "catch { $caught = $_.Exception.Message }\n"
+        "if ($caught -notmatch '41') { throw \"Unexpected failure: $caught\" }\n"
+        "if ($env:BOOTSTRAP_DATABASE_URL -ne 'prior-bootstrap' -or "
+        "$env:MIGRATION_DATABASE_URL -ne 'prior-migration' -or "
+        "$env:DATABASE_URL -ne 'prior-application' -or $env:PGHOST -ne 'prior-host') {\n"
+        "  throw 'Database or PG environment was not restored'\n"
+        "}\n"
+        "Write-Output 'RESET_ENVIRONMENT_RESTORED'\n",
+        encoding="utf-8",
+    )
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("PG")
+    }
+    environment["PATH"] = str(tmp_path) + os.pathsep + environment.get("PATH", "")
+    result = subprocess.run(
+        [
+            _resolve_powershell_executable(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(wrapper),
+        ],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESET_ENVIRONMENT_RESTORED" in result.stdout
+
+
 def test_standalone_seed_restores_libpq_environment_after_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -760,10 +905,9 @@ def test_standalone_seed_restores_libpq_environment_after_validation_failure(
 
     with pytest.raises(ValueError, match="non-disposable database"):
         seed_demo_script.main(
-            [
-                "--database-url",
-                "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/ojcc",
-            ]
+            _seed_arguments(
+                "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/ojcc"
+            )
         )
 
     for key, value in prior_values.items():

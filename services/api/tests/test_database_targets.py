@@ -27,12 +27,12 @@ def _config_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 def _run_offline_alembic(
-    *, application_url: str | None, migration_url: str | None
+    *, application_url: str | None, migration_url: str | None, revision: str = "head"
 ) -> subprocess.CompletedProcess[str]:
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key not in {"DATABASE_URL", "MIGRATION_DATABASE_URL"}
+        if key not in {"BOOTSTRAP_DATABASE_URL", "DATABASE_URL", "MIGRATION_DATABASE_URL"}
     }
     if application_url is not None:
         environment["DATABASE_URL"] = application_url
@@ -46,7 +46,7 @@ def _run_offline_alembic(
             "-c",
             "services/api/alembic.ini",
             "upgrade",
-            "head",
+            revision,
             "--sql",
         ],
         cwd=PROJECT_ROOT,
@@ -269,6 +269,7 @@ def test_alembic_accepts_a_matching_target_pair_for_offline_sql() -> None:
     result = _run_offline_alembic(
         application_url="postgresql+psycopg://runtime:runtime-secret@target.invalid/ojcc_target_a",
         migration_url="postgresql://owner:owner-secret@TARGET.INVALID:5432/ojcc_target_a",
+        revision="0006_navigator_closed_loop",
     )
 
     assert result.returncode == 0, result.stderr

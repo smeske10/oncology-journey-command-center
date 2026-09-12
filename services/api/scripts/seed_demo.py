@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.integrity import inspect_integrity
+from app.db.targets import validate_database_target_pair
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 DISPOSABLE_DATABASE_PATTERN = re.compile(r"^ojcc_(?:demo|task7)_[0-9a-f]{8,32}$")
@@ -1321,6 +1322,7 @@ def without_libpq_environment() -> Iterator[None]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed the deterministic synthetic public demo.")
+    parser.add_argument("--migration-database-url", required=True)
     parser.add_argument("--database-url", required=True)
     return parser
 
@@ -1328,10 +1330,25 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     with without_libpq_environment():
-        validated_url = validate_disposable_database_url(arguments.database_url)
-        engine = create_engine(validated_url, pool_pre_ping=True)
+        validated_migration_url = validate_disposable_database_url(
+            arguments.migration_database_url
+        )
+        validated_application_url = validate_disposable_database_url(arguments.database_url)
+        _, migration_target = validate_database_target_pair(
+            application_url=validated_application_url.render_as_string(hide_password=False),
+            migration_url=validated_migration_url.render_as_string(hide_password=False),
+        )
+        engine = create_engine(validated_migration_url, pool_pre_ping=True)
         try:
             with Session(engine) as session, session.begin():
+                connected_user, connected_database = session.execute(
+                    text("SELECT current_user, current_database()")
+                ).one()
+                if (
+                    connected_user != migration_target.username
+                    or connected_database != migration_target.database
+                ):
+                    raise RuntimeError("Seed connection identity does not match its owner target")
                 summary = seed_demo(session)
                 violations = inspect_integrity(session)
                 if violations:

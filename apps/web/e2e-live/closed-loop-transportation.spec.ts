@@ -3,6 +3,27 @@ import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
+function platformEnvironment(): NodeJS.ProcessEnv {
+  const allowed = [
+    "PATH",
+    "Path",
+    "PATHEXT",
+    "COMSPEC",
+    "SystemRoot",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "HOME",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "CI",
+  ];
+  return Object.fromEntries(
+    allowed.flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
+  );
+}
+
 test("persists the synthetic transportation journey from review through closure", async ({ browser }) => {
   const navigatorContext = await browser.newContext();
   const patientContext = await browser.newContext();
@@ -80,6 +101,9 @@ test("persists the synthetic transportation journey from review through closure"
 function assertDatabaseJourney() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required for live database assertions");
+  const migrationUsername = process.env.OJCC_MIGRATION_USERNAME;
+  if (!migrationUsername) throw new Error("OJCC_MIGRATION_USERNAME is required");
+  const runtimeUsername = decodeURIComponent(new URL(databaseUrl).username);
   const apiRoot = path.resolve(process.cwd(), "../../services/api");
   const verification = `
 import json, os
@@ -88,6 +112,8 @@ engine = create_engine(os.environ["DATABASE_URL"])
 with engine.connect() as connection:
     row = connection.execute(text("""
         SELECT
+          current_user,
+          session_user,
           (SELECT count(*) FROM follow_up_request r JOIN navigation_task t ON t.id=r.navigation_task_id WHERE t.title='Arrange transportation for oncology follow-up') AS requests,
           (SELECT count(*) FROM follow_up_response r JOIN follow_up_request q ON q.id=r.follow_up_request_id JOIN navigation_task t ON t.id=q.navigation_task_id WHERE t.title='Arrange transportation for oncology follow-up') AS responses,
           (SELECT count(*) FROM outcome o JOIN reported_need n ON n.id=o.reported_need_id JOIN navigation_task t ON t.reported_need_id=n.id WHERE t.title='Arrange transportation for oncology follow-up') AS outcomes,
@@ -100,9 +126,18 @@ engine.dispose()
   const output = execFileSync(
     "python",
     ["-c", verification],
-    { cwd: apiRoot, encoding: "utf8", env: { ...process.env, DATABASE_URL: databaseUrl } },
+    {
+      cwd: apiRoot,
+      encoding: "utf8",
+      env: { ...platformEnvironment(), DATABASE_URL: databaseUrl },
+    },
   );
-  const [requests, responses, outcomes, bindings, audits] = JSON.parse(output.trim()) as number[];
+  const [currentUser, sessionUser, requests, responses, outcomes, bindings, audits] = JSON.parse(
+    output.trim(),
+  ) as [string, string, number, number, number, number, number];
+  expect(currentUser).toBe(runtimeUsername);
+  expect(sessionUser).toBe(runtimeUsername);
+  expect(currentUser).not.toBe(migrationUsername);
   expect({ requests, responses, outcomes, bindings }).toEqual({
     requests: 1,
     responses: 1,

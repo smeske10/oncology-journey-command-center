@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Approved on 2026-09-11; Tasks 1–3 complete; Task 4 next.**
+Status: **Approved on 2026-09-11; Tasks 1–4 complete; Task 5 next.**
 
 ## Milestone boundary
 
@@ -260,6 +260,45 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 | `ojcc_migration_test_248d2e5b822e49e4a387ebe4fd101683` | dropped normally |
 | `ojcc_migration_test_57e1a1111f5c41049a6eb6205621bdf2` | dropped normally |
 
+## Task 4 — complete
+
+- Added `scripts.replay_schema`, which validates the exact bootstrap/owner/API triple, runs 0001–0004 as the non-superuser owner, runs only immutable 0005 as bootstrap, transfers the exact 0005 object allowlist, strips bootstrap state from Alembic children, and completes 0006→requested revision as owner.
+- Reset now validates all three loopback disposable targets and confirmation before connection, drops/recreates `public` only through the owner, replays through the bounded bridge, seeds twice through the owner, and runs integrity through both owner and API credentials.
+- Seed now requires an explicit owner/API pair, validates same target and distinct usernames, verifies its connected owner identity, and never connects through the API URL.
+- Verify and live-browser wrappers validate API and live triples before any install/import/connection. The live wrapper uses owner only for inactivity/reset, launches FastAPI with only runtime `DATABASE_URL`, and supplies no database URL to Next.
+- Playwright child environments are allowlisted rather than copied wholesale. The live SQL assertion now records `current_user` and `session_user`, requires both to match the runtime URL username, and proves they differ from the owner username supplied separately without an owner URL.
+- CI now generates two `uuid4().hex` database names, provisions/validates distinct `ojcc_migrator`, `ojcc_api`, and `ojcc_app` role profiles plus exact membership options with quoted identifiers, and exports API/live credential triples. The npm, pip, and Next.js cache blocks remained unchanged.
+- RED evidence: seed rejected the new owner argument as unknown; reset rejected the new bootstrap parameter as unknown; verifier/live wrappers rejected the new live bootstrap parameter as unknown.
+- GREEN evidence: target/reset/verify combined gate 79 passed; demo reset/seed suite 37 passed; verify harness 18 passed; PowerShell parsers passed for all three scripts; Ruff passed; web ESLint passed; immutable hashes passed; CI YAML parsed successfully; `git diff --check` passed.
+
+### Task 4 disposable database record
+
+| Database | Disposition |
+|---|---|
+| `ojcc_task7_f585fe708c264a688483974180b88077` | replay path-resolution failure left open; zero sessions verified; dropped normally |
+| `ojcc_task7_7ff50cac72074dea84ad1ec73221a4e3` | seed path-resolution failure left open; zero sessions verified; dropped normally |
+| `ojcc_task7_6ae12dc483bf4f66a1485830a0296f88` | dropped normally after first complete three-target reset |
+| `ojcc_task7_298073e99be2490c925fcfa62d5123c5` | dropped normally |
+| `ojcc_task7_33f7a844be2e40a7912a019ab5143126` | dropped normally |
+| `ojcc_task7_f68ca1d186d74945b4e4d51b77f74507` | dropped normally |
+| `ojcc_task7_12148e5dda1548dc8f7591636431e9b9` | dropped normally |
+| `ojcc_task7_f59807666475425688a69665dd9775f2` | dropped normally |
+| `ojcc_task7_e67de74da66d434cb0e98be86a4553fb` | dropped normally |
+| `ojcc_task7_9834bc9cb0c44bce974f995292502858` | dropped normally |
+| `ojcc_task7_1bbe76c0dba94aca8b6185ecf53b3a2f` | dropped normally |
+| `ojcc_task7_6a1d3128eac04829bed2b3018ee13d3b` | dropped normally |
+| `ojcc_task7_e84e977cf3994f8c9c288963f9c71c62` | dropped normally |
+| `ojcc_task7_b118a477e6cb4c77b8cb1eae16277840` | dropped normally |
+| `ojcc_task7_655310a775dd4d5e8a857dec7e5baafa` | dropped normally |
+| `ojcc_task7_6341e4a031444b6f8cf429c3a9a28728` | dropped normally |
+| `ojcc_task7_b6892975ed6447b880c0610524bdd94c` | dropped normally |
+| `ojcc_task7_3065ddaf82d24ca4bc557feaa3d57646` | dropped normally |
+| `ojcc_task7_768d161bbac14876997c8659e19a446e` | dropped normally |
+| `ojcc_task7_3b8c1d85782f4d5fa6794694c7f2f411` | dropped normally |
+| `ojcc_task7_164b6f13a31344a59a222bf95a2e788f` | dropped normally |
+| `ojcc_task7_f29844cfcae24eda854941f4244c9955` | dropped normally |
+| `ojcc_task7_8a495fbc93314ac89dfcdebf53319ef4` | dropped normally |
+
 ## Next exact step
 
-Write the Task 4 RED tests for three-target replay/reset/seed/verify propagation, then implement the shared replay entry point and carry the bootstrap, migration, and API credentials through every local and CI workflow without exposing the bootstrap credential to the running application.
+Write the Task 5 signed-cookie non-owner route journey and complete negative SQL boundary tests against one freshly replayed and seeded `DisposableDatabase`, then lock the historical unbound-task compatibility contract without adding any migration-time binding rule.
