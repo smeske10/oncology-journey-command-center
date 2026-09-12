@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.db.integrity import inspect_integrity
 from app.db.models import FollowUpRequest, FollowUpResponse, NavigationTask, ProposedChange
-from app.domain.enums import FollowUpResponseValue, NavigationTaskStatus
+from app.domain.enums import (
+    FollowUpResponseValue,
+    NavigationTaskStatus,
+    TaskCancellationReason,
+)
 
 
 def _bind_and_complete(session: Session, case: Any) -> tuple[NavigationTask, FollowUpRequest]:
@@ -67,6 +71,44 @@ def test_closed_loop_integrity_accepts_valid_and_legacy_unbound_history(
     )
     closed_loop_session.add(response)
     closed_loop_session.flush()
+
+    now = datetime.now(UTC)
+    legacy_tasks: list[NavigationTask] = []
+    for status in (
+        NavigationTaskStatus.ASSIGNED,
+        NavigationTaskStatus.IN_PROGRESS,
+        NavigationTaskStatus.COMPLETED,
+        NavigationTaskStatus.CANCELLED,
+    ):
+        legacy_tasks.append(
+            NavigationTask(
+                organization_id=closed_loop_case.organization_id,
+                patient_id=closed_loop_case.patient_id,
+                reported_need_id=closed_loop_case.reported_need_id,
+                assignee_user_id=closed_loop_case.navigator_user_id,
+                title=f"Legacy unbound {status.value} history",
+                status=status,
+                due_at=now + timedelta(days=1),
+                completed_at=now if status is NavigationTaskStatus.COMPLETED else None,
+                cancelled_by_user_id=(
+                    closed_loop_case.navigator_user_id
+                    if status is NavigationTaskStatus.CANCELLED
+                    else None
+                ),
+                cancelled_at=now if status is NavigationTaskStatus.CANCELLED else None,
+                cancellation_reason=(
+                    TaskCancellationReason.NEED_CLOSED
+                    if status is NavigationTaskStatus.CANCELLED
+                    else None
+                ),
+            )
+        )
+    closed_loop_session.execute(text("ALTER TABLE navigation_task DISABLE TRIGGER USER"))
+    try:
+        closed_loop_session.add_all(legacy_tasks)
+        closed_loop_session.flush()
+    finally:
+        closed_loop_session.execute(text("ALTER TABLE navigation_task ENABLE TRIGGER USER"))
 
     assert closed_loop_case.navigation_task_id != approved_closed_loop_case.navigation_task_id
     assert inspect_integrity(closed_loop_session) == []

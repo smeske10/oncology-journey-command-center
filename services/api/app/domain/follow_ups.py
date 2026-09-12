@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.advisory_locks import acquire_transaction_lock
 from app.db.models import (
     FollowUpRequest,
     FollowUpResponse,
@@ -131,6 +132,16 @@ def record_follow_up_response(
     if preliminary is None:
         raise FollowUpNotFound("Follow-up request not found")
 
+    acquire_transaction_lock(
+        session,
+        namespace="reported_need",
+        identifier=preliminary.reported_need_id,
+    )
+    acquire_transaction_lock(
+        session,
+        namespace="follow_up_request",
+        identifier=request_id,
+    )
     need = session.scalar(
         select(ReportedNeed)
         .where(
@@ -138,7 +149,6 @@ def record_follow_up_response(
             ReportedNeed.patient_id == preliminary.patient_id,
             ReportedNeed.id == preliminary.reported_need_id,
         )
-        .with_for_update()
     )
     if need is None:
         raise FollowUpNotFound("Follow-up request not found")
@@ -149,19 +159,18 @@ def record_follow_up_response(
             FollowUpRequest.id == request_id,
             FollowUpRequest.patient_id == need.patient_id,
         )
-        .with_for_update()
         .execution_options(populate_existing=True)
     )
     if request is None:
         raise FollowUpNotFound("Follow-up request not found")
 
-    link = _lock_active_patient_link(
+    link = _require_active_patient_link(
         session,
         organization_id=organization_id,
         actor_user_id=actor_user_id,
         patient_id=patient_id,
     )
-    _lock_supporting_actor_authority(
+    _require_supporting_actor_authority(
         session,
         organization_id=organization_id,
         actor_user_id=actor_user_id,
@@ -233,7 +242,7 @@ def _require_active_patient(
     return patient_id
 
 
-def _lock_active_patient_link(
+def _require_active_patient_link(
     session: Session,
     *,
     organization_id: UUID,
@@ -257,14 +266,13 @@ def _lock_active_patient_link(
         )
         .order_by(PatientIdentityLink.linked_at.desc(), PatientIdentityLink.id.asc())
         .limit(1)
-        .with_for_update()
     )
     if link is None:
         raise FollowUpForbidden("Active patient identity link is required")
     return link
 
 
-def _lock_supporting_actor_authority(
+def _require_supporting_actor_authority(
     session: Session,
     *,
     organization_id: UUID,
@@ -283,7 +291,6 @@ def _lock_supporting_actor_authority(
         )
         .order_by(RoleAssignment.granted_at.desc(), RoleAssignment.id.asc())
         .limit(1)
-        .with_for_update()
     )
     if assignment is None:
         raise FollowUpForbidden("Current supporting actor authority is required")

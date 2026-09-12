@@ -299,6 +299,57 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 | `ojcc_task7_f29844cfcae24eda854941f4244c9955` | dropped normally |
 | `ojcc_task7_8a495fbc93314ac89dfcdebf53319ef4` | dropped normally |
 
+## Task 5 — complete
+
+- Added a real signed-cookie journey that connects every FastAPI session as `ojcc_api`, corrects a check-in, creates a proposal, acknowledges and resolves a safety signal, approves/claims/starts/completes the transportation task, records a supporting-actor response and Outcome, and reloads both audience-safe histories. Exact before/after row deltas prove all eight intended write capabilities while database and object ownership remain `ojcc_migrator`.
+- RED evidence found an unapproved privilege dependency: approval and follow-up commands used `SELECT ... FOR UPDATE` on read-only aggregate roots and authority rows, which PostgreSQL correctly rejected for `ojcc_api`. Those false row locks now use stable transaction advisory locks on the proposal, reported need, and follow-up request; mutable `navigation_task` and `safety_signal` rows retain row locks.
+- Added a complete negative SQL boundary: schema/function/table creation and mutation, temporary tables, role creation/grants/switching, every DELETE, every out-of-matrix INSERT, and every out-of-matrix UPDATE are denied. PostgreSQL's ungrantable object-level `GRANT` is a warned no-op rather than an exception, so its unchanged ACL is asserted directly. Catalog ACL and full relation digests remain unchanged after every group.
+- Added open, assigned, in-progress, completed, and cancelled historical unbound-task coverage. 0007 preserves their exact rows and authorization/audit counts; integrity accepts the history; assigned/in-progress commands return `task_unbound` without a write; terminal rows remain readable; the existing atomic open-task claim contract remains covered.
+- Replaced residual superuser-only trigger bypasses encountered in approval/concurrency regression tests with an owner-safe, identifier-validated user-trigger context. The committed closed-loop teardown also breaks the approved task/proposal cycle explicitly before ordinary scoped deletes.
+- GREEN evidence: the required focused gate passed 52 tests; the approval/follow-up/advisory-lock regression gate passed 79 tests; Ruff, immutable hashes, and `git diff --check` passed.
+
+### Task 5 disposable database record
+
+| Database | Disposition |
+|---|---|
+| `ojcc_task7_296c649845a6400186a6d10c2e9cc105` | initial journey-shape RED; dropped normally |
+| `ojcc_task7_918bea57cfd44232b21c7aa3d662e672` | intended non-owner lock RED; dropped normally |
+| `ojcc_task7_476e2782b42d4e20b853c81962b52783` | timeline assertion RED; dropped normally |
+| exact UUID hidden by pytest capture on one intermediate successful run | fixture reported ordinary drop; no database remained |
+| `ojcc_task7_24332e1e33c145da986f4a3610ab6981` | production-session fidelity RED; dropped normally |
+| `ojcc_task7_9124a2144fdb402f9964cc56748509fd` | dropped normally |
+| `ojcc_migration_test_f84379e98dee4a23b65133318c54f482` | PostgreSQL object-GRANT semantics RED; dropped normally |
+| `ojcc_migration_test_8284ef27d9e74d209cbdb5236837ca53` | composite-key negative-test RED; dropped normally |
+| `ojcc_migration_test_dcaf646937604540b00b04b462db87f8` | dropped normally |
+| `ojcc_task7_79d639e474dd4d4f93ae66cdb47f2add` | historical transaction-scope RED; dropped normally |
+| `ojcc_task7_06b632079b384cea91661d48a545d8b3` | dropped normally |
+| `ojcc_migration_test_286d0cb97ea84604906af6ff7368b52c` | dropped normally |
+| `ojcc_task7_b7da247fe2454153b2b56384e9fb1923` | required focused gate wrapper; dropped normally |
+| `ojcc_migration_test_850ccc53a12c42d29e131883ea66569b` | dropped normally |
+| `ojcc_migration_test_129dfb09b267467b88408c4fff7bf766` | dropped normally |
+| `ojcc_migration_test_63b11e85c3a4496ca3195f9e86385058` | dropped normally |
+| `ojcc_task7_d82f4568687c43b8a68bb54ac9f83d16` | dropped normally |
+| `ojcc_migration_test_94e5009427b74c2aa0ac5723857c48f5` | dropped normally |
+| `ojcc_migration_test_f4d96655757d4bf2b55da3f8449a35a7` | dropped normally |
+| `ojcc_migration_test_074add1411bd47b09c8adf91515d42b1` | dropped normally |
+| `ojcc_migration_test_c5389a36458f4dbfa27faa4403eb34a9` | dropped normally |
+| `ojcc_task7_f4dc052303544209ad4e472b624633ad` | regression collection RED; dropped normally |
+| `ojcc_task7_b501cb97362b4a769c8ccb2455023cb4` | residual superuser-fixture RED; dropped normally |
+| `ojcc_task7_9b713710523a490f890143ac1a939020` | cyclic teardown ordering RED; dropped normally |
+| `ojcc_task7_3cf50914d7504376839935c5be4a74be` | cyclic teardown ordering RED; dropped normally |
+| `ojcc_task7_7fdc159cd0904031a64553e5e250b80a` | cyclic teardown ordering RED; dropped normally |
+| `ojcc_task7_3b61e5978ff243f2ba4bc3328af5bb49` | dropped normally |
+| `ojcc_task7_de50c0928ce74c0eb51ceb06b50432f2` | final required focused gate wrapper; dropped normally |
+| `ojcc_migration_test_99ddfac780934458bd40084cd374e131` | dropped normally |
+| `ojcc_migration_test_fe6dca428a374cb0bc04533c461f14d9` | dropped normally |
+| `ojcc_migration_test_72e59ac015c444b1aeb6d9a784980236` | dropped normally |
+| `ojcc_task7_95baa38c3e264c9ebdbf9af51bb04206` | dropped normally |
+| `ojcc_migration_test_7fd57f03148741fbbeb53e36aa527332` | dropped normally |
+| `ojcc_migration_test_7cef6a77b28e4ae193d7f3441502182f` | dropped normally |
+| `ojcc_migration_test_de65a063ccc642b0930897c78a31400b` | dropped normally |
+| `ojcc_migration_test_fc0413e43cc14d92b193dac81f36d44a` | dropped normally |
+| `ojcc_task7_1e82400ab48c47f4b39c2c00d8d4bcf3` | final approval/follow-up regression gate; dropped normally |
+
 ## Next exact step
 
-Write the Task 5 signed-cookie non-owner route journey and complete negative SQL boundary tests against one freshly replayed and seeded `DisposableDatabase`, then lock the historical unbound-task compatibility contract without adding any migration-time binding rule.
+Document the three-credential local/CI provisioning contract, provision the two planned final-gate databases, run reset/version/schema-generation and the complete cached verifier, rerun targeted security evidence, clean up only recorded disposable databases, and stop for integration review.

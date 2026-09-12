@@ -128,6 +128,10 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
             "submission",
             "need",
             "task",
+            "assigned_task",
+            "in_progress_task",
+            "completed_task",
+            "cancelled_task",
             "policy",
             "resource",
             "proposal",
@@ -259,6 +263,7 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
                 status="open",
                 evidence=[{"field": "transportation", "text": "yes"}],
             )
+            connection.execute(text("ALTER TABLE navigation_task DISABLE TRIGGER USER"))
             insert(
                 "navigation_task",
                 id=ids["task"],
@@ -268,6 +273,29 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
                 title="Legacy unbound transportation task",
                 status="open",
             )
+            for status in ("assigned", "in_progress", "completed", "cancelled"):
+                task_values: dict[str, object] = {
+                    "id": ids[f"{status}_task"],
+                    "organization_id": ids["organization"],
+                    "patient_id": ids["patient"],
+                    "reported_need_id": ids["need"],
+                    "assignee_user_id": ids["approver"],
+                    "due_at": proposed_at + timedelta(days=1),
+                    "title": f"Legacy unbound {status} task",
+                    "status": status,
+                }
+                if status == "completed":
+                    task_values["completed_at"] = approved_at
+                if status == "cancelled":
+                    task_values.update(
+                        {
+                            "cancelled_by_user_id": ids["approver"],
+                            "cancelled_at": approved_at,
+                            "cancellation_reason": "need_closed",
+                        }
+                    )
+                insert("navigation_task", **task_values)
+            connection.execute(text("ALTER TABLE navigation_task ENABLE TRIGGER USER"))
             insert(
                 "approval_policy",
                 id=ids["policy"],
@@ -398,6 +426,82 @@ def test_0006_preserves_populated_0005_unbound_task_and_approved_v2_resources() 
                 assert resource.approved_at == expected["approved_at"]
         finally:
             engine.dispose()
+
+
+def test_0007_preserves_unbound_execution_history_for_every_task_state() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "upgrade", "0005_workflow_knowledge_audit")
+        expected = _seed_representative_0005_history(database_url)
+        _run_alembic(database_url, "upgrade", "0006_navigator_closed_loop")
+
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                before = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            "SELECT id, title, status, assignee_user_id, due_at, "
+                            "authorized_proposed_change_id, completed_at, "
+                            "cancelled_by_user_id, cancelled_at, cancellation_reason "
+                            "FROM navigation_task WHERE reported_need_id = :need_id "
+                            "ORDER BY id"
+                        ),
+                        {"need_id": expected["need"]},
+                    )
+                )
+                history_counts_before = connection.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT count(*) FROM proposed_change), "
+                        "(SELECT count(*) FROM approval_decision), "
+                        "(SELECT count(*) FROM audit_event)"
+                    )
+                ).one()
+        finally:
+            engine.dispose()
+
+        _run_alembic(database_url, "upgrade", "head")
+
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                after = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            "SELECT id, title, status, assignee_user_id, due_at, "
+                            "authorized_proposed_change_id, completed_at, "
+                            "cancelled_by_user_id, cancelled_at, cancellation_reason "
+                            "FROM navigation_task WHERE reported_need_id = :need_id "
+                            "ORDER BY id"
+                        ),
+                        {"need_id": expected["need"]},
+                    )
+                )
+                history_counts_after = connection.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT count(*) FROM proposed_change), "
+                        "(SELECT count(*) FROM approval_decision), "
+                        "(SELECT count(*) FROM audit_event)"
+                    )
+                ).one()
+                version = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        finally:
+            engine.dispose()
+
+        assert after == before
+        assert history_counts_after == history_counts_before
+        assert {str(row[2]) for row in after} == {
+            "open",
+            "assigned",
+            "in_progress",
+            "completed",
+            "cancelled",
+        }
+        assert all(row[5] is None for row in after)
+        assert version == "0007_database_least_privilege"
 
 
 def test_0006_downgrade_refuses_to_discard_approved_execution_history() -> None:

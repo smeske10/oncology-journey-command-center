@@ -7,11 +7,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import psycopg
 from psycopg import sql
+from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 
 from app.config import settings
@@ -70,6 +71,29 @@ class DisposableDatabase:
     name: str
     migration_url: str
     application_url: str
+
+
+@contextmanager
+def user_triggers_disabled(executor: Any, *table_names: str) -> Iterator[None]:
+    """Temporarily disable user triggers using only table-owner authority."""
+    if not table_names:
+        raise ValueError("at least one table name is required")
+    if any(
+        not name
+        or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789_"
+            for character in name
+        )
+        for name in table_names
+    ):
+        raise ValueError("invalid table name")
+    for table_name in table_names:
+        executor.execute(text(f'ALTER TABLE public."{table_name}" DISABLE TRIGGER USER'))
+    try:
+        yield
+    finally:
+        for table_name in reversed(table_names):
+            executor.execute(text(f'ALTER TABLE public."{table_name}" ENABLE TRIGGER USER'))
 
 
 def validate_disposable_url(url: URL, *, prefix: str) -> None:

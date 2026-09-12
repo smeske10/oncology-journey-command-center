@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.advisory_locks import acquire_transaction_lock
 from app.db.models import (
     ApprovalDecision,
     ApprovalPolicy,
@@ -311,13 +312,17 @@ def record_decision(
     validate_public_demo_text(reason)
     if decision_value is ApprovalDecisionValue.DECLINED and not (reason and reason.strip()):
         raise ValueError("Decline reason is required")
+    acquire_transaction_lock(
+        session,
+        namespace="proposed_change",
+        identifier=proposed_change_id,
+    )
     proposal = session.scalar(
         select(ProposedChange)
         .where(
             ProposedChange.organization_id == organization_id,
             ProposedChange.id == proposed_change_id,
         )
-        .with_for_update()
     )
     if proposal is None:
         raise ProposalNotFound("Proposed change not found")
@@ -341,7 +346,6 @@ def record_decision(
             RoleAssignment.granted_at.desc(), RoleAssignment.id.asc()
         )
         .limit(1)
-        .with_for_update()
     )
     if assignment is None:
         raise ApprovalForbidden("Role assignment does not qualify for this proposal")

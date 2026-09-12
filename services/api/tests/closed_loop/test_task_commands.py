@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.auth.models import CurrentActor, Role
@@ -810,27 +810,119 @@ def test_claim_normalizes_timezone_before_exact_replay_comparison(
     assert replay.json()["replayed"] is True
 
 
-def test_historical_assigned_task_without_binding_is_read_only(
+def _set_legacy_unbound_task(session: Session, case: Any, status: str) -> None:
+    completed_at = datetime.now(UTC) if status == "completed" else None
+    cancelled_at = datetime.now(UTC) if status == "cancelled" else None
+    session.execute(text("ALTER TABLE navigation_task DISABLE TRIGGER USER"))
+    try:
+        session.execute(
+            text(
+                "UPDATE navigation_task SET status = CAST(:status AS navigation_task_status), "
+                "assignee_user_id = :assignee, due_at = :due_at, "
+                "authorized_proposed_change_id = NULL, completed_at = :completed_at, "
+                "cancelled_by_user_id = :cancelled_by, cancelled_at = :cancelled_at, "
+                "cancellation_reason = CAST(:cancellation_reason AS task_cancellation_reason) "
+                "WHERE id = :task_id"
+            ),
+            {
+                "status": status,
+                "assignee": case.navigator_user_id,
+                "due_at": datetime.now(UTC) + timedelta(days=2),
+                "completed_at": completed_at,
+                "cancelled_by": case.navigator_user_id if status == "cancelled" else None,
+                "cancelled_at": cancelled_at,
+                "cancellation_reason": "need_closed" if status == "cancelled" else None,
+                "task_id": case.navigation_task_id,
+            },
+        )
+    finally:
+        session.execute(text("ALTER TABLE navigation_task ENABLE TRIGGER USER"))
+    session.flush()
+
+
+def _legacy_history_snapshot(session: Session, task_id: Any) -> tuple[str, int]:
+    row = session.scalar(
+        text(
+            "SELECT row_to_json(task)::text FROM navigation_task AS task "
+            "WHERE id = :task_id"
+        ),
+        {"task_id": task_id},
+    )
+    audit_count = session.scalar(
+        select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_id == task_id)
+    )
+    assert isinstance(row, str)
+    assert isinstance(audit_count, int)
+    return row, audit_count
+
+
+@pytest.mark.parametrize(
+    ("historical_status", "command"),
+    [("assigned", "start"), ("in_progress", "complete")],
+)
+def test_historical_executing_task_without_binding_is_read_only(
     closed_loop_session: Session,
     closed_loop_client: Any,
     approved_closed_loop_case: Any,
+    historical_status: str,
+    command: str,
 ) -> None:
-    task = closed_loop_session.get(
-        NavigationTask, approved_closed_loop_case.navigation_task_id
+    _set_legacy_unbound_task(
+        closed_loop_session,
+        approved_closed_loop_case,
+        historical_status,
     )
-    assert task is not None
-    task.assignee_user_id = approved_closed_loop_case.navigator_user_id
-    task.due_at = datetime.now(UTC) + timedelta(days=2)
-    task.status = NavigationTaskStatus.ASSIGNED
-    closed_loop_session.flush()
+    closed_loop_session.commit()
+    before = _legacy_history_snapshot(
+        closed_loop_session, approved_closed_loop_case.navigation_task_id
+    )
 
     response = closed_loop_client.request(
         "POST",
-        f"/v1/navigator/tasks/{task.id}/start",
+        f"/v1/navigator/tasks/{approved_closed_loop_case.navigation_task_id}/{command}",
         actor=_navigator(approved_closed_loop_case),
         json={},
     )
     _assert_conflict(response, "task_unbound")
+    assert _legacy_history_snapshot(
+        closed_loop_session, approved_closed_loop_case.navigation_task_id
+    ) == before
+
+
+@pytest.mark.parametrize("historical_status", ["completed", "cancelled"])
+def test_historical_terminal_unbound_task_is_display_only(
+    closed_loop_session: Session,
+    closed_loop_client: Any,
+    approved_closed_loop_case: Any,
+    historical_status: str,
+) -> None:
+    _set_legacy_unbound_task(
+        closed_loop_session,
+        approved_closed_loop_case,
+        historical_status,
+    )
+    closed_loop_session.commit()
+    before = _legacy_history_snapshot(
+        closed_loop_session, approved_closed_loop_case.navigation_task_id
+    )
+
+    response = closed_loop_client.request(
+        "GET",
+        f"/v1/navigator/needs/{approved_closed_loop_case.reported_need_id}/workspace",
+        actor=_navigator(approved_closed_loop_case),
+    )
+
+    assert response.status_code == 200, response.text
+    task = next(
+        item
+        for item in response.json()["tasks"]
+        if item["id"] == str(approved_closed_loop_case.navigation_task_id)
+    )
+    assert task["status"] == historical_status
+    assert task["authorized_proposed_change_id"] is None
+    assert _legacy_history_snapshot(
+        closed_loop_session, approved_closed_loop_case.navigation_task_id
+    ) == before
 
 
 def test_non_open_unbound_task_cannot_be_claimed(

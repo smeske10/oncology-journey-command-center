@@ -872,6 +872,142 @@ def _acl_snapshot(database: PrivilegeDatabase) -> tuple[tuple[object, ...], ...]
         engine.dispose()
 
 
+def _relation_digest_snapshot(
+    database: PrivilegeDatabase,
+) -> tuple[tuple[str, str], ...]:
+    with psycopg.connect(_psycopg_url(make_url(database.migration_url))) as connection:
+        with connection.cursor() as cursor:
+            digests: list[tuple[str, str]] = []
+            for relation_name in sorted(APPLICATION_TABLES):
+                cursor.execute(
+                    sql.SQL(
+                        "SELECT md5(coalesce(string_agg(to_jsonb(row_value)::text, '|' "
+                        "ORDER BY to_jsonb(row_value)::text), '')) FROM public.{} AS row_value"
+                    ).format(sql.Identifier(relation_name))
+                )
+                digest = cursor.fetchone()
+                assert digest is not None
+                digests.append((relation_name, digest[0]))
+            return tuple(digests)
+
+
+def _assert_runtime_statement_is_forbidden(
+    database: PrivilegeDatabase,
+    statement: sql.Composable,
+) -> None:
+    with psycopg.connect(
+        _psycopg_url(make_url(database.application_url))
+    ) as connection:
+        with connection.cursor() as cursor:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                cursor.execute(statement)
+
+
+def _assert_runtime_object_grant_is_a_noop(database: PrivilegeDatabase) -> None:
+    notices: list[str] = []
+    with psycopg.connect(
+        _psycopg_url(make_url(database.application_url))
+    ) as connection:
+        connection.add_notice_handler(lambda diagnostic: notices.append(diagnostic.message_primary))
+        connection.execute("GRANT SELECT ON public.organization TO PUBLIC")
+    assert any("no privileges were granted" in notice for notice in notices)
+
+
+def _first_column_by_relation(database: PrivilegeDatabase) -> dict[str, str]:
+    engine = create_engine(database.migration_url)
+    try:
+        with engine.connect() as connection:
+            return {
+                row.table_name: row.column_name
+                for row in connection.execute(
+                    text(
+                        "SELECT DISTINCT ON (table_name) table_name, column_name "
+                        "FROM information_schema.columns WHERE table_schema = 'public' "
+                        "AND table_name = ANY(:relations) "
+                        "ORDER BY table_name, ordinal_position"
+                    ),
+                    {"relations": sorted(APPLICATION_TABLES)},
+                )
+            }
+    finally:
+        engine.dispose()
+
+
+def test_runtime_cannot_escape_the_complete_denied_sql_surface(
+    privilege_database: PrivilegeDatabase,
+) -> None:
+    first_columns = _first_column_by_relation(privilege_database)
+    assert set(first_columns) == APPLICATION_TABLES
+    groups: tuple[tuple[str, tuple[sql.Composable, ...]], ...] = (
+        (
+            "schema mutation",
+            (
+                sql.SQL("CREATE TABLE public.runtime_escape (id integer)"),
+                sql.SQL("CREATE SCHEMA runtime_escape"),
+                sql.SQL(
+                    "CREATE FUNCTION public.runtime_escape() RETURNS integer "
+                    "LANGUAGE sql AS 'SELECT 1'"
+                ),
+                sql.SQL("CREATE TEMP TABLE runtime_escape (id integer)"),
+                sql.SQL("ALTER TABLE public.organization ADD COLUMN runtime_escape integer"),
+                sql.SQL(
+                    "ALTER FUNCTION public.safety_severity_rank(safety_severity) "
+                    "RENAME TO runtime_escape"
+                ),
+                sql.SQL("DROP TABLE public.organization"),
+                sql.SQL("TRUNCATE TABLE public.organization"),
+            ),
+        ),
+        (
+            "role escalation",
+            (
+                sql.SQL("GRANT ojcc_app TO ojcc_api"),
+                sql.SQL("CREATE ROLE runtime_escape"),
+                sql.SQL("SET ROLE ojcc_app"),
+                sql.SQL("SET ROLE ojcc_migrator"),
+            ),
+        ),
+        (
+            "delete",
+            tuple(
+                sql.SQL("DELETE FROM public.{} WHERE false").format(
+                    sql.Identifier(relation_name)
+                )
+                for relation_name in sorted(APPLICATION_TABLES)
+            ),
+        ),
+        (
+            "out-of-matrix insert and update",
+            tuple(
+                sql.SQL("INSERT INTO public.{} DEFAULT VALUES").format(
+                    sql.Identifier(relation_name)
+                )
+                for relation_name in sorted(APPLICATION_TABLES - INSERT_TABLES)
+            )
+            + tuple(
+                sql.SQL("UPDATE public.{} SET {} = {} WHERE false").format(
+                    sql.Identifier(relation_name),
+                    sql.Identifier(first_columns[relation_name]),
+                    sql.Identifier(first_columns[relation_name]),
+                )
+                for relation_name in sorted(APPLICATION_TABLES - UPDATE_TABLES)
+            ),
+        ),
+    )
+
+    for group_name, statements in groups:
+        acl_before = _acl_snapshot(privilege_database)
+        rows_before = _relation_digest_snapshot(privilege_database)
+        if group_name == "role escalation":
+            # PostgreSQL reports an ungrantable object privilege as a successful
+            # no-op with a warning; the unchanged ACL is the security assertion.
+            _assert_runtime_object_grant_is_a_noop(privilege_database)
+        for statement in statements:
+            _assert_runtime_statement_is_forbidden(privilege_database, statement)
+        assert _acl_snapshot(privilege_database) == acl_before, group_name
+        assert _relation_digest_snapshot(privilege_database) == rows_before, group_name
+
+
 def test_populated_0006_upgrade_is_privilege_only() -> None:
     with _provision_privilege_database(
         revision="0006_navigator_closed_loop"

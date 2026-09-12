@@ -24,6 +24,7 @@ from app.db.models import NavigationTask, PatientMessage, ReportedNeed, RoleAssi
 from app.db.session import get_session
 from app.domain.enums import UserRole
 from app.main import app
+from tests.database_support import user_triggers_disabled
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -1095,12 +1096,11 @@ def test_final_approval_requalifies_every_stored_decision_before_application(
     assert first.status_code == 201
     assert first.json()["proposal_state"] == "pending"
 
-    db_session.execute(text("SET session_replication_role = replica"))
-    db_session.execute(
-        text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
-        {"role_id": first_role.id},
-    )
-    db_session.execute(text("SET session_replication_role = origin"))
+    with user_triggers_disabled(db_session, "role_assignment"):
+        db_session.execute(
+            text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
+            {"role_id": first_role.id},
+        )
     _actor(db_session, user_id=second_approver.id, organization_id=context["organization"].id)
     second = _request(
         "POST",
@@ -1145,12 +1145,11 @@ def test_no_longer_qualifying_decline_does_not_remain_terminal(db_session: Sessi
     assert declined.status_code == 201
     assert declined.json()["proposal_state"] == "declined"
 
-    db_session.execute(text("SET session_replication_role = replica"))
-    db_session.execute(
-        text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
-        {"role_id": role.id},
-    )
-    db_session.execute(text("SET session_replication_role = origin"))
+    with user_triggers_disabled(db_session, "role_assignment"):
+        db_session.execute(
+            text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
+            {"role_id": role.id},
+        )
     state = db_session.scalar(
         text(
             "SELECT effective_state FROM effective_proposed_change_state "
