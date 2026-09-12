@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Tasks 1–3 complete; corrective Task 4 next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–4 complete; corrective Task 5 next.**
 
 ## Milestone boundary
 
@@ -352,12 +352,12 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Implement corrective Task 4 from the
+Implement corrective Task 5 from the
 [Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
-generate and execute the fresh owner/bootstrap/owner offline replay bundle with per-stage identity,
-revision, ownership-transfer, and rollback guarantees. Push and PR remain after the corrective
-verification gates and independent review; merge, deployment, worktree removal, and deferred
-milestones remain out of scope.
+consolidate fail-closed role provisioning into one callable command used by local instructions and
+CI, then prove creation, idempotence, and drift refusal behavior. Push and PR remain after the
+corrective verification gates and independent review; merge, deployment, worktree removal, and
+deferred milestones remain out of scope.
 
 ### Pre-PR corrective design — implementation pending
 
@@ -429,6 +429,22 @@ milestones remain out of scope.
   sanitized errors, health, connection-free import/OpenAPI, and the revised read-only relation
   matrix. Ruff passed after import normalization. Each disposable database reported ordinary
   cleanup.
+
+## Corrective Task 4 — complete
+
+- `scripts.replay_schema` now has an explicit `--sql-output-directory` mode that validates the
+  credential triple without connecting and refuses non-head bundles or an existing output path.
+- The generated manifest records database, role names, credential order, filenames, and exact
+  starting/ending revisions without URLs or passwords. Each SQL file has one transaction and checks
+  connected identity, target database, and starting revision before mutation.
+- The bootstrap stage contains the established exact 0005 table/function/type ownership allowlist
+  before commit. It never uses `REASSIGN OWNED`.
+- RED evidence: the CLI rejected the new output argument. The first generated artifact test also
+  caught an assertion that failed to account for deliberately quoted object identifiers.
+- GREEN evidence: 12 replay and existing database-support tests passed in 21.23 seconds; Ruff and
+  Pyright passed. Real empty-database execution reached an attested 0007, while deliberate
+  stage-three sequence drift retained the committed 0005 stage and rolled back only stage three.
+  Both `ojcc_task7_` databases reported ordinary cleanup.
 
 ## Task 6 — complete
 

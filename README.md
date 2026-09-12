@@ -137,6 +137,33 @@ capability, so the reset runs only 0005 through the bootstrap bridge, transfers 
 allowlist to the owner, removes the bootstrap URL, and returns to the owner for 0006 onward. It
 never uses broad `REASSIGN OWNED`.
 
+For a release system that requires offline SQL, generate the supported fresh-replay bundle rather
+than executing raw `alembic upgrade head --sql` output:
+
+```powershell
+Push-Location .\services\api
+python -m scripts.replay_schema `
+    --bootstrap-database-url $env:BOOTSTRAP_DATABASE_URL `
+    --migration-database-url $env:MIGRATION_DATABASE_URL `
+    --database-url $env:DATABASE_URL `
+    --revision head `
+    --sql-output-directory $env:OJCC_OFFLINE_BUNDLE_DIRECTORY
+Pop-Location
+```
+
+The new directory contains `manifest.json` plus `01-owner.sql`, `02-bootstrap.sql`, and
+`03-owner.sql`. It contains database and role names but no URLs or passwords. Execute the files in
+manifest order with owner, bootstrap, then owner credentials and stop on the first error (for
+example, `psql -v ON_ERROR_STOP=1 ... -f <stage>`). Each file verifies its connected identity,
+database, and starting revision before mutation. The bootstrap file performs the exact 0005
+ownership transfer before its transaction commits. A failed stage rolls back only that stage;
+inspect the current revision before resuming because earlier stages remain committed.
+
+Raw `alembic upgrade head --sql` remains useful for inspection and generates without a database
+connection, but it is not an executable fresh replay: it cannot perform the required credential
+transition and 0005 ownership transfer. For a database already at 0006, the bounded
+`0006_navigator_closed_loop:head --sql` artifact is executable as the migration owner.
+
 The seed includes separate platform-user and patient identities, historical roles,
 pathway/submission versions, open and closed work, every safety state, approval history, workflow
 and knowledge lineage, and user, agent, policy, and system audit actors.

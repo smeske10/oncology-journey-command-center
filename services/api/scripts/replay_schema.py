@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -59,6 +60,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--migration-database-url", required=True)
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--revision", required=True)
+    parser.add_argument("--sql-output-directory", type=Path)
     return parser
 
 
@@ -103,10 +105,216 @@ def _upgrade(*, application_url: str, migration_url: str, revision: str) -> None
     )
 
 
+def _render_upgrade(
+    *, application_url: str, migration_url: str, revision_range: str
+) -> str:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "alembic.ini",
+            "upgrade",
+            "--sql",
+            revision_range,
+        ],
+        cwd=API_ROOT,
+        env=_child_environment(
+            application_url=application_url,
+            migration_url=migration_url,
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
 def _psycopg_url(url_text: str) -> str:
     return make_url(url_text).set(drivername="postgresql").render_as_string(
         hide_password=False
     )
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _stage_preflight(
+    *, credential: str, role: str, database: str, start_revision: str, end_revision: str
+) -> str:
+    revision_check = (
+        "IF to_regclass('public.alembic_version') IS NOT NULL OR EXISTS ("
+        "SELECT 1 FROM pg_class class JOIN pg_namespace namespace "
+        "ON namespace.oid = class.relnamespace WHERE namespace.nspname = 'public' "
+        "AND NOT EXISTS (SELECT 1 FROM pg_depend dependency "
+        "WHERE dependency.classid = 'pg_class'::regclass "
+        "AND dependency.objid = class.oid AND dependency.deptype = 'e')) THEN\n"
+        "        RAISE EXCEPTION 'offline replay base stage requires an empty "
+        "application schema';\n"
+        "    END IF;"
+        if start_revision == "base"
+        else (
+            "IF to_regclass('public.alembic_version') IS NULL OR "
+            "(SELECT version_num FROM public.alembic_version) <> "
+            f"{_sql_literal(start_revision)} THEN\n"
+            f"        RAISE EXCEPTION 'offline replay stage requires revision {start_revision}';\n"
+            "    END IF;"
+        )
+    )
+    return f"""
+-- OFFLINE REPLAY STAGE: {credential} {start_revision} -> {end_revision}
+DO $ojcc_replay_stage$
+BEGIN
+    IF current_user <> {_sql_literal(role)}
+       OR current_database() <> {_sql_literal(database)} THEN
+        RAISE EXCEPTION 'offline replay stage connected identity or database mismatch';
+    END IF;
+    {revision_check}
+END
+$ojcc_replay_stage$;
+"""
+
+
+def _inject_after_begin(artifact: str, preflight: str) -> str:
+    marker = "BEGIN;"
+    if marker not in artifact:
+        raise RuntimeError("Alembic offline artifact has no transaction boundary")
+    return artifact.replace(marker, f"{marker}\n{preflight}", 1)
+
+
+def _inject_before_commit(artifact: str, sql_text: str) -> str:
+    marker = "COMMIT;"
+    position = artifact.rfind(marker)
+    if position < 0:
+        raise RuntimeError("Alembic offline artifact has no commit boundary")
+    return f"{artifact[:position]}{sql_text}\n{artifact[position:]}"
+
+
+def _ownership_transfer_sql(*, migration_role: str) -> str:
+    role = _sql_identifier(migration_role)
+    statements = [
+        f"ALTER TABLE public.{_sql_identifier(name)} OWNER TO {role};"
+        for name in MIGRATION_0005_TABLES
+    ]
+    statements.extend(
+        f"ALTER FUNCTION public.{_sql_identifier(name)}() OWNER TO {role};"
+        for name in MIGRATION_0005_FUNCTIONS
+    )
+    statements.extend(
+        f"ALTER TYPE public.{_sql_identifier(name)} OWNER TO {role};"
+        for name in MIGRATION_0005_ENUMS
+    )
+    return "\n-- Exact 0005 ownership transfer\n" + "\n".join(statements) + "\n"
+
+
+def render_offline_bundle(
+    *,
+    bootstrap_database_url: str,
+    migration_database_url: str,
+    database_url: str,
+    revision: str,
+    output_directory: Path,
+) -> None:
+    if _revision_index(revision) != _revision_index("head"):
+        raise ValueError("offline replay bundles currently require revision head")
+    bootstrap_url = validate_disposable_database_url(bootstrap_database_url)
+    migration_url = validate_disposable_database_url(migration_database_url)
+    application_url = validate_disposable_database_url(database_url)
+    bootstrap_text = bootstrap_url.render_as_string(hide_password=False)
+    migration_text = migration_url.render_as_string(hide_password=False)
+    application_text = application_url.render_as_string(hide_password=False)
+    application_target, bootstrap_target = validate_database_target_pair(
+        application_url=application_text,
+        migration_url=bootstrap_text,
+    )
+    _, migration_target = validate_database_target_pair(
+        application_url=application_text,
+        migration_url=migration_text,
+    )
+    if bootstrap_target.username == migration_target.username:
+        raise ValueError("Bootstrap, migration, and application require distinct usernames")
+
+    stages = (
+        (
+            "01-owner.sql",
+            "migration",
+            "base",
+            "0004_safety_approval_lifecycle",
+            migration_text,
+            migration_target.username,
+        ),
+        (
+            "02-bootstrap.sql",
+            "bootstrap",
+            "0004_safety_approval_lifecycle",
+            "0005_workflow_knowledge_audit",
+            bootstrap_text,
+            bootstrap_target.username,
+        ),
+        (
+            "03-owner.sql",
+            "migration",
+            "0005_workflow_knowledge_audit",
+            "0007_database_least_privilege",
+            migration_text,
+            migration_target.username,
+        ),
+    )
+    rendered: dict[str, str] = {}
+    manifest_stages: list[dict[str, str]] = []
+    for file_name, credential, start, end, credential_url, role in stages:
+        artifact = _render_upgrade(
+            application_url=application_text,
+            migration_url=credential_url,
+            revision_range=f"{start}:{end}",
+        )
+        artifact = _inject_after_begin(
+            artifact,
+            _stage_preflight(
+                credential=credential,
+                role=role,
+                database=application_target.database,
+                start_revision=start,
+                end_revision=end,
+            ),
+        )
+        if credential == "bootstrap":
+            artifact = _inject_before_commit(
+                artifact,
+                _ownership_transfer_sql(migration_role=migration_target.username),
+            )
+        rendered[file_name] = artifact
+        manifest_stages.append(
+            {
+                "credential": credential,
+                "end_revision": end,
+                "file": file_name,
+                "start_revision": start,
+            }
+        )
+
+    output_directory.mkdir(parents=True, exist_ok=False)
+    manifest = {
+        "database": application_target.database,
+        "format_version": 1,
+        "roles": {
+            "application": application_target.username,
+            "bootstrap": bootstrap_target.username,
+            "migration": migration_target.username,
+        },
+        "stages": manifest_stages,
+    }
+    (output_directory / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    for file_name, artifact in rendered.items():
+        (output_directory / file_name).write_text(artifact, encoding="utf-8")
 
 
 def _transfer_0005_ownership(*, bootstrap_url: str, migration_role: str) -> None:
@@ -189,6 +397,15 @@ def replay_schema(
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
+    if arguments.sql_output_directory is not None:
+        render_offline_bundle(
+            bootstrap_database_url=arguments.bootstrap_database_url,
+            migration_database_url=arguments.migration_database_url,
+            database_url=arguments.database_url,
+            revision=arguments.revision,
+            output_directory=arguments.sql_output_directory,
+        )
+        return 0
     replay_schema(
         bootstrap_database_url=arguments.bootstrap_database_url,
         migration_database_url=arguments.migration_database_url,

@@ -97,13 +97,13 @@
 - Adds `--sql-output-directory PATH` to generate `manifest.json`, `01-owner.sql`, `02-bootstrap.sql`, and `03-owner.sql` without connecting.
 - Each SQL stage verifies identity, database, and starting revision before mutation; stage 2 includes exact 0005 ownership transfers before commit.
 
-- [ ] Write CLI tests using unreachable credential URLs and a temporary output directory; assert the exact manifest, file order, stage identities/revisions, and absence of passwords/URLs.
-- [ ] Run and confirm the new mode is rejected.
-- [ ] Implement generation by invoking bounded Alembic ranges, wrapping each stage in one transaction, and rendering the exact allowlisted transfer SQL into stage 2.
-- [ ] Add an integration executor test that uses three separate connections from an empty disposable database through head and verifies revisions, owners, and final ACLs.
-- [ ] Add a later-stage refusal case and assert earlier committed stages remain while the failing stage is rolled back.
-- [ ] Document raw fresh Alembic SQL as inspection-only and the bundle as the supported executable fresh path.
-- [ ] Run focused replay tests, formatting, immutable hashes, and diff checks; update the ledger and commit this task.
+- [x] Write CLI tests using unreachable credential URLs and a temporary output directory; assert the exact manifest, file order, stage identities/revisions, and absence of passwords/URLs.
+- [x] Run and confirm the new mode is rejected.
+- [x] Implement generation by invoking bounded Alembic ranges, wrapping each stage in one transaction, and rendering the exact allowlisted transfer SQL into stage 2.
+- [x] Add an integration executor test that uses three separate connections from an empty disposable database through head and verifies revisions, owners, and final ACLs.
+- [x] Add a later-stage refusal case and assert earlier committed stages remain while the failing stage is rolled back.
+- [x] Document raw fresh Alembic SQL as inspection-only and the bundle as the supported executable fresh path.
+- [x] Run focused replay tests, formatting, immutable hashes, and diff checks; update the ledger and commit this task.
 
 ### Task 5: Consolidate Fail-Closed Role Provisioning
 
