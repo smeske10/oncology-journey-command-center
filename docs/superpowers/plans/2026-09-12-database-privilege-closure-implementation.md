@@ -56,14 +56,14 @@
 - Produces offline PostgreSQL `DO` assertions using configured role literals without opening a connection.
 - Preserves the online validator from Task 1 and emits every assertion before the first 0007 ACL statement.
 
-- [ ] Add a subprocess test proving raw `alembic upgrade head --sql` completes with deliberately unreachable URLs and contains preflight before privilege mutation.
-- [ ] Run it and confirm generation fails at the current mock connection query.
-- [ ] Add offline rendering for identity, role profile, exact memberships, ownership, relation kinds, and function sets; quote all configured values and include no credentials.
-- [ ] Run generation tests and inspect the artifact ordering and secret-sentinel absence.
-- [ ] Add execution tests for `0006:head --sql` against valid and drifted disposable databases, including the sequence and real `postgres_fdw` foreign-table cases.
-- [ ] Run each test and confirm valid execution reaches 0007 while refusal rolls back the complete transaction and leaves the ACL snapshot unchanged.
-- [ ] Retain fail-closed offline downgrade behavior and verify it emits no ACL/version mutations.
-- [ ] Run formatting, immutable-hash, and diff checks; update the ledger and commit this task.
+- [x] Add a subprocess test proving raw `alembic upgrade head --sql` completes with deliberately unreachable URLs and contains preflight before privilege mutation.
+- [x] Run it and confirm generation fails at the current mock connection query.
+- [x] Add offline rendering for identity, role profile, exact memberships, ownership, relation kinds, and function sets; quote all configured values and include no credentials.
+- [x] Run generation tests and inspect the artifact ordering and secret-sentinel absence.
+- [x] Add execution tests for `0006:head --sql` against valid and drifted disposable databases, including the sequence and real `postgres_fdw` foreign-table cases.
+- [x] Run each test and confirm valid execution reaches 0007 while refusal rolls back the complete transaction and leaves the ACL snapshot unchanged.
+- [x] Retain fail-closed offline downgrade behavior and verify it emits no ACL/version mutations.
+- [x] Run formatting, immutable-hash, and diff checks; update the ledger and commit this task.
 
 ### Task 3: Add Runtime Startup Attestation
 

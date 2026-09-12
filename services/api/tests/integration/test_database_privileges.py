@@ -1091,8 +1091,9 @@ def test_invalid_ownership_preflight_preserves_0006_version_and_acl() -> None:
 
 
 @pytest.mark.parametrize("member_role", [APPLICATION_ROLE, APPLICATION_GROUP, MIGRATION_ROLE])
+@pytest.mark.parametrize("execution_mode", ["online", "offline"])
 def test_unexpected_outgoing_membership_preserves_0006_version_and_acl(
-    member_role: str,
+    member_role: str, execution_mode: str
 ) -> None:
     with _provision_privilege_database(
         revision="0006_navigator_closed_loop"
@@ -1117,15 +1118,26 @@ def test_unexpected_outgoing_membership_preserves_0006_version_and_acl(
                         )
                     )
 
-            result = _alembic(
-                application_url=database.application_url,
-                migration_url=database.migration_url,
-                arguments=["upgrade", "head"],
-                check=False,
-            )
-
-            assert result.returncode != 0
-            assert "unexpected outgoing role membership" in result.stderr
+            if execution_mode == "online":
+                result = _alembic(
+                    application_url=database.application_url,
+                    migration_url=database.migration_url,
+                    arguments=["upgrade", "head"],
+                    check=False,
+                )
+                assert result.returncode != 0
+                assert "unexpected outgoing role membership" in result.stderr
+            else:
+                artifact = _offline_0007_artifact(database)
+                with pytest.raises(
+                    psycopg.errors.RaiseException,
+                    match="unexpected outgoing role membership",
+                ):
+                    with psycopg.connect(
+                        _psycopg_url(make_url(database.migration_url)),
+                        autocommit=True,
+                    ) as connection:
+                        connection.execute(artifact)
             assert _acl_snapshot(database) == before
             engine = create_engine(database.migration_url)
             try:
@@ -1216,6 +1228,109 @@ def test_unexpected_relation_kind_preserves_0006_version_and_acl(
         assert result.returncode != 0
         assert object_name in result.stderr
         assert "review catalog drift before retrying" in result.stderr
+        assert _acl_snapshot(database) == before
+        engine = create_engine(database.migration_url)
+        try:
+            with engine.connect() as connection:
+                assert connection.scalar(
+                    text("SELECT version_num FROM alembic_version")
+                ) == "0006_navigator_closed_loop"
+        finally:
+            engine.dispose()
+
+
+def _offline_0007_artifact(database: PrivilegeDatabase) -> str:
+    rendered = _alembic(
+        application_url=database.application_url,
+        migration_url=database.migration_url,
+        arguments=[
+            "upgrade",
+            "--sql",
+            "0006_navigator_closed_loop:0007_database_least_privilege",
+        ],
+    )
+    return rendered.stdout
+
+
+def test_offline_0007_artifact_executes_from_revision_0006() -> None:
+    with _provision_privilege_database(
+        revision="0006_navigator_closed_loop"
+    ) as database:
+        artifact = _offline_0007_artifact(database)
+
+        with psycopg.connect(
+            _psycopg_url(make_url(database.migration_url)), autocommit=True
+        ) as connection:
+            connection.execute(artifact)
+            version = connection.execute(
+                "SELECT version_num FROM alembic_version"
+            ).fetchone()
+
+        assert version == ("0007_database_least_privilege",)
+
+
+@pytest.mark.parametrize("object_kind", ["sequence", "foreign table"])
+def test_offline_0007_artifact_rolls_back_catalog_drift(object_kind: str) -> None:
+    with _provision_privilege_database(
+        revision="0006_navigator_closed_loop"
+    ) as database:
+        object_name = (
+            f"unexpected_offline_{object_kind.replace(' ', '_')}_{uuid4().hex[:16]}"
+        )
+        with psycopg.connect(
+            _psycopg_url(make_url(database.bootstrap_url)), autocommit=True
+        ) as bootstrap:
+            if object_kind == "foreign table":
+                bootstrap.execute("CREATE EXTENSION postgres_fdw")
+                bootstrap.execute(
+                    sql.SQL("GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO {}").format(
+                        sql.Identifier(MIGRATION_ROLE)
+                    )
+                )
+        with psycopg.connect(
+            _psycopg_url(make_url(database.migration_url)), autocommit=True
+        ) as owner:
+            if object_kind == "sequence":
+                owner.execute(
+                    sql.SQL("CREATE SEQUENCE public.{}").format(
+                        sql.Identifier(object_name)
+                    )
+                )
+                owner.execute(
+                    sql.SQL("GRANT SELECT ON SEQUENCE public.{} TO {}").format(
+                        sql.Identifier(object_name), sql.Identifier(APPLICATION_ROLE)
+                    )
+                )
+            else:
+                server_name = f"unexpected_offline_server_{uuid4().hex}"
+                owner.execute(
+                    sql.SQL(
+                        "CREATE SERVER {} FOREIGN DATA WRAPPER postgres_fdw "
+                        "OPTIONS (host '127.0.0.1', dbname 'postgres')"
+                    ).format(sql.Identifier(server_name))
+                )
+                owner.execute(
+                    sql.SQL(
+                        "CREATE FOREIGN TABLE public.{} (id integer) SERVER {} "
+                        "OPTIONS (table_name 'pg_class')"
+                    ).format(
+                        sql.Identifier(object_name), sql.Identifier(server_name)
+                    )
+                )
+                owner.execute(
+                    sql.SQL("GRANT SELECT ON TABLE public.{} TO {}").format(
+                        sql.Identifier(object_name), sql.Identifier(APPLICATION_ROLE)
+                    )
+                )
+        before = _acl_snapshot(database)
+        artifact = _offline_0007_artifact(database)
+
+        with pytest.raises(psycopg.errors.RaiseException, match=object_name):
+            with psycopg.connect(
+                _psycopg_url(make_url(database.migration_url)), autocommit=True
+            ) as connection:
+                connection.execute(artifact)
+
         assert _acl_snapshot(database) == before
         engine = create_engine(database.migration_url)
         try:

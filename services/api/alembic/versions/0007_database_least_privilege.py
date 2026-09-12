@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 
-from alembic import op
+from alembic import context, op
 from app.config import settings
 from app.db.privilege_contracts import v0007
 from app.db.privilege_validation import (
@@ -33,6 +33,214 @@ APPLICATION_FUNCTIONS = v0007.APPLICATION_FUNCTIONS
 def _function_identity(function_name: str) -> str:
     arguments = "safety_severity" if function_name == "safety_severity_rank" else ""
     return f"public.{function_name}({arguments})"
+
+
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _offline_expected_relations() -> str:
+    return ",\n                ".join(
+        f"({_sql_literal(name)}, {_sql_literal(kind)})"
+        for name, kind in v0007.EXPECTED_RELATION_KINDS
+    )
+
+
+def _offline_expected_functions() -> str:
+    values = []
+    for name in APPLICATION_FUNCTIONS:
+        arguments = "value safety_severity" if name == "safety_severity_rank" else ""
+        values.append(f"({_sql_literal(name)}, {_sql_literal(arguments)})")
+    return ",\n                ".join(values)
+
+
+def _emit_offline_preflight(*, migration_role: str, application_role: str) -> None:
+    migration_literal = _sql_literal(migration_role)
+    application_literal = _sql_literal(application_role)
+    group_literal = _sql_literal(APPLICATION_GROUP)
+    expected_relations = _offline_expected_relations()
+    expected_functions = _offline_expected_functions()
+    op.execute(
+        f"""
+        -- DATABASE PRIVILEGE PREFLIGHT 0007
+        DO $ojcc_preflight$
+        DECLARE
+            migration_role constant text := {migration_literal};
+            application_role constant text := {application_literal};
+            application_group constant text := {group_literal};
+            drift_name text;
+            drift_kind text;
+        BEGIN
+            IF migration_role = application_role
+               OR migration_role = application_group
+               OR application_role = application_group THEN
+                RAISE EXCEPTION 'database privilege preflight requires three distinct roles';
+            END IF;
+
+            IF (SELECT count(*) FROM pg_roles WHERE rolname IN
+                (migration_role, application_role, application_group)) <> 3 THEN
+                RAISE EXCEPTION 'database privilege preflight is missing required roles';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = migration_role
+                  AND (NOT rolcanlogin OR NOT rolinherit OR rolsuper OR rolcreaterole
+                       OR rolreplication OR rolbypassrls)
+            ) THEN
+                RAISE EXCEPTION 'database privilege preflight rejected migration owner profile';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = application_role
+                  AND (NOT rolcanlogin OR NOT rolinherit OR rolsuper OR rolcreaterole
+                       OR rolcreatedb OR rolreplication OR rolbypassrls)
+            ) THEN
+                RAISE EXCEPTION 'database privilege preflight rejected application role profile';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = application_group
+                  AND (rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb
+                       OR rolreplication OR rolbypassrls)
+            ) THEN
+                RAISE EXCEPTION 'database privilege preflight rejected application group profile';
+            END IF;
+
+            IF (SELECT count(*) FROM pg_auth_members membership
+                JOIN pg_roles member ON member.oid = membership.member
+                WHERE member.rolname IN
+                    (migration_role, application_role, application_group)) <> 1
+               OR NOT EXISTS (
+                    SELECT 1 FROM pg_auth_members membership
+                    JOIN pg_roles member ON member.oid = membership.member
+                    JOIN pg_roles granted ON granted.oid = membership.roleid
+                    WHERE member.rolname = application_role
+                      AND granted.rolname = application_group
+                      AND membership.inherit_option
+                      AND NOT membership.set_option
+                      AND NOT membership.admin_option
+               ) THEN
+                RAISE EXCEPTION 'unexpected outgoing role membership';
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_database database
+                JOIN pg_roles owner ON owner.oid = database.datdba
+                WHERE database.datname = current_database()
+                  AND owner.rolname = migration_role
+                  AND current_user = migration_role
+            ) OR NOT EXISTS (
+                SELECT 1 FROM pg_namespace namespace
+                JOIN pg_roles owner ON owner.oid = namespace.nspowner
+                WHERE namespace.nspname = 'public' AND owner.rolname = migration_role
+            ) THEN
+                RAISE EXCEPTION 'migration login must own the target database and public schema';
+            END IF;
+
+            WITH expected(relname, relkind) AS (
+                VALUES {expected_relations}
+            ), actual AS (
+                SELECT class.relname, class.relkind::text AS relkind,
+                       owner.rolname AS owner
+                FROM pg_class class
+                JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+                JOIN pg_roles owner ON owner.oid = class.relowner
+                WHERE namespace.nspname = 'public'
+                  AND class.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_class'::regclass
+                        AND dependency.objid = class.oid
+                        AND dependency.deptype = 'e'
+                  )
+            )
+            SELECT coalesce(actual.relname, expected.relname),
+                   coalesce(actual.relkind, expected.relkind)
+              INTO drift_name, drift_kind
+              FROM expected FULL JOIN actual USING (relname, relkind)
+             WHERE expected.relname IS NULL OR actual.relname IS NULL
+                OR actual.owner <> migration_role
+             ORDER BY 1, 2 LIMIT 1;
+            IF drift_name IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'public application relation boundary drift: object % kind %; '
+                    'review catalog drift before retrying',
+                    drift_name, drift_kind;
+            END IF;
+
+            drift_name := NULL;
+            WITH expected(proname, identity_arguments) AS (
+                VALUES {expected_functions}
+            ), actual AS (
+                SELECT proc.proname,
+                       pg_get_function_identity_arguments(proc.oid) AS identity_arguments,
+                       owner.rolname AS owner
+                FROM pg_proc proc
+                JOIN pg_namespace namespace ON namespace.oid = proc.pronamespace
+                JOIN pg_roles owner ON owner.oid = proc.proowner
+                WHERE namespace.nspname = 'public'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_proc'::regclass
+                        AND dependency.objid = proc.oid
+                        AND dependency.deptype = 'e'
+                  )
+            )
+            SELECT coalesce(actual.proname, expected.proname)
+              INTO drift_name
+              FROM expected FULL JOIN actual USING (proname, identity_arguments)
+             WHERE expected.proname IS NULL OR actual.proname IS NULL
+                OR actual.owner <> migration_role
+             ORDER BY 1 LIMIT 1;
+            IF drift_name IS NOT NULL THEN
+                RAISE EXCEPTION
+                    'public application function boundary drift: function %', drift_name;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM pg_class class
+                JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+                JOIN pg_roles owner ON owner.oid = class.relowner
+                WHERE namespace.nspname = 'public' AND owner.rolname = application_role
+                UNION ALL
+                SELECT 1 FROM pg_proc proc
+                JOIN pg_namespace namespace ON namespace.oid = proc.pronamespace
+                JOIN pg_roles owner ON owner.oid = proc.proowner
+                WHERE namespace.nspname = 'public' AND owner.rolname = application_role
+            ) THEN
+                RAISE EXCEPTION 'application login must not own public objects';
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM pg_class class
+                JOIN pg_namespace namespace ON namespace.oid = class.relnamespace
+                JOIN pg_roles owner ON owner.oid = class.relowner
+                WHERE namespace.nspname = 'public'
+                  AND class.relkind IN ('r', 'p', 'v', 'm', 'S', 'f', 'i', 'I')
+                  AND owner.rolname <> migration_role
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_class'::regclass
+                        AND dependency.objid = class.oid
+                        AND dependency.deptype = 'e'
+                  )
+                UNION ALL
+                SELECT 1 FROM pg_type type
+                JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
+                JOIN pg_roles owner ON owner.oid = type.typowner
+                WHERE namespace.nspname = 'public'
+                  AND type.typtype IN ('c', 'd', 'e', 'm', 'r')
+                  AND owner.rolname <> migration_role
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_depend dependency
+                      WHERE dependency.classid = 'pg_type'::regclass
+                        AND dependency.objid = type.oid
+                        AND dependency.deptype = 'e'
+                  )
+            ) THEN
+                RAISE EXCEPTION 'migration login must own every non-extension public object';
+            END IF;
+        END
+        $ojcc_preflight$
+        """
+    )
 
 
 def _role_profile(bind: sa.Connection, role_names: tuple[str, str]) -> dict[str, dict]:
@@ -339,19 +547,29 @@ def upgrade() -> None:
         application_url=settings.database_url,
         migration_url=settings.require_migration_database_url(),
     )
-    bind = op.get_bind()
-    _validate_role_profile(
-        bind,
-        migration_role=migration_target.username,
-        application_role=application_target.username,
-    )
-    _validate_ownership(
-        bind,
-        migration_role=migration_target.username,
-        application_role=application_target.username,
-    )
+    if context.is_offline_mode():
+        _emit_offline_preflight(
+            migration_role=migration_target.username,
+            application_role=application_target.username,
+        )
+        op.execute(
+            "SELECT set_config('ojcc.application_role', "
+            f"{_sql_literal(application_target.username)}, true)"
+        )
+    else:
+        bind = op.get_bind()
+        _validate_role_profile(
+            bind,
+            migration_role=migration_target.username,
+            application_role=application_target.username,
+        )
+        _validate_ownership(
+            bind,
+            migration_role=migration_target.username,
+            application_role=application_target.username,
+        )
+        _set_application_role(bind, application_role=application_target.username)
 
-    _set_application_role(bind, application_role=application_target.username)
     _revoke_dynamic_application_privileges()
     _configure_database_and_schema()
     _configure_relations()

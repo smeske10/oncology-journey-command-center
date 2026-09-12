@@ -274,3 +274,26 @@ def test_alembic_accepts_a_matching_target_pair_for_offline_sql() -> None:
 
     assert result.returncode == 0, result.stderr
     assert "CREATE TABLE organization" in result.stdout
+
+
+def test_alembic_renders_0007_execution_preflight_without_connecting() -> None:
+    result = _run_offline_alembic(
+        application_url=(
+            "postgresql+psycopg://runtime:runtime-secret-sentinel@target.invalid/ojcc_target_a"
+        ),
+        migration_url=(
+            "postgresql://owner:owner-secret-sentinel@TARGET.INVALID:5432/ojcc_target_a"
+        ),
+    )
+
+    assert result.returncode == 0, result.stderr
+    migration_0007 = result.stdout.split(
+        "Running upgrade 0006_navigator_closed_loop -> 0007_database_least_privilege"
+    )[1]
+    assert "DATABASE PRIVILEGE PREFLIGHT 0007" in migration_0007
+    assert migration_0007.index("DATABASE PRIVILEGE PREFLIGHT 0007") < migration_0007.index(
+        "REVOKE ALL PRIVILEGES"
+    )
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert "runtime-secret-sentinel" not in combined
+    assert "owner-secret-sentinel" not in combined

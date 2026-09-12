@@ -2,7 +2,7 @@
 
 Created: 2026-09-11
 
-Status: **Original Tasks 1–6 and corrective Task 1 complete; corrective Task 2 next.**
+Status: **Original Tasks 1–6 and corrective Tasks 1–2 complete; corrective Task 3 next.**
 
 ## Milestone boundary
 
@@ -352,12 +352,12 @@ Every database below was fresh, UUID-suffixed, and ordinarily dropped. Rows mark
 
 ## Next exact step
 
-Implement corrective Task 2 from the
+Implement corrective Task 3 from the
 [Database Privilege Closure Implementation Plan](../plans/2026-09-12-database-privilege-closure-implementation.md):
-add execution-time preflight to offline migration 0007, then prove valid execution and atomic
-refusal from revision 0006. Push and PR remain after the corrective verification gates and
-independent review; merge, deployment, worktree removal, and deferred milestones remain out of
-scope.
+add fail-closed runtime database attestation to the FastAPI startup lifespan and prove real process
+startup/refusal behavior without changing liveness or import behavior. Push and PR remain after the
+corrective verification gates and independent review; merge, deployment, worktree removal, and
+deferred milestones remain out of scope.
 
 ### Pre-PR corrective design — implementation pending
 
@@ -391,6 +391,24 @@ scope.
 - GREEN evidence: the focused contract and privilege gate passed 20 tests in 46.19 seconds; Ruff
   passed. The three membership cases and real sequence/`postgres_fdw` foreign-table cases each used
   a fresh recorded disposable database and were dropped normally.
+
+## Corrective Task 2 — complete
+
+- Migration 0007 now branches explicitly between online catalog reads and offline PostgreSQL `DO`
+  assertions. Raw `head --sql` generation uses no connection and keeps role identifiers as quoted
+  literals without rendering either credential password.
+- The offline assertions cover required role profiles, the exact outgoing membership graph,
+  current owner identity, database/schema/object ownership, the six-kind relation set, and the
+  complete function set before the first 0007 ACL change.
+- Real execution of the generated `0006:0007` artifact reaches head for a valid database. Extra
+  membership, sequence, and `postgres_fdw` foreign-table drift raise inside its transaction and
+  preserve revision 0006 and the independently captured ACL snapshot.
+- RED evidence: raw head generation failed by attempting `.mappings()` on Alembic's offline mock
+  result. The first executing artifact then exposed a PostgreSQL `text` versus internal `char`
+  comparison mismatch, which the execution test caught before completion.
+- GREEN evidence: the final focused offline generation, membership-equivalence, execution, and
+  downgrade gate passed 35 tests in 53.31 seconds; Ruff passed. Every new disposable database
+  reported ordinary cleanup.
 
 ## Task 6 — complete
 
