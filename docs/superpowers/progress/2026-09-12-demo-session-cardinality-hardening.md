@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Architecture and amended implementation plan approved. Task 1 complete and awaiting its execution checkpoint; Tasks 2–5 not started.
+**Status:** Architecture and amended implementation plan approved. Tasks 1–2 complete; Task 2 is awaiting its execution checkpoint. Tasks 3–5 not started.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -82,7 +82,7 @@ The user-provided Skills catalog path under `Codex Cowork\Codex Skills` was abse
 - [Implementation plan](../plans/2026-09-12-demo-session-cardinality-hardening-implementation.md)
 - This ledger.
 
-The documents and Task 1 changes are pending the Task 1 commit. No PostgreSQL database has been created, inspected, connected to, seeded, reset, migrated, or dropped. Persistent ojcc was not accessed. No credentials were printed.
+The planning documents and Task 1 changes were committed as `d952728`. Task 1 did not access PostgreSQL. No credentials were printed.
 
 ## Execution record after approval
 
@@ -125,13 +125,88 @@ The user approved the amended implementation plan and authorized Task 1 on branc
   `git diff --check` passed with only line-ending notices.
 - No database connection was attempted, and no disposable database was created or reserved.
 
-Tasks 2–5 remain pending. Do not start Task 2 without the next execution checkpoint.
+The user accepted the Task 1 checkpoint and explicitly authorized Task 2. Tasks 3–5 remained pending.
+
+### Task 2 — one cardinality-safe authority resolver
+
+- Started from clean Task 1 commit `d952728` in the existing linked worktree. The repository-local
+  PostgreSQL container could not start because loopback port 5432 was already held by a compatible
+  repository PostgreSQL 16 service. The stopped container, empty volume, and network created by
+  that failed bind were removed; the working service was not changed. All three synthetic roles
+  from `.env.example` connected successfully without printing credentials.
+- Disposable smoke GREEN: committed owner setup was visible to a runtime SELECT session in
+  `ojcc_migration_test_e5f137d800c241eba795adf1670cf6f0`; **1 passed**, then ordinary drop.
+- Overlap setup initially failed before resolver execution because the test inserted unlinked ORM
+  objects in one flush; `ojcc_migration_test_aa974f0118a043f38b98fbe2e1b7beaf` was dropped. After
+  correcting only fixture flush ordering, PostgreSQL accepted one finite and one open effective
+  grant and the intended RED was missing `resolve_authority`; database
+  `ojcc_migration_test_518085ba4c9d489dafd6d9dd48b43201` was dropped.
+- Compiled-query GREEN: the literal SQL proves `[granted_at, revoked_at)` predicates and no
+  `DISTINCT`/`LIMIT`; **1 passed** without a database. Role-interpreter RED was the missing
+  `authority_from_row` interface; zero/one/many role cardinality then produced **4 passed**.
+- Repository overlap GREEN: one SELECT delegates to the interpreter and raises the stable
+  ambiguity error for multiple grant record IDs; **1 passed** in
+  `ojcc_migration_test_bd1a8f7072a442398b635c215295642e`, then ordinary drop.
+- Temporal/envelope RED: **12 passed, 1 failed** because an inactive user with one effective grant
+  was authorized in `ojcc_migration_test_2101da68fdf14e13a755acd1519914a1`, then ordinary drop.
+  Direct invalid-anchor cases also produced **4 intended failures**. Missing organization/user and
+  inactive/unknown activity branches were added; the combined temporal/anchor GREEN was
+  **17 passed** in `ojcc_migration_test_9eea0435fba447a19e249752e5e0ff70`, then ordinary drop.
+- Database-error RED exposed the injected SQLAlchemy sentinel. Translation to
+  `AuthorityDatabaseUnavailableError` from None then produced **1 passed** without a database or
+  raw context.
+- Forward-link RED: both legal overlapping finite-link shapes failed to raise ambiguity (**2
+  failed**) in `ojcc_migration_test_adfe0f9f8768414bb963a8f668c7b2bc`, then ordinary drop.
+  Record-ID and patient-ID aggregates produced **2 passed** in
+  `ojcc_migration_test_fb994f5e1f304359a7d6a1730c6be412`, then ordinary drop.
+- Reverse-link RED: an effective conflicting link held by an inactive user was not counted in
+  `ojcc_migration_test_8d94bcfdc34e4388b6a71154adf08188`; **1 failed**, then ordinary drop.
+  The independent reverse aggregate produced **1 passed** in
+  `ojcc_migration_test_481bda78c4cb4ef18f7e22f098a67495`, then ordinary drop.
+- Staff-link isolation was already correctly branched: **1 passed** in
+  `ojcc_migration_test_91647d38204e415cbb8c87a3732fb404`, then ordinary drop.
+- Async parity RED: valid authority passed while overlapping grants escaped as SQLAlchemy
+  `MultipleResultsFound` (**1 passed, 1 failed**) in
+  `ojcc_migration_test_b833912512b644e9bd30f2312f6598e2`, then ordinary drop. Delegating the
+  wrapper to the shared statement/interpreter produced **2 passed**, exactly one awaited query
+  each, in `ojcc_migration_test_02ec2f967da94678b357d7a175d80722`, then ordinary drop.
+- Complete new authority suite: **31 passed** in
+  `ojcc_migration_test_2ff663b65f8a43eea3133ed177a3b6ee`, then ordinary drop.
+- Required two-file integration verification used an outer migrated database for the legacy
+  rollback suite and a nested authority database: **37 passed, zero skipped**. Both
+  `ojcc_migration_test_828a8048fac34728959eec41a1c54d5c` and
+  `ojcc_migration_test_0ddd8e2180d44f4dbcc59c030eb908f2` were dropped normally. Persistent
+  `ojcc` was not migrated, seeded, or used for test writes.
+- Ruff and Pyright were clean before the final evidence update. No migration file changed and no
+  migration 0008 was created.
+- Fresh completion gate: the required two-file integration run produced **37 passed, zero skipped**
+  using outer `ojcc_migration_test_50702354998c4c90a43b1aca99f71a37` and nested
+  `ojcc_migration_test_5524492f83b247e78be9dccf7a26e369`; both dropped normally. Task 1
+  regression suites produced **50 passed**; Ruff produced **All checks passed**; Pyright produced
+  **0 errors, 0 warnings, 0 informations**; the immutable-byte guard produced **7 passed, 18
+  deselected**; and `git diff --check` passed with only line-ending notices.
+- Async parity tests were then moved, without behavior changes, into the existing identity
+  integration file named by the approved plan. The focused refactor check produced **2 passed, 6
+  deselected** in `ojcc_migration_test_ce6d86380f5846848951a5f1e835c163`, then ordinary drop.
+- Post-refactor completion gate: the exact two-file patch produced **37 passed, zero skipped** using
+  outer `ojcc_migration_test_328a66c0b37542ef88aa0bab8c4763d2` and nested
+  `ojcc_migration_test_6db59ad9903e47ba9aa4afa3bde9bf17`; both dropped normally. Task 1
+  regressions again produced **50 passed**; Ruff, Pyright, seven hashes, and `git diff --check`
+  again passed with the same clean results.
+- A read-only cleanup audit observed two pre-existing prefixed databases not emitted by this task,
+  `ojcc_migration_test_1c7d3d26610c4b68ad94fb3fd9cb6a1d` and
+  `ojcc_migration_test_e51d4f44b6a4475688c57eaaf82e4753`. Their ownership was not established,
+  so they were left untouched. Every database emitted by Task 2 was dropped normally.
+
+All named disposable databases were newly generated and dropped normally. Task 3 remains pending;
+do not begin token or HTTP reauthorization work without the next execution checkpoint.
 
 ## Conditional-approval amendment
 
 The user approved the architecture and retained the explicit actor roster, strict cardinality,
 authority-bound version-2 tokens, controlled legacy-token 401 behavior, and no-migration-0008
-boundary. Implementation remains unauthorized until the amended plan is reviewed.
+boundary. At this historical checkpoint, implementation remained unauthorized until the amended
+plan was reviewed; the later Task 1 and Task 2 execution records supersede that status.
 
 Three review gaps were verified and corrected in planning only:
 
@@ -151,5 +226,5 @@ At this conditional-approval checkpoint, no production or test file had been cha
 database had been accessed. The later Task 1 execution record above supersedes that historical
 working-tree statement.
 
-**Next exact step:** Commit the verified Task 1 changes, report the Task 1 execution checkpoint, and
-wait for authorization before Task 2.
+**Next exact step:** Commit `fix: reject ambiguous effective session authority`, report the Task 2
+execution checkpoint, and wait for authorization before Task 3.

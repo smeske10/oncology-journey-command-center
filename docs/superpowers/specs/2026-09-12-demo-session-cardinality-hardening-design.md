@@ -1,7 +1,7 @@
 # Demo-session authentication and authorization-cardinality hardening
 
 **Date:** 2026-09-12 (America/New_York)
-**Status:** Architecture and amended implementation plan approved; Task 1 implemented. Tasks 2–5 pending execution checkpoints.
+**Status:** Architecture and amended implementation plan approved; Tasks 1–2 implemented. Tasks 3–5 pending execution checkpoints.
 **Plan amended:** 2026-09-13 (America/New_York)
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 authentication/authorization closure supporting Week 4 release readiness.
 **Base:** `0a3cda82203d850992f2efc3653b653c8253459c`

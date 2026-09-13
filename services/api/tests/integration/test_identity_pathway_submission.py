@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import socket
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
-from app.auth.dependencies import current_actor
+from app.auth.authority import AmbiguousAuthorityError
+from app.auth.dependencies import current_actor, resolve_patient_actor
 from app.auth.models import CurrentActor
 from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.config import settings
@@ -30,6 +32,18 @@ from app.db.models import (
     User,
 )
 from app.domain.enums import CheckInStatus, SubmissionSource, UserRole
+
+ASYNC_CHECKED_AT = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
+
+
+class AsyncSessionBridge:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self.execute_count = 0
+
+    async def execute(self, statement: object) -> object:
+        self.execute_count += 1
+        return self._session.execute(statement)  # type: ignore[arg-type]
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -75,6 +89,88 @@ def _identity_fixture(session: Session) -> tuple[Organization, User, SyntheticPa
     session.add(patient)
     session.flush()
     return organization, user, patient
+
+
+def _async_patient_authority_fixture(
+    session: Session,
+    *,
+    overlapping_roles: bool,
+) -> tuple[Organization, User, SyntheticPatient]:
+    organization, user, patient = _identity_fixture(session)
+    roles = [
+        RoleAssignment(
+            organization_id=organization.id,
+            user_id=user.id,
+            role=UserRole.SUPPORTING_ACTOR,
+            granted_at=ASYNC_CHECKED_AT - timedelta(hours=1),
+        )
+    ]
+    if overlapping_roles:
+        roles.append(
+            RoleAssignment(
+                organization_id=organization.id,
+                user_id=user.id,
+                role=UserRole.SUPPORTING_ACTOR,
+                granted_at=ASYNC_CHECKED_AT - timedelta(hours=2),
+                revoked_at=ASYNC_CHECKED_AT + timedelta(hours=1),
+            )
+        )
+    session.add_all(roles)
+    session.add(
+        PatientIdentityLink(
+            organization_id=organization.id,
+            user_id=user.id,
+            patient_id=patient.id,
+            linked_at=ASYNC_CHECKED_AT - timedelta(hours=1),
+        )
+    )
+    session.flush()
+    return organization, user, patient
+
+
+def test_async_wrapper_matches_valid_patient_authority(db_session: Session) -> None:
+    organization, user, patient = _async_patient_authority_fixture(
+        db_session,
+        overlapping_roles=False,
+    )
+    bridge = AsyncSessionBridge(db_session)
+
+    actor = asyncio.run(
+        resolve_patient_actor(
+            bridge,  # type: ignore[arg-type]
+            organization_id=organization.id,
+            user_id=user.id,
+            at=ASYNC_CHECKED_AT,
+        )
+    )
+
+    assert actor == CurrentActor(
+        user_id=user.id,
+        organization_id=organization.id,
+        role=UserRole.SUPPORTING_ACTOR,
+        patient_id=patient.id,
+    )
+    assert bridge.execute_count == 1
+
+
+def test_async_wrapper_matches_ambiguous_patient_authority(db_session: Session) -> None:
+    organization, user, _ = _async_patient_authority_fixture(
+        db_session,
+        overlapping_roles=True,
+    )
+    bridge = AsyncSessionBridge(db_session)
+
+    with pytest.raises(AmbiguousAuthorityError):
+        asyncio.run(
+            resolve_patient_actor(
+                bridge,  # type: ignore[arg-type]
+                organization_id=organization.id,
+                user_id=user.id,
+                at=ASYNC_CHECKED_AT,
+            )
+        )
+
+    assert bridge.execute_count == 1
 
 
 def test_patient_identity_link_resolves_separate_patient_actor_in_its_organization(

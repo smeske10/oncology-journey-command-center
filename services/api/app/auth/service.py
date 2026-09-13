@@ -12,9 +12,15 @@ from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.auth.models import CurrentActor, Role
+from app.auth.authority import (
+    AuthorityDatabaseUnavailableError,
+    authority_from_row,
+    build_authority_statement,
+)
+from app.auth.models import CurrentActor, ResolvedAuthority, Role
 from app.db.models import PatientIdentityLink, RoleAssignment, User
 
 TOKEN_ISSUER = "ojcc-demo"
@@ -23,6 +29,15 @@ MAX_SESSION_LIFETIME_SECONDS = 2 * 60 * 60
 
 
 class ActorRepository(Protocol):
+    def resolve_authority(
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        role: Role,
+        at: datetime | None = None,
+    ) -> ResolvedAuthority | None: ...
+
     def find_active_actor(
         self, *, organization_id: UUID, role: Role, at: datetime | None = None
     ) -> CurrentActor | None: ...
@@ -31,6 +46,33 @@ class ActorRepository(Protocol):
 class SqlAlchemyActorRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def resolve_authority(
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        role: Role,
+        at: datetime | None = None,
+    ) -> ResolvedAuthority | None:
+        checked_at = datetime.now(UTC) if at is None else at
+        try:
+            row = self._session.execute(
+                build_authority_statement(
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    role=role,
+                    at=checked_at,
+                )
+            ).one_or_none()
+        except SQLAlchemyError:
+            raise AuthorityDatabaseUnavailableError() from None
+        return authority_from_row(
+            row,
+            organization_id=organization_id,
+            user_id=user_id,
+            role=role,
+        )
 
     def find_active_actor(
         self, *, organization_id: UUID, role: Role, at: datetime | None = None

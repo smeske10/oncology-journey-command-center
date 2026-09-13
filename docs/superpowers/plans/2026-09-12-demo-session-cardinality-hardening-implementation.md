@@ -1,6 +1,6 @@
 # Demo-session authentication and authorization-cardinality hardening implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` after user approval to implement this plan task-by-task. Do not delegate unless separately authorized. Checkboxes track completed work; Task 1 was implemented after explicit approval.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` after user approval to implement this plan task-by-task. Do not delegate unless separately authorized. Checkboxes track completed work; Tasks 1–2 were implemented after their explicit execution approvals.
 
 **Date:** 2026-09-12 (America/New_York); amended 2026-09-13
 **Goal:** Make demo actor selection explicit and session authority unambiguous while preserving stored history and delivered journeys.
@@ -109,10 +109,10 @@ def test_staff_configuration_rejects_patient_field():
 `AmbiguousAuthorityError` and `AuthorityDatabaseUnavailableError` carry only stable messages.
 Preserve `resolve_patient_actor(...)->CurrentActor` as an async wrapper around the same authority rules; no new async service/runtime.
 
-- [ ] Create the disposable authority fixture with independently generated IDs, committed owner setup, runtime SELECT session, and one fixed UTC instant. Run a smoke case and record the fresh database's ordinary cleanup.
-- [ ] Write `test_overlapping_roles_refuse_authority` using one finite role spanning the instant and one open role. Do not disable constraints.
-- [ ] Run only that test. Expected RED: missing new resolver interface or baseline `MultipleResultsFound`; record that PostgreSQL accepted the legal overlap.
-- [ ] Add the desired assertion:
+- [x] Create the disposable authority fixture with independently generated IDs, committed owner setup, runtime SELECT session, and one fixed UTC instant. Run a smoke case and record the fresh database's ordinary cleanup.
+- [x] Write `test_overlapping_roles_refuse_authority` using one finite role spanning the instant and one open role. Do not disable constraints.
+- [x] Run only that test. Expected RED: missing new resolver interface or baseline `MultipleResultsFound`; record that PostgreSQL accepted the legal overlap.
+- [x] Add the desired assertion:
 ```python
 with pytest.raises(AmbiguousAuthorityError):
     repository.resolve_authority(
@@ -120,22 +120,22 @@ with pytest.raises(AmbiguousAuthorityError):
         role=Role.SUPPORTING_ACTOR, at=checked_at,
 )
 ```
-- [ ] Implement only `build_authority_statement` with a user/org anchor and effective role-ID aggregate. Add a literal compiled-query assertion proving `[granted_at, revoked_at)` predicates and absence of DISTINCT/LIMIT. Run it. Expected GREEN for query shape while the behavior test remains RED.
-- [ ] Implement only `authority_from_row` role cardinality: zero → unavailable, one → extract, more than one → `AmbiguousAuthorityError`. Run interpreter unit cases. Expected GREEN while repository behavior remains RED.
-- [ ] Add `resolve_authority` to execute the statement once and pass its row to the interpreter. Rerun the overlap behavior test. Expected GREEN.
-- [ ] Write temporal role tests for starts/ends exactly at t, future grant/revocation, expired and zero-length history, adjacent grants, disjoint role/org, inactive/missing user/org, and NULL/different primary organization.
-- [ ] Run the temporal-role selection. Expected RED where the role-only envelope is incomplete.
-- [ ] Add missing-user/org/inactive envelope branches to the interpreter; rerun those named temporal cases. Expected GREEN.
-- [ ] Add SQLAlchemy error translation in `resolve_authority` as `AuthorityDatabaseUnavailableError` from None; run one injected database-error test. Expected GREEN with no raw context.
-- [ ] Write `test_multiple_effective_links_refuse_authority` for two finite links to one patient and for two patients attached to one user. Run it. Expected RED: patient cardinality is not implemented.
-- [ ] Add an independent forward-link aggregate; count link record IDs rather than distinct actor tuples. Rerun the multiple-link test. Expected GREEN.
-- [ ] Write `test_reverse_patient_link_conflict_refuses_authority`, including a conflicting link owned by an inactive user. Run it. Expected RED: reverse conflict is not counted.
-- [ ] Add the independent reverse-link aggregate and require the selected link to be the only effective link for that patient. Rerun. Expected GREEN.
-- [ ] Write `test_staff_role_ignores_patient_links`; run it, then branch staff interpretation away from link requirements only if RED. Expected final GREEN.
-- [ ] Write async-wrapper parity tests for valid and ambiguous patient authority. Run them. Expected RED: the old async join still raises/misclassifies.
-- [ ] Delegate the async wrapper to the shared builder/interpreter with exactly one awaited query. Rerun async parity tests. Expected GREEN.
-- [ ] Run both complete integration files with `-q -s`, Ruff/Pyright on touched files, seven hashes, and `git diff --check`; no PostgreSQL case may skip.
-- [ ] Update the ledger with each named RED/GREEN and database disposition; commit `fix: reject ambiguous effective session authority`.
+- [x] Implement only `build_authority_statement` with a user/org anchor and effective role-ID aggregate. Add a literal compiled-query assertion proving `[granted_at, revoked_at)` predicates and absence of DISTINCT/LIMIT. Run it. Expected GREEN for query shape while the behavior test remains RED.
+- [x] Implement only `authority_from_row` role cardinality: zero → unavailable, one → extract, more than one → `AmbiguousAuthorityError`. Run interpreter unit cases. Expected GREEN while repository behavior remains RED.
+- [x] Add `resolve_authority` to execute the statement once and pass its row to the interpreter. Rerun the overlap behavior test. Expected GREEN.
+- [x] Write temporal role tests for starts/ends exactly at t, future grant/revocation, expired and zero-length history, adjacent grants, disjoint role/org, inactive/missing user/org, and NULL/different primary organization.
+- [x] Run the temporal-role selection. Expected RED where the role-only envelope is incomplete.
+- [x] Add missing-user/org/inactive envelope branches to the interpreter; rerun those named temporal cases. Expected GREEN.
+- [x] Add SQLAlchemy error translation in `resolve_authority` as `AuthorityDatabaseUnavailableError` from None; run one injected database-error test. Expected GREEN with no raw context.
+- [x] Write `test_multiple_effective_links_refuse_authority` for two finite links to one patient and for two patients attached to one user. Run it. Expected RED: patient cardinality is not implemented.
+- [x] Add an independent forward-link aggregate; count link record IDs rather than distinct actor tuples. Rerun the multiple-link test. Expected GREEN.
+- [x] Write `test_reverse_patient_link_conflict_refuses_authority`, including a conflicting link owned by an inactive user. Run it. Expected RED: reverse conflict is not counted.
+- [x] Add the independent reverse-link aggregate and require the selected link to be the only effective link for that patient. Rerun. Expected GREEN.
+- [x] Write `test_staff_role_ignores_patient_links`; run it, then branch staff interpretation away from link requirements only if RED. Expected final GREEN.
+- [x] Write async-wrapper parity tests for valid and ambiguous patient authority. Run them. Expected RED: the old async join still raises/misclassifies.
+- [x] Delegate the async wrapper to the shared builder/interpreter with exactly one awaited query. Rerun async parity tests. Expected GREEN.
+- [x] Run both complete integration files with `-q -s`, Ruff/Pyright on touched files, seven hashes, and `git diff --check`; no PostgreSQL case may skip.
+- [x] Update the ledger with each named RED/GREEN and database disposition; commit `fix: reject ambiguous effective session authority`.
 
 ## Task 3: Explicit issuance and authority-bound reauthorization
 
