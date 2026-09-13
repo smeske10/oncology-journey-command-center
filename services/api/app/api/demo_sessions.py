@@ -3,7 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import SESSION_COOKIE_NAME
 from app.auth.models import Role
-from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
+from app.auth.service import (
+    MAX_SESSION_LIFETIME_SECONDS,
+    DemoSessionService,
+    SqlAlchemyActorRepository,
+)
 from app.config import settings
 from app.db.session import get_session
 
@@ -16,10 +20,13 @@ def get_demo_session_service(
     try:
         if settings.demo_organization_id is None:
             raise ValueError("DEMO_ORGANIZATION_ID must be configured")
+        ttl_minutes = settings.demo_session_ttl_minutes
+        if ttl_minutes is None or not 1 <= ttl_minutes <= MAX_SESSION_LIFETIME_SECONDS // 60:
+            raise ValueError("DEMO_SESSION_TTL_MINUTES must be between 1 and 120")
         return DemoSessionService(
             actor_repository=SqlAlchemyActorRepository(session),
             secret=settings.demo_session_secret,
-            ttl_minutes=settings.demo_session_ttl_minutes,
+            ttl_minutes=ttl_minutes,
             organization_id=settings.demo_organization_id,
         )
     except ValueError as error:

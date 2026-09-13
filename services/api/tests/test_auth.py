@@ -191,6 +191,85 @@ def test_demo_session_route_rejects_missing_tenant_configuration(
     assert response.json() == {"detail": "Demo sessions are not configured"}
 
 
+@pytest.mark.parametrize("ttl_minutes", [None, 0, 121])
+def test_demo_session_route_rejects_invalid_ttl_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    ttl_minutes: int | None,
+) -> None:
+    """This fails if invalid TTL state reaches session-service construction."""
+    from app.api import demo_sessions
+
+    monkeypatch.setattr(
+        demo_sessions,
+        "settings",
+        Settings(
+            demo_session_secret="test-only-signing-secret",
+            demo_session_ttl_minutes=ttl_minutes,
+            demo_organization_id=uuid4(),
+        ),
+    )
+
+    async def create_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    response = asyncio.run(create_session())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+    assert "set-cookie" not in response.headers
+
+
+def test_demo_session_route_rejects_invalid_demo_organization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This fails if malformed tenant configuration is exposed during session issuance."""
+    from app.api import demo_sessions
+
+    monkeypatch.setenv("DEMO_ORGANIZATION_ID", "not-a-uuid")
+    monkeypatch.setattr(
+        demo_sessions,
+        "settings",
+        Settings(demo_session_secret="test-only-signing-secret"),
+    )
+
+    async def create_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    response = asyncio.run(create_session())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("ttl_minutes", [None, 0, 121])
+def test_current_actor_factory_rejects_invalid_ttl_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    ttl_minutes: int | None,
+) -> None:
+    """This fails if current-session validation accepts malformed TTL configuration."""
+    from app.auth import dependencies
+
+    monkeypatch.setattr(
+        dependencies,
+        "settings",
+        Settings(
+            demo_session_secret="test-only-signing-secret",
+            demo_session_ttl_minutes=ttl_minutes,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        dependencies.get_current_demo_session_service()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Demo sessions are not configured"
+
+
 def test_demo_session_route_is_registered_without_enabling_api_docs() -> None:
     """This fails if the router is not included in the application factory."""
     from app.api.demo_sessions import router

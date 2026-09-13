@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.auth.models import CurrentActor, Role
-from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
+from app.auth.service import (
+    MAX_SESSION_LIFETIME_SECONDS,
+    DemoSessionService,
+    SqlAlchemyActorRepository,
+)
 from app.config import settings
 from app.db.models import PatientIdentityLink, RoleAssignment, User
 from app.db.session import get_session
@@ -58,10 +62,13 @@ async def resolve_patient_actor(
 
 def get_current_demo_session_service() -> DemoSessionService:
     try:
+        ttl_minutes = settings.demo_session_ttl_minutes
+        if ttl_minutes is None or not 1 <= ttl_minutes <= MAX_SESSION_LIFETIME_SECONDS // 60:
+            raise ValueError("DEMO_SESSION_TTL_MINUTES must be between 1 and 120")
         return DemoSessionService(
             actor_repository=None,
             secret=settings.demo_session_secret,
-            ttl_minutes=settings.demo_session_ttl_minutes,
+            ttl_minutes=ttl_minutes,
             organization_id=None,
         )
     except ValueError as error:

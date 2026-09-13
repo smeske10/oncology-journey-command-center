@@ -37,6 +37,7 @@ IMMUTABLE_MIGRATION_SHA256 = {
     "0004_safety_approval_lifecycle.py": "301eae2be84c8685b14b0335525fa011cc88015f654cef95212327cf4cee6704",
     "0005_workflow_knowledge_audit.py": "c81f81976dd82fde31eb70b1a271205938b9dc1ecae34e84e5780d09c3fdd5cc",
     "0006_navigator_closed_loop.py": "9b325c30e7bf0ab82925adbcfc2462546866ed07355e8fef740ac1832ee5f91b",
+    "0007_database_least_privilege.py": "7bbe68eeb878fcb6418c62354e9ee323f46e1750ee36d293f69e978ae06018f7",
 }
 DISPOSABLE_MIGRATION_DATABASE_PREFIX = "ojcc_migration_test_"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})

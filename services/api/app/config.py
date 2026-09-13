@@ -15,7 +15,22 @@ def _required_environment(name: str) -> str:
 
 def _optional_uuid_from_environment(name: str) -> UUID | None:
     value = os.getenv(name)
-    return UUID(value) if value else None
+    if value is None:
+        return None
+    try:
+        return UUID(value.strip())
+    except ValueError:
+        return None
+
+
+def _optional_int_from_environment(name: str, default: int) -> int | None:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip(), 10)
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -29,11 +44,16 @@ class Settings:
     demo_session_secret: str | None = field(
         default_factory=lambda: os.getenv("DEMO_SESSION_SECRET")
     )
-    demo_session_ttl_minutes: int = field(
-        default_factory=lambda: int(os.getenv("DEMO_SESSION_TTL_MINUTES", "30"))
+    demo_session_ttl_minutes: int | None = field(
+        default_factory=lambda: _optional_int_from_environment(
+            "DEMO_SESSION_TTL_MINUTES", 30
+        )
     )
     demo_organization_id: UUID | None = field(
         default_factory=lambda: _optional_uuid_from_environment("DEMO_ORGANIZATION_ID")
+    )
+    demo_actors_json: str | None = field(
+        default_factory=lambda: os.getenv("DEMO_ACTORS_JSON")
     )
     navigator_priority_weights_json: str | None = field(
         default_factory=lambda: os.getenv("NAVIGATOR_PRIORITY_WEIGHTS_JSON")
