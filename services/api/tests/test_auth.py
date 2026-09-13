@@ -8,10 +8,10 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.auth.demo_actors import DemoActorSelection
-from app.auth.dependencies import require_role
+from app.auth.dependencies import current_actor, require_role
 from app.auth.models import CurrentActor, ResolvedAuthority, Role, VerifiedDemoSession
 from app.auth.service import ActorRepository, DemoSessionService
 from app.config import Settings
@@ -110,6 +110,55 @@ def test_patient_facing_supporting_actor_cannot_use_navigator_permission() -> No
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Role not permitted"
+
+
+def test_http_valid_but_wrong_role_remains_forbidden() -> None:
+    app.dependency_overrides[current_actor] = lambda: _actor(Role.ADMINISTRATOR)
+
+    async def load_queue() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.get("/v1/navigator/queue")
+
+    try:
+        response = asyncio.run(load_queue())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Role not permitted"}
+
+
+def test_http_unknown_demo_role_remains_unprocessable() -> None:
+    from app.api import demo_sessions
+
+    actor = _actor(Role.NAVIGATOR)
+    session_service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
+    )
+    app.dependency_overrides[demo_sessions.get_demo_session_service] = (
+        lambda: session_service
+    )
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/unknown-role")
+
+    try:
+        response = asyncio.run(issue_session())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize(
@@ -345,6 +394,28 @@ def test_demo_sessions_reject_expired_or_overlong_tokens() -> None:
         service.verify_session(overlong_token, now=1_001)
 
 
+@pytest.mark.parametrize("ttl_minutes", [1, 120])
+def test_demo_session_accepts_ttl_boundaries_and_expires_at_exact_boundary(
+    ttl_minutes: int,
+) -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=ttl_minutes,
+        organization_id=authority.actor.organization_id,
+    )
+    issued_at = 1_000
+    expires_at = issued_at + ttl_minutes * 60
+    token = service.create_token(authority, issued_at=issued_at)
+    payload = json.loads(_decode_base64url(token.split(".")[1]))
+
+    assert payload["exp"] == expires_at
+    assert service.verify_session(token, now=expires_at - 1).authority == authority
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.verify_session(token, now=expires_at)
+
+
 @pytest.mark.parametrize(
     "claim_update",
     [
@@ -369,6 +440,42 @@ def test_demo_sessions_reject_invalid_identity_claims(claim_update: dict[str, ob
 
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
         service.verify_session(_resign_token(token, claim_update), now=1_000)
+
+
+def test_invalid_token_http_refusal_suppresses_parser_context() -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=None,
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+        demo_actors={
+            Role.NAVIGATOR: DemoActorSelection(user_id=authority.actor.user_id)
+        },
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+    invalid_token = _resign_token(token, {}, remove_claims=("ver",))
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/v1/navigator/queue",
+            "raw_path": b"/v1/navigator/queue",
+            "query_string": b"",
+            "headers": [(b"cookie", f"ojcc_session={invalid_token}".encode())],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        current_actor(request, service, object())  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid or expired demo session"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
 
 
 def test_demo_session_requires_an_environment_secret() -> None:
@@ -413,6 +520,15 @@ def test_demo_session_route_sets_a_local_http_only_cookie() -> None:
     assert "samesite=lax" in cookie
     assert "path=/" in cookie
     assert "secure" not in cookie
+    assert "max-age" not in cookie
+    assert "expires" not in cookie
+    stored_cookie = next(item for item in response.cookies.jar if item.name == "ojcc_session")
+    assert stored_cookie.domain_specified is False
+    assert stored_cookie.path == "/"
+    assert stored_cookie.expires is None
+    assert stored_cookie.secure is False
+    assert stored_cookie.has_nonstandard_attr("HttpOnly")
+    assert stored_cookie.get_nonstandard_attr("SameSite") == "lax"
 
 
 def test_demo_session_route_rejects_missing_tenant_configuration(
@@ -438,6 +554,30 @@ def test_demo_session_route_rejects_missing_tenant_configuration(
     assert response.json() == {"detail": "Demo sessions are not configured"}
 
 
+def test_demo_session_configuration_refusal_suppresses_internal_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import demo_sessions
+
+    monkeypatch.setattr(
+        demo_sessions,
+        "settings",
+        Settings(
+            demo_session_secret="test-only-signing-secret",
+            demo_organization_id=uuid4(),
+            demo_actors_json='{"navigator":',
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        demo_sessions.get_demo_session_service()
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Demo sessions are not configured"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+
+
 @pytest.mark.parametrize("ttl_minutes", [None, 0, 121])
 def test_demo_session_route_rejects_invalid_ttl_configuration(
     monkeypatch: pytest.MonkeyPatch,
@@ -459,6 +599,37 @@ def test_demo_session_route_rejects_invalid_ttl_configuration(
     async def create_session() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    response = asyncio.run(create_session())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("configured_ttl", ["", "not-an-integer"])
+def test_demo_session_route_sanitizes_malformed_ttl_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_ttl: str,
+) -> None:
+    from app.api import demo_sessions
+
+    monkeypatch.setenv("DEMO_SESSION_TTL_MINUTES", configured_ttl)
+    monkeypatch.setattr(
+        demo_sessions,
+        "settings",
+        Settings(
+            demo_session_secret=TEST_SESSION_SECRET,
+            demo_organization_id=uuid4(),
+        ),
+    )
+
+    async def create_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
             return await client.post("/v1/demo/session/navigator")
 
     response = asyncio.run(create_session())
@@ -515,13 +686,17 @@ def test_current_actor_factory_rejects_invalid_ttl_configuration(
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Demo sessions are not configured"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
 
 
 def test_demo_session_route_is_registered_without_enabling_api_docs() -> None:
     """This fails if the router is not included in the application factory."""
     from app.api.demo_sessions import router
 
-    assert "/v1/demo/session/{role}" in {route.path for route in router.routes}
+    assert "/v1/demo/session/{role}" in {
+        getattr(route, "path", None) for route in router.routes
+    }
     assert any(getattr(route, "original_router", None) is router for route in app.routes)
     assert app.docs_url is None
     assert app.redoc_url is None
@@ -557,3 +732,46 @@ def test_demo_session_route_sets_secure_cookie_outside_local_development(
 
     assert response.status_code == 204
     assert "secure" in response.headers["set-cookie"].lower()
+    stored_cookie = next(item for item in response.cookies.jar if item.name == "ojcc_session")
+    assert stored_cookie.domain_specified is False
+    assert stored_cookie.secure is True
+
+
+def test_repeated_demo_session_issuance_replaces_the_host_only_cookie() -> None:
+    from app.api import demo_sessions
+
+    actor = _actor(Role.NAVIGATOR)
+    session_service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
+    )
+    app.dependency_overrides[demo_sessions.get_demo_session_service] = (
+        lambda: session_service
+    )
+
+    async def issue_twice() -> tuple[httpx.Response, httpx.Response, str, int]:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            first = await client.post("/v1/demo/session/navigator")
+            old_cookie = client.cookies["ojcc_session"]
+            second = await client.post("/v1/demo/session/navigator")
+            current_cookie = client.cookies["ojcc_session"]
+            cookie_count = len(
+                [item for item in client.cookies.jar if item.name == "ojcc_session"]
+            )
+        assert current_cookie != old_cookie
+        return first, second, current_cookie, cookie_count
+
+    try:
+        first, second, current_cookie, cookie_count = asyncio.run(issue_twice())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.status_code == second.status_code == 204
+    assert current_cookie
+    assert cookie_count == 1

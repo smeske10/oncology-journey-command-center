@@ -19,6 +19,11 @@ class AmbiguousAuthorityError(RuntimeError):
         super().__init__("Demo session authority is ambiguous")
 
 
+class AuthorityUnavailableError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("Demo session authority is unavailable")
+
+
 class AuthorityDatabaseUnavailableError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("Demo session authority database is unavailable")

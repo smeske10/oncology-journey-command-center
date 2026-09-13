@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.auth.demo_actors import parse_demo_actors
+from app.auth.authority import (
+    AmbiguousAuthorityError,
+    AuthorityDatabaseUnavailableError,
+    AuthorityUnavailableError,
+)
+from app.auth.demo_actors import DemoActorConfigurationError, parse_demo_actors
 from app.auth.dependencies import SESSION_COOKIE_NAME
 from app.auth.models import Role
 from app.auth.service import (
@@ -31,11 +36,11 @@ def get_demo_session_service(
             organization_id=settings.demo_organization_id,
             demo_actors=parse_demo_actors(settings.demo_actors_json),
         )
-    except ValueError as error:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Demo sessions are not configured",
-        ) from error
+        ) from None
 
 
 @router.post("/session/{role}", status_code=status.HTTP_204_NO_CONTENT)
@@ -46,11 +51,21 @@ def create_demo_session(
 ) -> None:
     try:
         token = session_service.create_session(role)
-    except LookupError as error:
+    except DemoActorConfigurationError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demo sessions are not configured",
+        ) from None
+    except AuthorityDatabaseUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demo authentication is unavailable",
+        ) from None
+    except (AmbiguousAuthorityError, AuthorityUnavailableError):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Demo actor is unavailable",
-        ) from error
+        ) from None
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,

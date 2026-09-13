@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -29,6 +30,7 @@ def test_non_integer_ttl_does_not_break_config_import() -> None:
 
     result = subprocess.run(
         [sys.executable, "-c", "import app.config; print('CONFIG_IMPORTED')"],
+        cwd=Path(__file__).resolve().parents[1],
         check=False,
         capture_output=True,
         text=True,

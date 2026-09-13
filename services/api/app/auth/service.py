@@ -16,10 +16,11 @@ from sqlalchemy.orm import Session
 
 from app.auth.authority import (
     AuthorityDatabaseUnavailableError,
+    AuthorityUnavailableError,
     authority_from_row,
     build_authority_statement,
 )
-from app.auth.demo_actors import DemoActorSelection
+from app.auth.demo_actors import DemoActorConfigurationError, DemoActorSelection
 from app.auth.models import CurrentActor, ResolvedAuthority, Role, VerifiedDemoSession
 
 TOKEN_ISSUER = "ojcc-demo"
@@ -97,14 +98,16 @@ class DemoSessionService:
             raise RuntimeError("Demo session actor repository is not configured")
         selection = self._demo_actors.get(role)
         if selection is None:
-            raise LookupError("No active demo actor is available for this role")
+            raise DemoActorConfigurationError(
+                "DEMO_ACTORS_JSON has no entry for the requested role"
+            )
         authority = self._actor_repository.resolve_authority(
             organization_id=self._organization_id,
             user_id=selection.user_id,
             role=role,
         )
         if authority is None or authority.actor.patient_id != selection.patient_id:
-            raise LookupError("No active demo actor is available for this role")
+            raise AuthorityUnavailableError()
         return self.create_token(authority)
 
     def is_configured_actor(self, actor: CurrentActor) -> bool:

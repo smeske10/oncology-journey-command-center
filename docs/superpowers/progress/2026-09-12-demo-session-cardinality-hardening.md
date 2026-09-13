@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Architecture and amended implementation plan approved. Tasks 1–3 are complete and committed. Task 4 awaits explicit authorization; Task 5 has not started.
+**Status:** Architecture and amended implementation plan approved. Tasks 1–4 are complete. Task 5 has not started.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -282,8 +282,70 @@ Task 2 checkpoint and explicitly authorized Task 3. Tasks 4–5 remained pending
   exactly match the immutable ledger, no migration 0008 exists, no migration diff exists, and
   `git diff --check` passed with only Windows line-ending notices.
 
-Task 4 remains pending; do not begin its broader stable error mapping, sanitization, and process
-coverage without the next execution checkpoint.
+The user accepted the Task 3 checkpoint and explicitly authorized Task 4. Task 5 remained pending.
+
+### Task 4 — stable refusal, sanitization and cookie preservation
+
+- Missing/malformed roster HTTP preservation: the new `raise_app_exceptions=False` cases already
+  returned the exact configuration 503 with no Set-Cookie (**2 passed**). A direct boundary test
+  then produced the intended RED because the HTTP exception explicitly chained the internal roster
+  error. The configuration mapping now suppresses that context and the focused gate produced
+  **3 passed**.
+- Ambiguous issuance RED/GREEN: the first fixture attempt used two open grants and PostgreSQL
+  correctly rejected it under the existing partial unique index in
+  `ojcc_task7_eb1a29ae609d4ff6849f6da4bb932b03`; it dropped normally. The corrected legal overlap
+  (one future-ended, one open grant) produced raw HTTP 500 in
+  `ojcc_task7_dfc6a39f7cf84129b418be972cf7de23`; it dropped normally. A narrow typed ambiguity
+  translation then returned exact actor 503 with no cookie. Existing Task 3 ambiguity, revocation,
+  inactive-user, roster-drift and replacement-authority cases preserve exact no-longer-authorized
+  401 behavior.
+- Database-failure RED/GREEN: injected issuance and reauthorization SQLAlchemy failures each
+  returned raw 500 before their respective mappings. Issuance and current-request boundaries now
+  catch only `AuthorityDatabaseUnavailableError`, return exact authentication 503, suppress
+  context, and neither retry nor reuse the failed session. Sentinel coverage includes a synthetic
+  secret, database URL, SQL, parameter and token across response text, captured logs and formatted
+  traceback; none escape.
+- Compatibility and routing preservation: missing/legacy/wrong-type token version, missing/invalid
+  grant ID and invalid staff patient-link claims all stop before database access with exact invalid-
+  session 401 (**6 passed**). The direct parser-boundary test first exposed explicit exception
+  chaining and passed after suppression. Valid-but-wrong role remains exact 403 and an unknown role
+  path remains 422 (**2 passed**) without production edits.
+- Cookie and lifetime preservation: local and non-local cookies retain host-only scope, Path=/,
+  HttpOnly, SameSite=lax, local-only absence of Secure, non-local Secure, and no Max-Age/Expires.
+  Repeated issuance replaces the one cookie-jar entry. TTL 1 and 120 are accepted, the exact expiry
+  boundary refuses, absence remains 30, 0/121/non-integer/blank return sanitized configuration 503,
+  and the two-hour verification ceiling remains enforced. These checks were preservation GREEN and
+  required no cookie or TTL production edit.
+- Real-process coverage: Uvicorn passed runtime privilege attestation and served unchanged health,
+  then a temporary revoked SELECT forced the real authority query to return the stable
+  authentication 503 without a traceback, SQL, database name, or signing secret in server output.
+  The privilege was restored and only the owned process was terminated. Cleanup was strengthened
+  after review so setup, process-stop, and output-collection failures cannot bypass engine disposal.
+  Fresh process targets `ojcc_task7_33e9a1dd8d934eaabcec7c578ce74231`,
+  `ojcc_task7_f573ffa70f1844e5ba4f3740e1514461`, and
+  `ojcc_task7_c2e99d69d44a4e26bb18eb53abe644f3` all dropped normally.
+- Independent review initially found three Important issues: missing roster roles were classified as
+  actor rather than configuration failures, reauthorization did not reject a missing organization,
+  and process-test cleanup began too late. Failing HTTP tests reproduced the first two. The service
+  now distinguishes `DemoActorConfigurationError` from `AuthorityUnavailableError`, both factories
+  require the configured organization, the broad `LookupError` route catch is gone, and nested
+  cleanup guarantees engine disposal. Focused re-review found no remaining Critical or Important
+  issues and judged the task ready.
+- The first combined completion gate produced **157 passed, 1 failed** because its configuration-
+  import child resolved `app.config` from an older sibling worktree through the interpreter's
+  installed path. Anchoring that child to this worktree's API directory fixed the harness without
+  changing configuration behavior. The post-review final completion gate produced **160 passed,
+  zero skipped**. Its authority target `ojcc_migration_test_51aaa036255f4baa9e519dab815f77cc`,
+  HTTP target `ojcc_task7_63ab760cf89e494ca1df594243b5feb7`, and process target
+  `ojcc_task7_708bd6c4352e400697a093ec4e015c99` all dropped normally.
+- Ruff passed; Pyright reported **0 errors, 0 warnings, 0 informations**; the automated immutable
+  guard produced **7 passed, 18 deselected**; all seven hashes exactly match the ledger; no 0008 or
+  migration diff exists; and `git diff --check` passed with only Windows line-ending notices.
+- A read-only post-suite audit found two zero-session `ojcc_migration_test_` databases owned by the
+  bootstrap role that already existed before the final gate. They were not created by Task 4 and
+  were left untouched under the unknown-target cleanup rule.
+
+Task 5 remains pending and was not started.
 
 ## Conditional-approval amendment
 
@@ -310,5 +372,5 @@ At this conditional-approval checkpoint, no production or test file had been cha
 database had been accessed. The later Task 1 execution record above supersedes that historical
 working-tree statement.
 
-**Next exact step:** Report the Task 3 execution checkpoint and wait for explicit authorization
-before Task 4.
+**Next exact step:** Report the Task 4 execution checkpoint and wait for explicit authorization
+before Task 5.

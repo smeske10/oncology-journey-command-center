@@ -190,25 +190,25 @@ assert response.json() == {"detail": "Demo session is no longer authorized"}
 - Modify `tests/test_auth.py`, `tests/integration/test_demo_session_http.py`.
 - Create `services/api/tests/integration/test_demo_session_process.py`.
 
-- [ ] Write one missing/malformed-roster issuance test using `ASGITransport(raise_app_exceptions=False)`; assert configuration 503 and no Set-Cookie. Run it. Expected RED before narrow mapping.
-- [ ] Map only roster/config errors to the constant configuration 503 with suppressed context. Rerun. Expected GREEN.
-- [ ] Write one unavailable/ambiguous-actor issuance test; assert actor 503 and no Set-Cookie. Run it. Expected RED.
+- [x] Write one missing/malformed-roster issuance test using `ASGITransport(raise_app_exceptions=False)`; assert configuration 503 and no Set-Cookie. Run it. Expected RED before narrow mapping.
+- [x] Map only roster/config errors to the constant configuration 503 with suppressed context. Rerun. Expected GREEN.
+- [x] Write one unavailable/ambiguous-actor issuance test; assert actor 503 and no Set-Cookie. Run it. Expected RED.
 ```python
 assert response.status_code == 503
 assert response.json() == {"detail": "Demo actor is unavailable"}
 assert "set-cookie" not in response.headers
 ```
-- [ ] Map only authority unavailable/ambiguous errors to actor 503; rerun. Expected GREEN.
-- [ ] Write reauthorization ambiguity and revoked/mismatched tests; assert no-longer-authorized 401. Run; add the narrow typed mapping; rerun GREEN.
-- [ ] Write issuance database-failure test; assert 503 `Demo authentication is unavailable`. Run. Expected RED raw 500; add narrow SQLAlchemy-derived mapping from None; rerun GREEN.
-- [ ] Repeat the database-failure test for reauthorization. Run RED, add the dependency mapping without fallback/reuse of failed session, rerun GREEN.
-- [ ] Add preservation tests for wrong valid role → 403 and unknown path role → 422. Run; do not edit production if already GREEN.
-- [ ] Inject SQLAlchemy errors containing synthetic secret, URL, SQL, parameter, and token sentinels; inspect response, captured logs, and `traceback.format_exception`. Run. Expected RED if raw chain/500 escapes.
-- [ ] Suppress original exception context and never log/format caught database objects. Rerun sentinel test. Expected GREEN.
-- [ ] Add a real Uvicorn case with valid startup attestation then auth-query failure in its dedicated disposable fixture. Run it; assert stable HTTP/log output, stop only the owned process, and record ordinary cleanup.
-- [ ] Write cookie flag tests: local/nonlocal Secure, HttpOnly, SameSite=lax, Path=/, host-only, and no Max-Age/Expires. Run; treat existing passes as preservation evidence.
-- [ ] Write TTL boundary tests for absent=30, 1/120 accepted, 0/121/non-integer/blank sanitized 503, expiry boundary, and two-hour maximum. Run; implement only an observed defect; rerun GREEN.
-- [ ] Write the repeated-issuance cookie test:
+- [x] Map only authority unavailable/ambiguous errors to actor 503; rerun. Expected GREEN.
+- [x] Write reauthorization ambiguity and revoked/mismatched tests; assert no-longer-authorized 401. Run; add the narrow typed mapping; rerun GREEN.
+- [x] Write issuance database-failure test; assert 503 `Demo authentication is unavailable`. Run. Expected RED raw 500; add narrow SQLAlchemy-derived mapping from None; rerun GREEN.
+- [x] Repeat the database-failure test for reauthorization. Run RED, add the dependency mapping without fallback/reuse of failed session, rerun GREEN.
+- [x] Add preservation tests for wrong valid role → 403 and unknown path role → 422. Run; do not edit production if already GREEN.
+- [x] Inject SQLAlchemy errors containing synthetic secret, URL, SQL, parameter, and token sentinels; inspect response, captured logs, and `traceback.format_exception`. Run. Expected RED if raw chain/500 escapes.
+- [x] Suppress original exception context and never log/format caught database objects. Rerun sentinel test. Expected GREEN.
+- [x] Add a real Uvicorn case with valid startup attestation then auth-query failure in its dedicated disposable fixture. Run it; assert stable HTTP/log output, stop only the owned process, and record ordinary cleanup.
+- [x] Write cookie flag tests: local/nonlocal Secure, HttpOnly, SameSite=lax, Path=/, host-only, and no Max-Age/Expires. Run; treat existing passes as preservation evidence.
+- [x] Write TTL boundary tests for absent=30, 1/120 accepted, 0/121/non-integer/blank sanitized 503, expiry boundary, and two-hour maximum. Run; implement only an observed defect; rerun GREEN.
+- [x] Write the repeated-issuance cookie test:
 ```python
 first = client.post("/v1/demo/session/navigator")
 old_cookie = client.cookies["ojcc_session"]
@@ -217,9 +217,9 @@ assert first.status_code == second.status_code == 204
 assert client.cookies["ojcc_session"] != old_cookie
 assert len([c for c in client.cookies.jar if c.name == "ojcc_session"]) == 1
 ```
-- [ ] Run it; implement only if RED; rerun GREEN.
-- [ ] Run all auth/HTTP/process tests with no skips, Ruff/Pyright, seven hashes, and `git diff --check`.
-- [ ] Update the ledger with each refusal/cookie RED or preservation result and commit `fix: sanitize demo authentication refusal paths`.
+- [x] Run it; implement only if RED; rerun GREEN.
+- [x] Run all auth/HTTP/process tests with no skips, Ruff/Pyright, seven hashes, and `git diff --check`.
+- [x] Update the ledger with each refusal/cookie RED or preservation result and commit `fix: sanitize demo authentication refusal paths`.
 
 ## Task 5: Seed intent and live configuration
 

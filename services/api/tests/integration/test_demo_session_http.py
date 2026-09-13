@@ -5,19 +5,24 @@ import base64
 import hashlib
 import hmac
 import json
-from collections.abc import Iterator
+import traceback
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from fastapi import HTTPException, Response
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api import demo_sessions
 from app.auth import dependencies
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import SESSION_COOKIE_NAME
-from app.auth.models import Role
+from app.auth.models import CurrentActor, ResolvedAuthority, Role
+from app.auth.service import DemoSessionService
 from app.config import Settings
 from app.db.models import (
     Organization,
@@ -31,6 +36,19 @@ from app.main import app
 from tests.database_support import DisposableDatabase, disposable_database
 
 SESSION_SECRET = "demo-session-http-signing-secret"
+DATABASE_FAILURE_SENTINELS = (
+    "secret-sentinel",
+    "postgresql://sentinel.invalid/private",
+    "SELECT private_sentinel FROM hidden_table",
+    "parameter-sentinel",
+    "token-sentinel",
+)
+DATABASE_FAILURE_SENTINEL = " | ".join(DATABASE_FAILURE_SENTINELS)
+
+
+class _FailingSession:
+    def execute(self, *_args: object, **_kwargs: object) -> object:
+        raise SQLAlchemyError(DATABASE_FAILURE_SENTINEL)
 
 
 @pytest.fixture(scope="module")
@@ -47,10 +65,17 @@ def _decode_token_payload(token: str) -> dict[str, object]:
     return payload
 
 
-def _resign_token(token: str, claim_update: dict[str, object]) -> str:
+def _resign_token(
+    token: str,
+    claim_update: Mapping[str, object],
+    *,
+    remove_claims: tuple[str, ...] = (),
+) -> str:
     encoded_header, encoded_payload, _ = token.split(".")
     payload = _decode_token_payload(token)
     payload.update(claim_update)
+    for claim in remove_claims:
+        payload.pop(claim, None)
     encoded_payload = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     ).rstrip(b"=").decode()
@@ -84,6 +109,387 @@ def _configure_runtime_dependencies(
     monkeypatch.setattr(dependencies, "settings", configured_settings)
     app.dependency_overrides[get_session] = runtime_session
     return runtime_engine
+
+
+@pytest.mark.parametrize(
+    "demo_actors_json",
+    [pytest.param(None, id="missing"), pytest.param('{"navigator":', id="malformed")],
+)
+def test_http_issuance_sanitizes_missing_or_malformed_roster(
+    monkeypatch: pytest.MonkeyPatch,
+    demo_actors_json: str | None,
+) -> None:
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=uuid4(),
+        demo_actors_json=demo_actors_json,
+    )
+    monkeypatch.setattr(demo_sessions, "settings", configured_settings)
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    response = asyncio.run(issue_session())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+    assert "set-cookie" not in response.headers
+
+
+def test_http_issuance_treats_missing_role_entry_as_configuration_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=uuid4(),
+        demo_actors_json=json.dumps(
+            {Role.ADMINISTRATOR.value: {"user_id": str(uuid4())}}
+        ),
+    )
+
+    def database_must_not_be_used() -> Iterator[object]:
+        yield _FailingSession()
+
+    monkeypatch.setattr(demo_sessions, "settings", configured_settings)
+    app.dependency_overrides[get_session] = database_must_not_be_used
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    try:
+        response = asyncio.run(issue_session())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+    assert "set-cookie" not in response.headers
+
+
+def test_http_issuance_sanitizes_ambiguous_selected_actor(
+    demo_session_database: DisposableDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = uuid4()
+    user_id = uuid4()
+    owner_engine = create_engine(demo_session_database.migration_url)
+    try:
+        with Session(owner_engine) as owner:
+            owner.add(Organization(id=organization_id, name=f"HTTP ambiguous {uuid4()}"))
+            owner.flush()
+            owner.add(
+                User(
+                    id=user_id,
+                    email=f"http-{uuid4()}@example.test",
+                    display_name="HTTP ambiguous actor",
+                    primary_organization_id=None,
+                )
+            )
+            owner.flush()
+            granted_at = datetime.now(UTC) - timedelta(hours=1)
+            owner.add_all(
+                [
+                    RoleAssignment(
+                        id=uuid4(),
+                        organization_id=organization_id,
+                        user_id=user_id,
+                        role=Role.NAVIGATOR,
+                        granted_at=granted_at,
+                        revoked_at=datetime.now(UTC) + timedelta(hours=1),
+                    ),
+                    RoleAssignment(
+                        id=uuid4(),
+                        organization_id=organization_id,
+                        user_id=user_id,
+                        role=Role.NAVIGATOR,
+                        granted_at=granted_at,
+                    ),
+                ]
+            )
+            owner.commit()
+    finally:
+        owner_engine.dispose()
+
+    runtime_engine = _configure_runtime_dependencies(
+        demo_session_database,
+        monkeypatch,
+        organization_id=organization_id,
+        roster={Role.NAVIGATOR.value: {"user_id": str(user_id)}},
+    )
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    try:
+        response = asyncio.run(issue_session())
+    finally:
+        app.dependency_overrides.clear()
+        runtime_engine.dispose()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo actor is unavailable"}
+    assert "set-cookie" not in response.headers
+
+
+def test_http_issuance_sanitizes_database_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    organization_id = uuid4()
+    user_id = uuid4()
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=organization_id,
+        demo_actors_json=json.dumps(
+            {Role.NAVIGATOR.value: {"user_id": str(user_id)}}
+        ),
+    )
+
+    def failing_session() -> Iterator[object]:
+        yield _FailingSession()
+
+    monkeypatch.setattr(demo_sessions, "settings", configured_settings)
+    app.dependency_overrides[get_session] = failing_session
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    try:
+        response = asyncio.run(issue_session())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo authentication is unavailable"}
+    assert "set-cookie" not in response.headers
+
+
+def test_http_reauthorization_sanitizes_database_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = CurrentActor(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        role=Role.NAVIGATOR,
+    )
+    authority = ResolvedAuthority(actor=actor, role_assignment_id=uuid4())
+    roster = {Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)}
+    token = DemoSessionService(
+        actor_repository=None,
+        secret=SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors=roster,
+    ).create_token(authority)
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=actor.organization_id,
+        demo_actors_json=json.dumps(
+            {Role.NAVIGATOR.value: {"user_id": str(actor.user_id)}}
+        ),
+    )
+
+    def failing_session() -> Iterator[object]:
+        yield _FailingSession()
+
+    monkeypatch.setattr(dependencies, "settings", configured_settings)
+    app.dependency_overrides[get_session] = failing_session
+
+    async def load_queue() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            cookies={SESSION_COOKIE_NAME: token},
+        ) as client:
+            return await client.get("/v1/navigator/queue")
+
+    try:
+        response = asyncio.run(load_queue())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo authentication is unavailable"}
+
+
+def test_http_reauthorization_rejects_missing_organization_as_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = CurrentActor(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        role=Role.NAVIGATOR,
+    )
+    authority = ResolvedAuthority(actor=actor, role_assignment_id=uuid4())
+    token = DemoSessionService(
+        actor_repository=None,
+        secret=SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
+    ).create_token(authority)
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=None,
+        demo_actors_json=json.dumps(
+            {Role.NAVIGATOR.value: {"user_id": str(actor.user_id)}}
+        ),
+    )
+
+    def database_must_not_be_used() -> Iterator[object]:
+        yield _FailingSession()
+
+    monkeypatch.setattr(dependencies, "settings", configured_settings)
+    app.dependency_overrides[get_session] = database_must_not_be_used
+
+    async def load_queue() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            cookies={SESSION_COOKIE_NAME: token},
+        ) as client:
+            return await client.get("/v1/navigator/queue")
+
+    try:
+        response = asyncio.run(load_queue())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo sessions are not configured"}
+
+
+def test_database_failure_sentinels_do_not_escape_http_logs_or_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    actor = CurrentActor(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        role=Role.NAVIGATOR,
+    )
+    roster = {Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)}
+    service = DemoSessionService(
+        actor_repository=demo_sessions.SqlAlchemyActorRepository(_FailingSession()),  # type: ignore[arg-type]
+        secret=SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors=roster,
+    )
+    app.dependency_overrides[demo_sessions.get_demo_session_service] = lambda: service
+
+    async def issue_session() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            return await client.post("/v1/demo/session/navigator")
+
+    try:
+        response = asyncio.run(issue_session())
+    finally:
+        app.dependency_overrides.clear()
+
+    with pytest.raises(HTTPException) as exc_info:
+        demo_sessions.create_demo_session(Role.NAVIGATOR, Response(), service)
+    rendered = "".join(traceback.format_exception(exc_info.value))
+    inspected = f"{response.text}\n{caplog.text}\n{rendered}"
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Demo authentication is unavailable"}
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__suppress_context__ is True
+    for sentinel in DATABASE_FAILURE_SENTINELS:
+        assert sentinel not in inspected
+
+
+@pytest.mark.parametrize(
+    ("claim_update", "remove_claims"),
+    [
+        pytest.param({}, ("ver",), id="missing-version"),
+        pytest.param({"ver": 1}, (), id="legacy-version"),
+        pytest.param({"ver": "2"}, (), id="wrong-type-version"),
+        pytest.param({}, ("ra",), id="missing-role-assignment"),
+        pytest.param({"ra": "not-a-uuid"}, (), id="invalid-role-assignment"),
+        pytest.param({"pil": str(uuid4())}, (), id="staff-link-claim"),
+    ],
+)
+def test_http_reauthorization_sanitizes_incompatible_token_claims_before_database(
+    monkeypatch: pytest.MonkeyPatch,
+    claim_update: dict[str, object],
+    remove_claims: tuple[str, ...],
+) -> None:
+    actor = CurrentActor(
+        user_id=uuid4(),
+        organization_id=uuid4(),
+        role=Role.NAVIGATOR,
+    )
+    authority = ResolvedAuthority(actor=actor, role_assignment_id=uuid4())
+    token = DemoSessionService(
+        actor_repository=None,
+        secret=SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
+    ).create_token(authority)
+    incompatible_token = _resign_token(
+        token,
+        claim_update,
+        remove_claims=remove_claims,
+    )
+    configured_settings = Settings(
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_organization_id=actor.organization_id,
+        demo_actors_json=json.dumps(
+            {Role.NAVIGATOR.value: {"user_id": str(actor.user_id)}}
+        ),
+    )
+
+    def database_must_not_be_used() -> Iterator[object]:
+        yield _FailingSession()
+
+    monkeypatch.setattr(dependencies, "settings", configured_settings)
+    app.dependency_overrides[get_session] = database_must_not_be_used
+
+    async def load_queue() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            cookies={SESSION_COOKIE_NAME: incompatible_token},
+        ) as client:
+            return await client.get("/v1/navigator/queue")
+
+    try:
+        response = asyncio.run(load_queue())
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or expired demo session"}
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.authority import (
     AmbiguousAuthorityError,
+    AuthorityDatabaseUnavailableError,
     authority_from_row,
     build_authority_statement,
 )
@@ -55,6 +56,8 @@ async def resolve_patient_actor(
 
 def get_current_demo_session_service() -> DemoSessionService:
     try:
+        if settings.demo_organization_id is None:
+            raise ValueError("DEMO_ORGANIZATION_ID must be configured")
         ttl_minutes = settings.demo_session_ttl_minutes
         if ttl_minutes is None or not 1 <= ttl_minutes <= MAX_SESSION_LIFETIME_SECONDS // 60:
             raise ValueError("DEMO_SESSION_TTL_MINUTES must be between 1 and 120")
@@ -65,11 +68,11 @@ def get_current_demo_session_service() -> DemoSessionService:
             organization_id=settings.demo_organization_id,
             demo_actors=parse_demo_actors(settings.demo_actors_json),
         )
-    except ValueError as error:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Demo sessions are not configured",
-        ) from error
+        ) from None
 
 
 def current_actor(
@@ -85,11 +88,11 @@ def current_actor(
         )
     try:
         verified_session = session_service.verify_session(token)
-    except ValueError as error:
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired demo session",
-        ) from error
+        ) from None
     token_actor = verified_session.authority.actor
     if not session_service.is_configured_actor(token_actor):
         raise HTTPException(
@@ -102,6 +105,11 @@ def current_actor(
             user_id=token_actor.user_id,
             role=token_actor.role,
         )
+    except AuthorityDatabaseUnavailableError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Demo authentication is unavailable",
+        ) from None
     except AmbiguousAuthorityError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
