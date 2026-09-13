@@ -13,7 +13,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.api.demo_sessions import get_demo_session_service
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import get_current_demo_session_service
+from app.auth.models import Role
 from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.db.session import get_session
 from app.main import app
@@ -44,6 +46,16 @@ def _runtime_dependencies(database: DisposableDatabase) -> Iterator[None]:
         secret=SESSION_SECRET,
         ttl_minutes=30,
         organization_id=DEMO_IDS["organization"],
+        demo_actors={
+            Role.NAVIGATOR: DemoActorSelection(user_id=DEMO_IDS["navigator_user"]),
+            Role.ADMINISTRATOR: DemoActorSelection(
+                user_id=DEMO_IDS["administrator_user"]
+            ),
+            Role.SUPPORTING_ACTOR: DemoActorSelection(
+                user_id=DEMO_IDS["patient_user"],
+                patient_id=DEMO_IDS["patient"],
+            ),
+        },
     )
 
     def runtime_session() -> Iterator[Session]:

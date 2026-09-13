@@ -15,8 +15,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import current_actor, get_current_demo_session_service
-from app.auth.models import CurrentActor, Role
+from app.auth.models import CurrentActor, ResolvedAuthority, Role
 from app.auth.service import DemoSessionService
 from app.config import settings
 from app.db import models
@@ -572,9 +573,14 @@ def test_revoked_navigator_session_cannot_acknowledge(db_session: Session) -> No
         actor_repository=None,
         secret="safety-route-test-secret",
         ttl_minutes=30,
-        organization_id=None,
+        organization_id=context["organization"].id,
+        demo_actors={
+            Role.NAVIGATOR: DemoActorSelection(user_id=context["navigator"].id)
+        },
     )
-    token = service.create_token(actor)
+    token = service.create_token(
+        ResolvedAuthority(actor=actor, role_assignment_id=context["role"].id)
+    )
     context["role"].revoked_at = datetime.now(UTC)
     db_session.flush()
     app.dependency_overrides[get_current_demo_session_service] = lambda: service

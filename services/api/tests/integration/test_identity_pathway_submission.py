@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
 from app.auth.authority import AmbiguousAuthorityError
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import current_actor, resolve_patient_actor
-from app.auth.models import CurrentActor
+from app.auth.models import CurrentActor, ResolvedAuthority
 from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.config import settings
 from app.db.models import (
@@ -194,13 +195,15 @@ def test_patient_identity_link_resolves_separate_patient_actor_in_its_organizati
     db_session.add_all([link, role])
     db_session.flush()
 
-    actor = SqlAlchemyActorRepository(db_session).find_active_actor(
+    authority = SqlAlchemyActorRepository(db_session).resolve_authority(
         organization_id=organization.id,
+        user_id=user.id,
         role=UserRole.SUPPORTING_ACTOR,
         at=now,
     )
 
-    assert actor is not None
+    assert authority is not None
+    actor = authority.actor
     assert actor.user_id != actor.patient_id
     assert actor.patient_id == patient.id
     assert actor.organization_id == link.organization_id
@@ -218,8 +221,9 @@ def test_patient_identity_link_resolves_separate_patient_actor_in_its_organizati
     )
     db_session.flush()
     assert (
-        SqlAlchemyActorRepository(db_session).find_active_actor(
+        SqlAlchemyActorRepository(db_session).resolve_authority(
             organization_id=other_organization.id,
+            user_id=user.id,
             role=UserRole.SUPPORTING_ACTOR,
             at=now,
         )
@@ -251,13 +255,14 @@ def test_revoked_role_or_patient_link_cannot_create_patient_actor(db_session: Se
     )
     db_session.flush()
 
-    actor = SqlAlchemyActorRepository(db_session).find_active_actor(
+    authority = SqlAlchemyActorRepository(db_session).resolve_authority(
         organization_id=organization.id,
+        user_id=user.id,
         role=UserRole.SUPPORTING_ACTOR,
         at=now,
     )
 
-    assert actor is None
+    assert authority is None
 
 
 @pytest.mark.parametrize("revoked_record", ["role", "link"])
@@ -291,9 +296,21 @@ def test_request_revalidates_revoked_patient_authority_after_token_issuance(
         actor_repository=None,
         secret="test-only-signing-secret",
         ttl_minutes=30,
-        organization_id=None,
+        organization_id=organization.id,
+        demo_actors={
+            UserRole.SUPPORTING_ACTOR: DemoActorSelection(
+                user_id=user.id,
+                patient_id=patient.id,
+            )
+        },
     )
-    token = service.create_token(actor)
+    token = service.create_token(
+        ResolvedAuthority(
+            actor=actor,
+            role_assignment_id=role.id,
+            patient_identity_link_id=link.id,
+        )
+    )
     request = Request(
         {"type": "http", "headers": [(b"cookie", f"ojcc_session={token}".encode())]}
     )

@@ -6,7 +6,12 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.auth.authority import authority_from_row, build_authority_statement
+from app.auth.authority import (
+    AmbiguousAuthorityError,
+    authority_from_row,
+    build_authority_statement,
+)
+from app.auth.demo_actors import parse_demo_actors
 from app.auth.models import CurrentActor, Role
 from app.auth.service import (
     MAX_SESSION_LIFETIME_SECONDS,
@@ -57,7 +62,8 @@ def get_current_demo_session_service() -> DemoSessionService:
             actor_repository=None,
             secret=settings.demo_session_secret,
             ttl_minutes=ttl_minutes,
-            organization_id=None,
+            organization_id=settings.demo_organization_id,
+            demo_actors=parse_demo_actors(settings.demo_actors_json),
         )
     except ValueError as error:
         raise HTTPException(
@@ -78,23 +84,42 @@ def current_actor(
             detail="Authentication required",
         )
     try:
-        token_actor = session_service.current_actor(token)
+        verified_session = session_service.verify_session(token)
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired demo session",
         ) from error
-    active_actor = SqlAlchemyActorRepository(session).find_active_actor_for_user(
-        organization_id=token_actor.organization_id,
-        user_id=token_actor.user_id,
-        role=token_actor.role,
-    )
-    if active_actor is None or active_actor.patient_id != token_actor.patient_id:
+    token_actor = verified_session.authority.actor
+    if not session_service.is_configured_actor(token_actor):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Demo session is no longer authorized",
         )
-    return active_actor
+    try:
+        active_authority = SqlAlchemyActorRepository(session).resolve_authority(
+            organization_id=token_actor.organization_id,
+            user_id=token_actor.user_id,
+            role=token_actor.role,
+        )
+    except AmbiguousAuthorityError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo session is no longer authorized",
+        ) from None
+    if (
+        active_authority is None
+        or active_authority.actor != token_actor
+        or active_authority.role_assignment_id
+        != verified_session.authority.role_assignment_id
+        or active_authority.patient_identity_link_id
+        != verified_session.authority.patient_identity_link_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Demo session is no longer authorized",
+        )
+    return active_authority.actor
 
 
 def require_role(*allowed: Role) -> Callable[[CurrentActor], CurrentActor]:

@@ -152,11 +152,11 @@ DemoSessionService constructor gains `demo_actors: Mapping[Role, DemoActorSelect
 `verify_session(token: str, *, now: int | None = None) -> VerifiedDemoSession` replaces the old token-only current_actor method.
 The HTTP current_actor dependency verifies claims, roster, and freshly resolved authority, then returns CurrentActor.
 
-- [ ] Write one real HTTP issuance test with two eligible navigators, configure the second, and assert 204 plus the configured token subject. Run it. Expected RED: baseline org/role discovery raises or selects ambiguously.
-- [ ] Reverse IDs/insertion order and rerun the same test. Preserve both cases so no ordered selector can satisfy the contract.
-- [ ] Implement only explicit roster selection and authority resolution in `create_session`; sign the returned authority. Rerun both issuance cases. Expected GREEN.
-- [ ] Repeat the explicit-selection test for administrator and supporting_actor, including configured patient equality. Run; implement only missing role-specific selection; rerun GREEN.
-- [ ] Write cookie-authenticated simple-revocation tests using these exact route expectations:
+- [x] Write one real HTTP issuance test with two eligible navigators, configure the second, and assert 204 plus the configured token subject. Run it. Expected RED: baseline org/role discovery raises or selects ambiguously.
+- [x] Reverse IDs/insertion order and rerun the same test. Preserve both cases so no ordered selector can satisfy the contract.
+- [x] Implement only explicit roster selection and authority resolution in `create_session`; sign the returned authority. Rerun both issuance cases. Expected GREEN.
+- [x] Repeat the explicit-selection test for administrator and supporting_actor, including configured patient equality. Run; implement only missing role-specific selection; rerun GREEN.
+- [x] Write cookie-authenticated simple-revocation tests using these exact route expectations:
 ```python
 assert client.post("/v1/demo/session/navigator").status_code == 204
 assert client.get("/v1/navigator/queue").status_code == 200
@@ -165,23 +165,23 @@ response = client.get("/v1/navigator/queue")
 assert response.status_code == 401
 assert response.json() == {"detail": "Demo session is no longer authorized"}
 ```
-- [ ] Run simple revocation. Existing behavior may pass; record it as baseline evidence rather than RED.
-- [ ] Write the adjacent replacement-grant test: old cookie remains 401 after a new grant ID becomes effective; fresh issuance works. Run it. Expected RED: tuple-only token revives.
-- [ ] Write the equivalent patient-link replacement test and run it. Expected RED for the same missing provenance binding.
-- [ ] Write failing token tests for `ver`: missing, legacy, values 1/3, and wrong types `"2"`, bool, null, list, and object. Run `python -m pytest tests/test_auth.py -k token_version -q`. Expected RED: missing/legacy claims are accepted or parser interface is absent.
-- [ ] Implement exact `ver=2` parsing using `type(value) is int`; rerun token-version cases. Expected GREEN.
-- [ ] Write failing `ra` tests: missing, empty, malformed UUID, integer, bool, null, list, and object. Run the role-assignment-claim selection. Expected RED.
-- [ ] Implement required UUID-string `ra` parsing from None; rerun. Expected GREEN.
-- [ ] Write failing patient claim-shape tests. Supporting_actor requires both valid UUID `patient` and `pil`; test either missing, malformed/wrong type, or singly present. Staff roles reject either or both claims. Run the patient-shape selection. Expected RED.
-- [ ] Implement role-specific `patient`/`pil` encoding and parsing; rerun. Expected GREEN. Preserve issuer/audience/HS256/time/jti/TTL behavior.
-- [ ] Add only token-to-roster user/org/role/patient comparison in `current_actor`; run mismatch tests. Expected GREEN while replacement-authority tests remain RED.
-- [ ] Add exactly one fresh `resolve_authority` call and actor-tuple comparison; run simple revocation and ambiguity tests. Expected GREEN while replacement-ID tests remain RED.
-- [ ] Add role-assignment ID comparison; rerun replacement-grant test. Expected GREEN.
-- [ ] Add nullable patient-link ID comparison; rerun replacement-link test. Expected GREEN.
-- [ ] Add mismatched org/user/role/patient/ra/pil cases, a valid other-organization membership, inactive user, and roster change after issuance. Run; implement only uncovered comparisons; rerun GREEN.
-- [ ] Remove org/role discovery only after repository call-site search is empty; retain no fallback. Update token-unit fixtures to v2 with no legacy acceptance.
-- [ ] Run the complete Task 3 suite command, Ruff/Pyright, seven hashes, and `git diff --check`.
-- [ ] Update the ledger with every compatibility RED/GREEN and commit `fix: bind demo sessions to explicit authorization records`.
+- [x] Run simple revocation. Existing behavior may pass; record it as baseline evidence rather than RED.
+- [x] Write the adjacent replacement-grant test: old cookie remains 401 after a new grant ID becomes effective; fresh issuance works. Run it. Expected RED: tuple-only token revives.
+- [x] Write the equivalent patient-link replacement test and run it. Expected RED for the same missing provenance binding.
+- [x] Write failing token tests for `ver`: missing, legacy, values 1/3, and wrong types `"2"`, bool, null, list, and object. Run `python -m pytest tests/test_auth.py -k token_version -q`. Expected RED: missing/legacy claims are accepted or parser interface is absent.
+- [x] Implement exact `ver=2` parsing using `type(value) is int`; rerun token-version cases. Expected GREEN.
+- [x] Write failing `ra` tests: missing, empty, malformed UUID, integer, bool, null, list, and object. Run the role-assignment-claim selection. Expected RED.
+- [x] Implement required UUID-string `ra` parsing from None; rerun. Expected GREEN.
+- [x] Write failing patient claim-shape tests. Supporting_actor requires both valid UUID `patient` and `pil`; test either missing, malformed/wrong type, or singly present. Staff roles reject either or both claims. Run the patient-shape selection. Expected RED.
+- [x] Implement role-specific `patient`/`pil` encoding and parsing; rerun. Expected GREEN. Preserve issuer/audience/HS256/time/jti/TTL behavior.
+- [x] Add only token-to-roster user/org/role/patient comparison in `current_actor`; run mismatch tests. Expected GREEN while replacement-authority tests remain RED.
+- [x] Add exactly one fresh `resolve_authority` call and actor-tuple comparison; run simple revocation and ambiguity tests. Expected GREEN while replacement-ID tests remain RED.
+- [x] Add role-assignment ID comparison; rerun replacement-grant test. Expected GREEN.
+- [x] Add nullable patient-link ID comparison; rerun replacement-link test. Expected GREEN.
+- [x] Add mismatched org/user/role/patient/ra/pil cases, a valid other-organization membership, inactive user, and roster change after issuance. Run; implement only uncovered comparisons; rerun GREEN.
+- [x] Remove org/role discovery only after repository call-site search is empty; retain no fallback. Update token-unit fixtures to v2 with no legacy acceptance.
+- [x] Run the complete Task 3 suite command, Ruff/Pyright, seven hashes, and `git diff --check`.
+- [x] Update the ledger with every compatibility RED/GREEN and commit `fix: bind demo sessions to explicit authorization records`.
 
 ## Task 4: Stable refusal, sanitization and cookie preservation
 

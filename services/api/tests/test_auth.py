@@ -3,14 +3,16 @@ import base64
 import hashlib
 import hmac
 import json
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from fastapi import HTTPException
 
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import require_role
-from app.auth.models import CurrentActor, Role
+from app.auth.models import CurrentActor, ResolvedAuthority, Role, VerifiedDemoSession
 from app.auth.service import ActorRepository, DemoSessionService
 from app.config import Settings
 from app.main import app
@@ -22,23 +24,69 @@ def _actor(role: Role) -> CurrentActor:
     return CurrentActor(user_id=uuid4(), organization_id=uuid4(), role=role)
 
 
+def _authority(role: Role) -> ResolvedAuthority:
+    base_actor = _actor(role)
+    actor = (
+        CurrentActor(
+            user_id=base_actor.user_id,
+            organization_id=base_actor.organization_id,
+            role=role,
+            patient_id=uuid4(),
+        )
+        if role == Role.SUPPORTING_ACTOR
+        else base_actor
+    )
+    return ResolvedAuthority(
+        actor=actor,
+        role_assignment_id=uuid4(),
+        patient_identity_link_id=(uuid4() if role == Role.SUPPORTING_ACTOR else None),
+    )
+
+
+def _authority_for_actor(actor: CurrentActor) -> ResolvedAuthority:
+    return ResolvedAuthority(
+        actor=actor,
+        role_assignment_id=uuid4(),
+        patient_identity_link_id=(
+            uuid4() if actor.role == Role.SUPPORTING_ACTOR else None
+        ),
+    )
+
+
 class StaticActorRepository(ActorRepository):
     def __init__(self, actors: dict[Role, CurrentActor]) -> None:
         self._actors = actors
 
-    def find_active_actor(
-        self, *, organization_id: UUID, role: Role
-    ) -> CurrentActor | None:
+    def resolve_authority(
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        role: Role,
+        at: datetime | None = None,
+    ) -> ResolvedAuthority | None:
+        del at
         actor = self._actors.get(role)
-        if actor is None or actor.organization_id != organization_id:
+        if (
+            actor is None
+            or actor.organization_id != organization_id
+            or actor.user_id != user_id
+        ):
             return None
-        return actor
+        return ResolvedAuthority(actor=actor, role_assignment_id=uuid4())
 
 
-def _resign_token(token: str, mutate_claims: dict[str, object]) -> str:
+def _resign_token(
+    token: str,
+    mutate_claims: dict[str, object],
+    *,
+    remove_claims: tuple[str, ...] = (),
+) -> str:
     header, encoded_payload, _ = token.split(".")
     payload = json.loads(_decode_base64url(encoded_payload))
     payload.update(mutate_claims)
+    for claim in remove_claims:
+        payload.pop(claim, None)
     encoded_payload = _encode_base64url(json.dumps(payload, separators=(",", ":")).encode())
     signing_input = f"{header}.{encoded_payload}".encode()
     signature = hmac.new(TEST_SESSION_SECRET.encode(), signing_input, hashlib.sha256).digest()
@@ -64,6 +112,200 @@ def test_patient_facing_supporting_actor_cannot_use_navigator_permission() -> No
     assert exc_info.value.detail == "Role not permitted"
 
 
+@pytest.mark.parametrize(
+    "version",
+    [pytest.param("missing", id="missing"), "legacy", 1, 3, "2", True, None, [], {}],
+)
+def test_demo_session_rejects_invalid_token_version(version: object) -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+    mutated = (
+        _resign_token(token, {}, remove_claims=("ver",))
+        if version == "missing"
+        else _resign_token(token, {"ver": version})
+    )
+
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.verify_session(mutated, now=1_000)
+
+
+def test_demo_session_issues_exact_integer_token_version_two() -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+
+    payload = json.loads(_decode_base64url(token.split(".")[1]))
+    assert type(payload["ver"]) is int
+    assert payload["ver"] == 2
+
+
+@pytest.mark.parametrize(
+    "role_assignment_claim",
+    [pytest.param("missing", id="missing"), "", "not-a-uuid", 7, True, None, [], {}],
+)
+def test_demo_session_rejects_invalid_role_assignment_claim(
+    role_assignment_claim: object,
+) -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+    mutated = (
+        _resign_token(token, {}, remove_claims=("ra",))
+        if role_assignment_claim == "missing"
+        else _resign_token(token, {"ra": role_assignment_claim})
+    )
+
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.verify_session(mutated, now=1_000)
+
+
+def test_demo_session_verifies_role_assignment_provenance() -> None:
+    authority = _authority(Role.NAVIGATOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.NAVIGATOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+
+    assert service.verify_session(token, now=1_000) == VerifiedDemoSession(
+        authority=authority
+    )
+
+
+@pytest.mark.parametrize(
+    ("claim_update", "remove_claims"),
+    [
+        ({}, ("patient",)),
+        ({}, ("pil",)),
+        ({}, ("patient", "pil")),
+        ({"patient": ""}, ()),
+        ({"patient": "not-a-uuid"}, ()),
+        ({"patient": 7}, ()),
+        ({"patient": True}, ()),
+        ({"patient": None}, ()),
+        ({"patient": []}, ()),
+        ({"patient": {}}, ()),
+        ({"pil": ""}, ()),
+        ({"pil": "not-a-uuid"}, ()),
+        ({"pil": 7}, ()),
+        ({"pil": True}, ()),
+        ({"pil": None}, ()),
+        ({"pil": []}, ()),
+        ({"pil": {}}, ()),
+    ],
+    ids=[
+        "missing-patient",
+        "missing-pil",
+        "missing-both",
+        "empty-patient",
+        "malformed-patient",
+        "integer-patient",
+        "boolean-patient",
+        "null-patient",
+        "list-patient",
+        "object-patient",
+        "empty-pil",
+        "malformed-pil",
+        "integer-pil",
+        "boolean-pil",
+        "null-pil",
+        "list-pil",
+        "object-pil",
+    ],
+)
+def test_supporting_actor_rejects_invalid_patient_claim_shape(
+    claim_update: dict[str, object],
+    remove_claims: tuple[str, ...],
+) -> None:
+    authority = _authority(Role.SUPPORTING_ACTOR)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({Role.SUPPORTING_ACTOR: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+    assert authority.patient_identity_link_id is not None
+    token_with_pil = _resign_token(
+        token,
+        {"pil": str(authority.patient_identity_link_id)},
+    )
+
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.verify_session(
+            _resign_token(
+                token_with_pil,
+                claim_update,
+                remove_claims=remove_claims,
+            ),
+            now=1_000,
+        )
+
+
+@pytest.mark.parametrize(
+    "claim_update",
+    [
+        {"patient": str(uuid4())},
+        {"pil": str(uuid4())},
+        {"patient": str(uuid4()), "pil": str(uuid4())},
+    ],
+    ids=["patient-only", "pil-only", "patient-and-pil"],
+)
+@pytest.mark.parametrize("role", [Role.NAVIGATOR, Role.ADMINISTRATOR])
+def test_staff_actor_rejects_patient_claims(
+    role: Role,
+    claim_update: dict[str, object],
+) -> None:
+    authority = _authority(role)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({role: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+
+    with pytest.raises(ValueError, match="Invalid or expired demo session"):
+        service.verify_session(_resign_token(token, claim_update), now=1_000)
+
+
+@pytest.mark.parametrize(
+    "role",
+    [Role.NAVIGATOR, Role.ADMINISTRATOR, Role.SUPPORTING_ACTOR],
+)
+def test_demo_session_verifies_role_specific_patient_provenance(role: Role) -> None:
+    authority = _authority(role)
+    service = DemoSessionService(
+        actor_repository=StaticActorRepository({role: authority.actor}),
+        secret=TEST_SESSION_SECRET,
+        ttl_minutes=30,
+        organization_id=authority.actor.organization_id,
+    )
+    token = service.create_token(authority, issued_at=1_000, expires_at=2_000)
+
+    assert service.verify_session(token, now=1_000) == VerifiedDemoSession(
+        authority=authority
+    )
+
+
 def test_demo_sessions_are_signed_and_tamper_evident() -> None:
     """This fails if the token signature is omitted or its comparison is not enforced."""
     actor = _actor(Role.NAVIGATOR)
@@ -74,12 +316,13 @@ def test_demo_sessions_are_signed_and_tamper_evident() -> None:
         organization_id=actor.organization_id,
     )
 
-    token = service.create_token(actor)
+    authority = _authority_for_actor(actor)
+    token = service.create_token(authority)
     tampered_token = f"{'A' if token[0] != 'A' else 'B'}{token[1:]}"
 
-    assert service.current_actor(token) == actor
+    assert service.verify_session(token).authority == authority
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
-        service.current_actor(tampered_token)
+        service.verify_session(tampered_token)
 
 
 def test_demo_sessions_reject_expired_or_overlong_tokens() -> None:
@@ -92,13 +335,14 @@ def test_demo_sessions_reject_expired_or_overlong_tokens() -> None:
         organization_id=actor.organization_id,
     )
 
-    expired_token = service.create_token(actor, issued_at=1_000, expires_at=1_001)
-    overlong_token = service.create_token(actor, issued_at=1_000, expires_at=8_201)
+    authority = _authority_for_actor(actor)
+    expired_token = service.create_token(authority, issued_at=1_000, expires_at=1_001)
+    overlong_token = service.create_token(authority, issued_at=1_000, expires_at=8_201)
 
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
-        service.current_actor(expired_token, now=1_002)
+        service.verify_session(expired_token, now=1_002)
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
-        service.current_actor(overlong_token, now=1_001)
+        service.verify_session(overlong_token, now=1_001)
 
 
 @pytest.mark.parametrize(
@@ -119,10 +363,12 @@ def test_demo_sessions_reject_invalid_identity_claims(claim_update: dict[str, ob
         ttl_minutes=30,
         organization_id=actor.organization_id,
     )
-    token = service.create_token(actor, issued_at=1_000, expires_at=2_000)
+    token = service.create_token(
+        _authority_for_actor(actor), issued_at=1_000, expires_at=2_000
+    )
 
     with pytest.raises(ValueError, match="Invalid or expired demo session"):
-        service.current_actor(_resign_token(token, claim_update), now=1_000)
+        service.verify_session(_resign_token(token, claim_update), now=1_000)
 
 
 def test_demo_session_requires_an_environment_secret() -> None:
@@ -146,6 +392,7 @@ def test_demo_session_route_sets_a_local_http_only_cookie() -> None:
         secret="test-only-signing-secret",
         ttl_minutes=30,
         organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
     )
     app.dependency_overrides[get_demo_session_service] = lambda: session_service
 
@@ -293,6 +540,7 @@ def test_demo_session_route_sets_secure_cookie_outside_local_development(
         secret="test-only-signing-secret",
         ttl_minutes=30,
         organization_id=actor.organization_id,
+        demo_actors={Role.NAVIGATOR: DemoActorSelection(user_id=actor.user_id)},
     )
     monkeypatch.setattr(demo_sessions, "settings", Settings(environment="staging"))
     app.dependency_overrides[demo_sessions.get_demo_session_service] = lambda: session_service

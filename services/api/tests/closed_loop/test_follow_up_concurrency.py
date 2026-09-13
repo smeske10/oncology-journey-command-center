@@ -13,8 +13,9 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from app.auth.demo_actors import DemoActorSelection
 from app.auth.dependencies import get_current_demo_session_service
-from app.auth.models import CurrentActor, Role
+from app.auth.models import CurrentActor, ResolvedAuthority, Role
 from app.auth.service import DemoSessionService
 from app.db.models import PatientIdentityLink, RoleAssignment
 from app.domain.follow_ups import FollowUpConflict, record_follow_up_response
@@ -159,9 +160,21 @@ def test_signed_cookie_is_rechecked_in_a_fresh_session_after_revocation(
         actor_repository=None,
         secret=TEST_SESSION_SECRET,
         ttl_minutes=30,
-        organization_id=None,
+        organization_id=case.organization_id,
+        demo_actors={
+            Role.SUPPORTING_ACTOR: DemoActorSelection(
+                user_id=case.patient_user_id,
+                patient_id=case.patient_id,
+            )
+        },
     )
-    token = session_service.create_token(actor)
+    token = session_service.create_token(
+        ResolvedAuthority(
+            actor=actor,
+            role_assignment_id=case.patient_role_assignment_id,
+            patient_identity_link_id=case.patient_identity_link_id,
+        )
+    )
     app.dependency_overrides[get_current_demo_session_service] = lambda: session_service
 
     async def request_follow_ups() -> httpx.Response:

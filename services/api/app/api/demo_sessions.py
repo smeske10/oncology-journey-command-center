@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.auth.demo_actors import parse_demo_actors
 from app.auth.dependencies import SESSION_COOKIE_NAME
 from app.auth.models import Role
 from app.auth.service import (
@@ -28,6 +29,7 @@ def get_demo_session_service(
             secret=settings.demo_session_secret,
             ttl_minutes=ttl_minutes,
             organization_id=settings.demo_organization_id,
+            demo_actors=parse_demo_actors(settings.demo_actors_json),
         )
     except ValueError as error:
         raise HTTPException(

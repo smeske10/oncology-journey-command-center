@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Architecture and amended implementation plan approved. Tasks 1–2 complete; Task 2 is awaiting its execution checkpoint. Tasks 3–5 not started.
+**Status:** Architecture and amended implementation plan approved. Tasks 1–3 are complete and committed. Task 4 awaits explicit authorization; Task 5 has not started.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -198,8 +198,92 @@ The user accepted the Task 1 checkpoint and explicitly authorized Task 2. Tasks 
   `ojcc_migration_test_e51d4f44b6a4475688c57eaaf82e4753`. Their ownership was not established,
   so they were left untouched. Every database emitted by Task 2 was dropped normally.
 
-All named disposable databases were newly generated and dropped normally. Task 3 remains pending;
-do not begin token or HTTP reauthorization work without the next execution checkpoint.
+All named disposable databases were newly generated and dropped normally. The user accepted the
+Task 2 checkpoint and explicitly authorized Task 3. Tasks 4–5 remained pending.
+
+### Task 3 — explicit issuance and authority-bound reauthorization
+
+- Explicit-issuance RED: two real HTTP cases, with the configured navigator reversed across UUID
+  ordering and insertion ordering, both raised baseline `MultipleResultsFound` through org/role
+  discovery. The intended RED used
+  `ojcc_migration_test_7d6668b551e048bf947a466a60961b09`, which dropped normally. An earlier
+  fixture iteration used `ojcc_migration_test_42030e106dfd4fd39d3592a11a9ab675`; its second case
+  collided on a deliberately fixed test UUID, so that test-only setup was corrected and the
+  database dropped normally.
+- Explicit-issuance GREEN: the service now selects only the configured roster identity, resolves
+  it through the Task 2 authority envelope, checks configured patient equality, and signs the
+  resolved authority. Both navigator order cases passed in
+  `ojcc_migration_test_91dbd2bd4a964e8d915a68389931eb46`; administrator and supporting-actor
+  selection passed in `ojcc_migration_test_9b307e2343f44f029960ba89b052638d`. Both dropped
+  normally.
+- Simple revocation was existing baseline behavior: issuance 204, queue 200, committed role
+  revocation, then exact no-longer-authorized 401 passed in
+  `ojcc_migration_test_952aca5df9df4c3abead7537dd8bd867`, which dropped normally.
+- Provenance RED: an adjacent replacement grant revived the old tuple-only cookie in
+  `ojcc_migration_test_ad9b2df45b83459b8e199075ad807f06`; an adjacent replacement patient link
+  did the same in `ojcc_migration_test_fd9d6621348149e6a4a3e9c343068ca1`. Both returned 200
+  instead of 401 and both databases dropped normally.
+- Version compatibility RED/GREEN: all ten version cases first failed on the absent
+  `verify_session` interface. Version 2 is now emitted as an exact integer; missing, legacy,
+  values 1/3, string `"2"`, boolean, null, list, and object versions all refuse. Focused GREEN:
+  **10 passed** without PostgreSQL.
+- Role-assignment claim RED/GREEN: missing, empty, malformed UUID, integer, boolean, null, list,
+  and object `ra` values were initially ignored (**8 intended failures**). Tokens now require and
+  decode a UUID string and preserve the issued grant ID. Focused GREEN: **9 passed** without
+  PostgreSQL.
+- Patient claim-shape RED/GREEN: the supporting-actor and staff matrix produced **17 intended
+  failures, 9 passes** before strict role-specific parsing. Supporting actors now require valid
+  `patient` and `pil` UUID strings; navigator and administrator tokens reject either field.
+  Focused GREEN: **26 passed** without PostgreSQL. Issuance preserves issuer, audience, HS256,
+  jti, time bounds, configured TTL, and the two-hour ceiling.
+- Roster and current-authority binding: a roster change initially left the old cookie usable in
+  `ojcc_migration_test_74f1d35810ff4454a93777fbbc7b5ea2`; it dropped normally. Actor-tuple-only
+  current resolution still left both replacement cases RED in
+  `ojcc_migration_test_7497991a56b649feac91d4069df30142`. Grant-ID comparison made the role
+  replacement GREEN while link replacement remained RED in
+  `ojcc_migration_test_99da91f2e12f459381805816242fc0bc`. Nullable link-ID comparison made both
+  GREEN in `ojcc_migration_test_2f8edf7da16d4bedb2967e24cf498b84`. All dropped normally.
+- Current requests now verify signed claims, match organization/user/role/patient to the current
+  roster, execute exactly one fresh cardinality-safe authority resolution, and require exact
+  actor/grant/link equality. A valid role in another organization does not interfere. Signed
+  org/user/role/grant and patient/link drift all refuse. Post-issuance revocation and inactive-user
+  cases passed; an ambiguity case first escaped as the stable internal ambiguity exception in
+  `ojcc_migration_test_80042068c2fa4f3aae19a01c4ca60b8e`, then produced the exact 401 after narrow
+  translation in `ojcc_migration_test_1fc1dd3acde14263a96834d01a461da5`. Both dropped normally.
+- Removed both legacy discovery methods and the token-only `current_actor` parser after repository
+  and test call-site searches were empty. Updated auth, identity, outcome, safety-signal,
+  concurrency, and non-owner fixtures to create authority-bound version-2 tokens. Focused existing
+  checks: auth/navigator **77 passed**; identity **8 passed** in
+  `ojcc_migration_test_5290af82447a4f32bf47a5c2e2f349e0`; revoked outcome/safety/concurrency
+  **4 passed** in `ojcc_migration_test_5c316748dce4461a915c86f931dddb45`; real non-owner journey
+  **1 passed** in `ojcc_task7_64d670c88b134a46ba69b83c6e54ff15`. All databases dropped normally.
+- Complete Task 3 suite: **114 passed, zero skipped**. The outer identity target
+  `ojcc_migration_test_744320dbb6224f018f9b8e7c0bc12bc3`, nested authority target
+  `ojcc_migration_test_1a898c4888f641429beceb964cae2490`, nested HTTP target
+  `ojcc_migration_test_6036dbfbfdc4492f9a9a2fe970ef4385`, and non-owner target
+  `ojcc_task7_401a1ea46d0b4284a16477c33ed92734` all dropped normally.
+- Fresh pre-commit completion gate repeated the same **114 passed, zero skipped** result. Its outer
+  target `ojcc_migration_test_840017c7de9643e09ae844f9973c2a3b`, authority target
+  `ojcc_migration_test_8d8f490913d84863b7c6a19b7ac8c495`, HTTP target
+  `ojcc_migration_test_d57bfc3c13cd418e8318a57a2834f854`, and non-owner target
+  `ojcc_task7_5b3bac5ba48044e19848890d2f4f0ad3` all dropped normally.
+- Independent read-only post-commit review found no Critical or Important issues and judged Task 3
+  ready to proceed. Its two traceability findings were corrected: the Task 3 checklist/status now
+  reflects completion, and the HTTP suite uses the plan's `ojcc_task7_` prefix. The reviewer also
+  noted that ASGITransport does not exercise application lifespan; that process/startup boundary
+  remains explicitly covered by Task 4's real-Uvicorn process suite rather than connecting the
+  pre-import global engine to a non-disposable target here.
+- Post-review completion gate again produced **114 passed, zero skipped**. Outer identity target
+  `ojcc_migration_test_206a13a70fc548888bd8cd2e68d88a1e`, authority target
+  `ojcc_migration_test_73bfacd04e0f481aa1326e1678ebc8c7`, HTTP target
+  `ojcc_task7_b52214f206f84046b3f0326fbf324db4`, and non-owner target
+  `ojcc_task7_b7893f82cd9e4d51a41c6129e410a40e` all dropped normally.
+- Ruff and Pyright passed for the touched production and test files. All seven migration hashes
+  exactly match the immutable ledger, no migration 0008 exists, no migration diff exists, and
+  `git diff --check` passed with only Windows line-ending notices.
+
+Task 4 remains pending; do not begin its broader stable error mapping, sanitization, and process
+coverage without the next execution checkpoint.
 
 ## Conditional-approval amendment
 
@@ -226,5 +310,5 @@ At this conditional-approval checkpoint, no production or test file had been cha
 database had been accessed. The later Task 1 execution record above supersedes that historical
 working-tree statement.
 
-**Next exact step:** Commit `fix: reject ambiguous effective session authority`, report the Task 2
-execution checkpoint, and wait for authorization before Task 3.
+**Next exact step:** Report the Task 3 execution checkpoint and wait for explicit authorization
+before Task 4.
