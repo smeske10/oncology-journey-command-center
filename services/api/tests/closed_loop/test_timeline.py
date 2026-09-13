@@ -16,6 +16,7 @@ from app.domain.navigation_tasks import (
     start_navigation_task,
 )
 from app.domain.needs import reopen_need
+from tests.database_support import user_triggers_disabled
 
 
 def _patient(case: Any) -> CurrentActor:
@@ -139,17 +140,16 @@ def test_full_timelines_allowlist_each_audience_and_keep_closed_workspace_readab
         },
     )
     assert outcome.status_code == 201, outcome.text
-    closed_loop_session.execute(text("SET LOCAL session_replication_role = replica"))
-    closed_loop_session.execute(
-        text(
-            "UPDATE audit_event SET payload = payload || "
-            "'{\"internal\": \"RAW_AUDIT_PAYLOAD_SENTINEL\"}'::jsonb "
-            "WHERE organization_id = :organization_id "
-            "AND entity_type = 'navigation_task'"
-        ),
-        {"organization_id": approved_closed_loop_case.organization_id},
-    )
-    closed_loop_session.execute(text("SET LOCAL session_replication_role = origin"))
+    with user_triggers_disabled(closed_loop_session, "audit_event"):
+        closed_loop_session.execute(
+            text(
+                "UPDATE audit_event SET payload = payload || "
+                "'{\"internal\": \"RAW_AUDIT_PAYLOAD_SENTINEL\"}'::jsonb "
+                "WHERE organization_id = :organization_id "
+                "AND entity_type = 'navigation_task'"
+            ),
+            {"organization_id": approved_closed_loop_case.organization_id},
+        )
 
     patient = closed_loop_client.request(
         "GET",

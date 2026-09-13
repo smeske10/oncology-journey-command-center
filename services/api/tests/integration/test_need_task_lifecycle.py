@@ -35,6 +35,7 @@ from app.domain.enums import (
     NeedStatus,
     SubmissionSource,
 )
+from tests.database_support import user_triggers_disabled
 
 
 @dataclass(frozen=True)
@@ -60,9 +61,11 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture(scope="session")
 def database_url() -> str:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for need lifecycle tests")
-    return settings.database_url
+    """Return the owner-credential target used for fixture setup and cleanup."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for need lifecycle tests")
+    return setup_database_url
 
 
 @pytest.fixture
@@ -799,29 +802,38 @@ def _create_committed_aggregate(engine: Engine) -> AggregateIds:
 
 def _delete_committed_aggregate(engine: Engine, ids: AggregateIds) -> None:
     with engine.begin() as connection:
-        # Test-only teardown intentionally bypasses immutable lifecycle triggers.
-        connection.execute(text("SET LOCAL session_replication_role = replica"))
         parameters = {"organization_id": ids.organization_id}
-        for statement in (
-            "DELETE FROM audit_event WHERE organization_id = :organization_id",
-            "DELETE FROM outcome WHERE organization_id = :organization_id",
-            "DELETE FROM navigation_task WHERE organization_id = :organization_id",
-            "DELETE FROM agent_run WHERE organization_id = :organization_id",
-            "DELETE FROM safety_signal WHERE organization_id = :organization_id",
-            "DELETE FROM reported_need WHERE organization_id = :organization_id",
-            "DELETE FROM check_in_submission WHERE organization_id = :organization_id",
-            "DELETE FROM episode_pathway_assignment WHERE organization_id = :organization_id",
-            "DELETE FROM check_in_definition WHERE organization_id = :organization_id",
-            "DELETE FROM care_episode WHERE organization_id = :organization_id",
-            "DELETE FROM pathway_definition WHERE organization_id = :organization_id",
-            "DELETE FROM patient_identity_link WHERE organization_id = :organization_id",
-            "DELETE FROM role_assignment WHERE organization_id = :organization_id",
-            "DELETE FROM synthetic_patient WHERE organization_id = :organization_id",
-            "DELETE FROM user_account WHERE primary_organization_id = :organization_id",
-            "DELETE FROM organization WHERE id = :organization_id",
-        ):
-            connection.execute(text(statement), parameters)
-        connection.execute(text("SET LOCAL session_replication_role = origin"))
+        tables = (
+            "audit_event",
+            "outcome",
+            "navigation_task",
+            "agent_run",
+            "safety_signal",
+            "reported_need",
+            "check_in_submission",
+            "episode_pathway_assignment",
+            "check_in_definition",
+            "care_episode",
+            "pathway_definition",
+            "patient_identity_link",
+            "role_assignment",
+            "synthetic_patient",
+            "user_account",
+            "organization",
+        )
+        with user_triggers_disabled(connection, *tables):
+            for table in tables:
+                column = (
+                    "primary_organization_id"
+                    if table == "user_account"
+                    else "id"
+                    if table == "organization"
+                    else "organization_id"
+                )
+                connection.execute(
+                    text(f"DELETE FROM {table} WHERE {column} = :organization_id"),
+                    parameters,
+                )
 
 
 @pytest.mark.parametrize("task_action", ["create", "assign", "start"])

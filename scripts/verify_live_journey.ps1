@@ -1,5 +1,11 @@
 param(
     [Parameter(Mandatory = $true)]
+    [string]$BootstrapDatabaseUrl,
+
+    [Parameter(Mandatory = $true)]
+    [string]$MigrationDatabaseUrl,
+
+    [Parameter(Mandatory = $true)]
     [string]$DatabaseUrl,
 
     [Parameter(Mandatory = $true)]
@@ -11,8 +17,10 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $webRoot = Join-Path $projectRoot "apps/web"
 $apiRoot = Join-Path $projectRoot "services/api"
 $taskEnvironmentNames = @(
-    "DATABASE_URL", "APP_ENV", "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID",
-    "OJCC_API_ORIGIN", "PLAYWRIGHT_BASE_URL", "OJCC_LIVE_DEVICE"
+    "BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL", "APP_ENV",
+    "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID",
+    "OJCC_API_ORIGIN", "PLAYWRIGHT_BASE_URL", "OJCC_LIVE_DEVICE",
+    "OJCC_MIGRATION_USERNAME"
 )
 $priorTaskEnvironment = @{}
 $priorLibpqEnvironment = @()
@@ -27,7 +35,10 @@ Get-ChildItem Env: | Where-Object {
 }
 
 function Assert-SafeTarget {
-    param([string]$UrlText, [string]$Confirmation)
+    param([string]$UrlText, [string]$Purpose, [string]$Confirmation = "")
+    if ([string]::IsNullOrWhiteSpace($UrlText)) {
+        throw "$Purpose requires an explicit database URL."
+    }
     $parsed = [System.Uri]$UrlText
     $databaseName = $parsed.AbsolutePath.TrimStart("/")
     $allowedHost = $parsed.Host -in @("127.0.0.1", "::1", "localhost")
@@ -35,12 +46,43 @@ function Assert-SafeTarget {
     if ($parsed.Scheme -notin @("postgresql", "postgresql+psycopg") -or
         -not $allowedHost -or $parsed.Port -ne 5432 -or
         $parsed.Query -or $parsed.Fragment -or -not $allowedName) {
-        throw "Live journey requires an explicit loopback disposable PostgreSQL URL."
+        throw "$Purpose requires an explicit loopback disposable PostgreSQL URL."
     }
-    if ($databaseName -ne $Confirmation) {
-        throw "Database confirmation does not match the validated disposable database name."
+    if ($Confirmation -and $databaseName -ne $Confirmation) {
+        throw "$Purpose confirmation does not match the validated disposable database name."
     }
-    return $databaseName
+    return [PSCustomObject]@{
+        Name = $databaseName
+        Host = $parsed.Host.ToLowerInvariant()
+        Port = $parsed.Port
+        Username = [System.Uri]::UnescapeDataString($parsed.UserInfo.Split(":")[0])
+    }
+}
+
+function Assert-TargetTriple {
+    param(
+        [string]$BootstrapUrl,
+        [string]$MigrationUrl,
+        [string]$ApplicationUrl,
+        [string]$Confirmation
+    )
+    $bootstrap = Assert-SafeTarget $BootstrapUrl "BOOTSTRAP_DATABASE_URL"
+    $migration = Assert-SafeTarget $MigrationUrl "MIGRATION_DATABASE_URL"
+    $application = Assert-SafeTarget $ApplicationUrl "DATABASE_URL" $Confirmation
+    foreach ($candidate in @($bootstrap, $migration)) {
+        if ($candidate.Name -cne $application.Name -or
+            $candidate.Host -cne $application.Host -or
+            $candidate.Port -ne $application.Port) {
+            throw "Live database targets must use the same host, port, and database name."
+        }
+    }
+    $distinctCount = @(
+        $bootstrap.Username, $migration.Username, $application.Username
+    ) | Sort-Object -Unique | Measure-Object | Select-Object -ExpandProperty Count
+    if ($distinctCount -ne 3) {
+        throw "Bootstrap, migration, and application require distinct usernames."
+    }
+    return $application.Name
 }
 
 function Assert-PortAvailable {
@@ -85,15 +127,28 @@ finally:
     }
 }
 
-$databaseName = Assert-SafeTarget $DatabaseUrl $ConfirmDatabaseName
+$databaseName = Assert-TargetTriple `
+    $BootstrapDatabaseUrl $MigrationDatabaseUrl $DatabaseUrl $ConfirmDatabaseName
+$migrationUsername = [System.Uri]::UnescapeDataString(
+    ([System.Uri]$MigrationDatabaseUrl).UserInfo.Split(":")[0]
+)
 try {
     foreach ($entry in $priorLibpqEnvironment) { Remove-Item -LiteralPath ("Env:{0}" -f $entry.Name) }
+    foreach ($name in @("BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL")) {
+        Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+    }
 
     foreach ($device in @("desktop", "mobile")) {
         Assert-PortAvailable 8011
         Assert-PortAvailable 3011
-        Assert-DatabaseUnused $DatabaseUrl $databaseName
-        Invoke-Checked { & (Join-Path $PSScriptRoot "reset_demo.ps1") -DatabaseUrl $DatabaseUrl -ConfirmDatabaseName $databaseName }
+        Assert-DatabaseUnused $MigrationDatabaseUrl $databaseName
+        Invoke-Checked {
+            & (Join-Path $PSScriptRoot "reset_demo.ps1") `
+                -BootstrapDatabaseUrl $BootstrapDatabaseUrl `
+                -MigrationDatabaseUrl $MigrationDatabaseUrl `
+                -DatabaseUrl $DatabaseUrl `
+                -ConfirmDatabaseName $databaseName
+        }
         [System.Environment]::SetEnvironmentVariable("DATABASE_URL", $DatabaseUrl, "Process")
         [System.Environment]::SetEnvironmentVariable("APP_ENV", "local", "Process")
         [System.Environment]::SetEnvironmentVariable("DEMO_SESSION_SECRET", "synthetic-live-session-secret-with-32-characters", "Process")
@@ -101,6 +156,9 @@ try {
         [System.Environment]::SetEnvironmentVariable("OJCC_API_ORIGIN", "http://127.0.0.1:8011", "Process")
         [System.Environment]::SetEnvironmentVariable("PLAYWRIGHT_BASE_URL", "http://127.0.0.1:3011", "Process")
         [System.Environment]::SetEnvironmentVariable("OJCC_LIVE_DEVICE", $device, "Process")
+        [System.Environment]::SetEnvironmentVariable(
+            "OJCC_MIGRATION_USERNAME", $migrationUsername, "Process"
+        )
         Push-Location $webRoot
         try {
             Invoke-Checked { npm run test:e2e:live }
@@ -110,7 +168,9 @@ try {
         }
         Push-Location $apiRoot
         try {
-            Invoke-Checked { python scripts/check_integrity.py --database-url $DatabaseUrl }
+            Invoke-Checked {
+                python -m scripts.check_integrity --database-url $DatabaseUrl
+            }
         }
         finally {
             Pop-Location

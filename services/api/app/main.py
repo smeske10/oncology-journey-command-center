@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -14,13 +17,29 @@ from app.api.patient_journey import router as patient_journey_router
 from app.api.proposed_changes import router as proposed_changes_router
 from app.api.safety_signals import router as safety_signals_router
 from app.config import settings
+from app.db.session import attest_runtime_engine, engine
 from app.domain.check_ins import PUBLIC_DEMO_PHI_WARNING
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        attest_runtime_engine()
+    except Exception:
+        engine.dispose()
+        raise
+    try:
+        yield
+    finally:
+        engine.dispose()
+
 
 app = FastAPI(
     title=settings.api_title,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=lifespan,
 )
 app.include_router(demo_sessions_router)
 app.include_router(patient_check_ins_router)

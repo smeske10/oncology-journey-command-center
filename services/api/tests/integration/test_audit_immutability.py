@@ -2,23 +2,28 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from time import monotonic, sleep
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import URL, Connection, make_url
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.db.models import Base
 from app.domain import enums
+from tests.database_support import (
+    DisposableDatabase,
+    bootstrap_database_url,
+    disposable_database,
+    run_alembic,
+    upgrade_database,
+)
 
 APPEND_ONLY_TABLES = (
     "check_in_submission",
@@ -28,6 +33,15 @@ APPEND_ONLY_TABLES = (
     "safety_signal_resolution",
     "audit_event",
     "workflow_transition_event",
+)
+APPLICATION_INSERT_RELATIONS = frozenset(
+    {
+        "approval_decision",
+        "check_in_submission",
+        "outcome",
+        "proposed_change",
+        "safety_signal_resolution",
+    }
 )
 TASK5_TABLES = {
     "workflow_run",
@@ -47,14 +61,29 @@ PRIVILEGED_TRIGGER_FUNCTIONS = (
     "guard_safety_signal_resolution",
     "close_reported_need_from_outcome",
 )
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DISPOSABLE_PREFIX = "ojcc_task5_migration_"
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 @pytest.fixture
 def connection() -> Iterator[Connection]:
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup connection isolated by a rollback."""
+    engine = create_engine(settings.require_migration_database_url())
+    with engine.connect() as value:
+        transaction = value.begin()
+        try:
+            yield value
+        finally:
+            transaction.rollback()
+    engine.dispose()
+
+
+@pytest.fixture
+def corruption_connection() -> Iterator[Connection]:
+    """Bootstrap-only rollback fixture for deliberate invalid-row and SET ROLE checks."""
+    bootstrap_database_url = os.getenv("BOOTSTRAP_DATABASE_URL")
+    if bootstrap_database_url is None or not bootstrap_database_url.strip():
+        pytest.skip("BOOTSTRAP_DATABASE_URL is required for deliberate corruption tests")
+    engine = create_engine(bootstrap_database_url)
     with engine.connect() as value:
         transaction = value.begin()
         try:
@@ -414,10 +443,11 @@ def _seed_append_only_rows(connection: Connection) -> dict[str, UUID]:
 
 @pytest.mark.parametrize("operation", ["UPDATE", "DELETE"])
 def test_owner_cannot_bypass_any_append_only_trigger(
-    connection: Connection,
+    corruption_connection: Connection,
     operation: str,
 ) -> None:
     """Production break: a table owner can rewrite one immutable clinical/audit record."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_append_only_rows(connection)
     for table in APPEND_ONLY_TABLES:
@@ -432,9 +462,10 @@ def test_owner_cannot_bypass_any_append_only_trigger(
 
 
 def test_application_role_has_insert_read_but_no_mutation_privileges(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: ojcc_app receives UPDATE/DELETE on an append-only table."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_append_only_rows(connection)
     assert connection.scalar(
@@ -458,7 +489,7 @@ def test_application_role_has_insert_read_but_no_mutation_privileges(
         assert connection.scalar(
             text("SELECT has_table_privilege('ojcc_app', :table, 'INSERT')"),
             {"table": f"public.{table}"},
-        ) is True
+        ) is (table in APPLICATION_INSERT_RELATIONS)
         assert connection.scalar(
             text("SELECT has_table_privilege('ojcc_app', :table, 'UPDATE')"),
             {"table": f"public.{table}"},
@@ -745,30 +776,18 @@ def _seed_application_role_operation(connection: Connection) -> dict[str, object
 
 @pytest.mark.parametrize(
     "operation",
-    ["transition", "approval", "submission", "resolution", "outcome"],
+    ["approval", "submission", "resolution", "outcome"],
 )
 def test_application_role_can_execute_valid_triggered_inserts(
-    connection: Connection,
+    corruption_connection: Connection,
     operation: str,
 ) -> None:
     """Production break: an invoker trigger reads or writes tables unavailable to ojcc_app."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_application_role_operation(connection)
     started_at = ids["started_at"]
     statements: dict[str, tuple[str, dict[str, object]]] = {
-        "transition": (
-            "INSERT INTO workflow_transition_event "
-            "(id, organization_id, workflow_run_id, sequence_number, from_state, to_state, "
-            "actor_type, actor_system_component, actor_system_version, reason, transitioned_at) "
-            "VALUES (:id, :organization_id, :workflow_id, 1, 'pending', 'running', "
-            "'system', 'workflow-coordinator', '1', 'started', :at)",
-            {
-                "id": uuid4(),
-                "organization_id": ids["organization"],
-                "workflow_id": ids["workflow"],
-                "at": started_at + timedelta(minutes=1),
-            },
-        ),
         "approval": (
             "INSERT INTO approval_decision "
             "(id, organization_id, proposed_change_id, authorized_by_user_id, "
@@ -837,12 +856,7 @@ def test_application_role_can_execute_valid_triggered_inserts(
     finally:
         connection.execute(text("RESET ROLE"))
 
-    if operation == "transition":
-        assert connection.scalar(
-            text("SELECT current_state FROM workflow_run WHERE id = :id"),
-            {"id": ids["workflow"]},
-        ) == "running"
-    elif operation == "approval":
+    if operation == "approval":
         assert connection.scalar(
             text("SELECT approved_at FROM navigation_task_resource WHERE id = :id"),
             {"id": ids["task_resource"]},
@@ -862,53 +876,50 @@ def test_application_role_can_execute_valid_triggered_inserts(
 
 
 def test_security_definer_trigger_ignores_pg_temp_relation_shadow(
-    connection: Connection,
+    corruption_connection: Connection,
 ) -> None:
     """Production break: pg_temp shadows a governed relation in a definer trigger."""
+    connection = corruption_connection
     _require_task5_schema(connection)
     ids = _seed_application_role_operation(connection)
     transitioned_at = ids["started_at"] + timedelta(minutes=1)
 
-    connection.execute(text("SET LOCAL ROLE ojcc_app"))
-    try:
-        connection.execute(
-            text(
-                "CREATE TEMP TABLE workflow_run ("
-                "id uuid PRIMARY KEY, organization_id uuid NOT NULL, "
-                "current_state text NOT NULL, started_at timestamptz NOT NULL, "
-                "updated_at timestamptz) ON COMMIT DROP"
-            )
+    connection.execute(
+        text(
+            "CREATE TEMP TABLE workflow_run ("
+            "id uuid PRIMARY KEY, organization_id uuid NOT NULL, "
+            "current_state text NOT NULL, started_at timestamptz NOT NULL, "
+            "updated_at timestamptz) ON COMMIT DROP"
         )
-        connection.execute(
-            text(
-                "INSERT INTO pg_temp.workflow_run "
-                "(id, organization_id, current_state, started_at) "
-                "VALUES (:id, :organization_id, 'pending', :started_at)"
-            ),
-            {
-                "id": ids["workflow"],
-                "organization_id": ids["organization"],
-                "started_at": ids["started_at"],
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO public.workflow_transition_event "
-                "(id, organization_id, workflow_run_id, sequence_number, from_state, "
-                "to_state, actor_type, actor_system_component, actor_system_version, "
-                "reason, transitioned_at) VALUES (:id, :organization_id, :workflow_id, "
-                "1, 'pending', 'running', 'system', 'workflow-coordinator', '1', "
-                "'started', :transitioned_at)"
-            ),
-            {
-                "id": uuid4(),
-                "organization_id": ids["organization"],
-                "workflow_id": ids["workflow"],
-                "transitioned_at": transitioned_at,
-            },
-        )
-    finally:
-        connection.execute(text("RESET ROLE"))
+    )
+    connection.execute(
+        text(
+            "INSERT INTO pg_temp.workflow_run "
+            "(id, organization_id, current_state, started_at) "
+            "VALUES (:id, :organization_id, 'pending', :started_at)"
+        ),
+        {
+            "id": ids["workflow"],
+            "organization_id": ids["organization"],
+            "started_at": ids["started_at"],
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO public.workflow_transition_event "
+            "(id, organization_id, workflow_run_id, sequence_number, from_state, "
+            "to_state, actor_type, actor_system_component, actor_system_version, "
+            "reason, transitioned_at) VALUES (:id, :organization_id, :workflow_id, "
+            "1, 'pending', 'running', 'system', 'workflow-coordinator', '1', "
+            "'started', :transitioned_at)"
+        ),
+        {
+            "id": uuid4(),
+            "organization_id": ids["organization"],
+            "workflow_id": ids["workflow"],
+            "transitioned_at": transitioned_at,
+        },
+    )
 
     assert connection.execute(
         text(
@@ -920,90 +931,44 @@ def test_security_definer_trigger_ignores_pg_temp_relation_shadow(
     ).one() == ("running", "pending")
 
 
-def _validate_local_url(url: URL) -> None:
-    if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
-        raise ValueError("Task 5 migration tests require loopback PostgreSQL")
-
-
 @contextmanager
 def _disposable_database() -> Iterator[str]:
-    configured = make_url(settings.database_url)
-    _validate_local_url(configured)
-    disposable = configured.set(database=f"{DISPOSABLE_PREFIX}{uuid4().hex}")
-    admin = disposable.set(database="postgres")
-    database = disposable.database
-    assert database is not None and database.startswith(DISPOSABLE_PREFIX)
-    engine = create_engine(admin, isolation_level="AUTOCOMMIT")
-    created = False
-    try:
-        with engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database}"'))
-        created = True
-        yield disposable.render_as_string(hide_password=False)
-    finally:
-        if created:
-            with engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :database AND pid <> pg_backend_pid()"
-                    ),
-                    {"database": database},
-                )
-                connection.execute(text(f'DROP DATABASE "{database}"'))
-        engine.dispose()
+    with disposable_database(prefix=DISPOSABLE_PREFIX, migrate_to=None) as database:
+        yield database.migration_url
+
+
+def _database_target(database_url: str) -> DisposableDatabase:
+    migration_url = make_url(database_url)
+    application_url = make_url(settings.database_url).set(
+        host=migration_url.host,
+        port=migration_url.port,
+        database=migration_url.database,
+    )
+    assert migration_url.database is not None
+    return DisposableDatabase(
+        name=migration_url.database,
+        migration_url=database_url,
+        application_url=application_url.render_as_string(hide_password=False),
+    )
 
 
 def _alembic(
     database_url: str, revision: str, *, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            "upgrade",
-            revision,
-        ],
-        cwd=PROJECT_ROOT,
-        env=os.environ | {"DATABASE_URL": database_url},
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    return upgrade_database(_database_target(database_url), revision, check=check)
 
 
 def _alembic_check(database_url: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "services/api/alembic.ini", "check"],
-        cwd=PROJECT_ROOT,
-        env=os.environ | {"DATABASE_URL": database_url},
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    return run_alembic(_database_target(database_url), ["check"], check=False)
 
 
 def _alembic_downgrade(
     database_url: str, revision: str
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            "downgrade",
-            revision,
-        ],
-        cwd=PROJECT_ROOT,
-        env=os.environ | {"DATABASE_URL": database_url},
+    return run_alembic(
+        _database_target(database_url),
+        ["downgrade", revision],
         check=False,
-        capture_output=True,
-        text=True,
     )
 
 
@@ -1016,7 +981,7 @@ def test_empty_upgrade_reaches_current_head_with_task5_metadata_parity() -> None
             with engine.connect() as connection:
                 assert TASK5_TABLES <= set(inspect(connection).get_table_names())
                 assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                    "0006_navigator_closed_loop"
+                    "0007_database_least_privilege"
                 )
             result = _alembic_check(database_url)
         finally:
@@ -1063,7 +1028,7 @@ def test_populated_upgrade_preserves_task_closure_audit_actor_and_payload() -> N
                 },
             )
         engine.dispose()
-        _alembic(database_url, "head")
+        _alembic(database_url, "0006_navigator_closed_loop")
         engine = create_engine(database_url)
         try:
             with engine.connect() as connection:
@@ -1181,6 +1146,9 @@ def test_populated_upgrade_serializes_legacy_agent_run_check_with_concurrent_ins
             )
 
         writer = engine.connect()
+        observer_engine = create_engine(
+            bootstrap_database_url(_database_target(database_url))
+        )
         writer_transaction = writer.begin()
         try:
             writer.execute(
@@ -1202,7 +1170,7 @@ def test_populated_upgrade_serializes_legacy_agent_run_check_with_concurrent_ins
                 migration = executor.submit(_alembic, database_url, "head", check=False)
                 deadline = monotonic() + 10
                 migration_waited_for_writer = False
-                with engine.connect().execution_options(
+                with observer_engine.connect().execution_options(
                     isolation_level="AUTOCOMMIT"
                 ) as observer:
                     while monotonic() < deadline:
@@ -1228,6 +1196,7 @@ def test_populated_upgrade_serializes_legacy_agent_run_check_with_concurrent_ins
             if writer_transaction.is_active:
                 writer_transaction.rollback()
             writer.close()
+            observer_engine.dispose()
 
         try:
             with engine.connect() as connection:
@@ -1238,7 +1207,10 @@ def test_populated_upgrade_serializes_legacy_agent_run_check_with_concurrent_ins
         finally:
             engine.dispose()
 
-    assert migration_waited_for_writer, "0005 never serialized with the concurrent writer"
+    assert migration_waited_for_writer, (
+        "0005 never serialized with the concurrent writer: "
+        f"{result.stdout}{result.stderr}"
+    )
     assert result.returncode != 0, "0005 let a concurrent legacy AgentRun cross its preflight"
     diagnostic = result.stdout + result.stderr
     assert str(agent_run_id) in diagnostic
@@ -1281,7 +1253,7 @@ def test_populated_upgrade_refuses_non_draft_knowledge_without_inventing_provena
 def test_0005_downgrade_refuses_before_any_teardown_ddl() -> None:
     """Production break: irreversible downgrade drops Task 5 lineage before refusing."""
     with _disposable_database() as database_url:
-        _alembic(database_url, "head")
+        _alembic(database_url, "0006_navigator_closed_loop")
         result = _alembic_downgrade(database_url, "0004_safety_approval_lifecycle")
         engine = create_engine(database_url)
         try:

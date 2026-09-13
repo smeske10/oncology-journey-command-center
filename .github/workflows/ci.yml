@@ -13,11 +13,6 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    env:
-      API_DATABASE_NAME: ojcc_demo_c1a0000000000001
-      LIVE_DATABASE_NAME: ojcc_demo_c1a0000000000002
-      DATABASE_URL: postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/ojcc_demo_c1a0000000000001
-      LIVE_DATABASE_URL: postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/ojcc_demo_c1a0000000000002
     services:
       postgres:
         image: postgres:16-alpine
@@ -57,39 +52,100 @@ jobs:
       - name: Create owned disposable verification databases
         shell: pwsh
         run: |
+          Push-Location ./services/api
+          python -m scripts.provision_database_roles `
+            --bootstrap-database-url "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/postgres" `
+            --migration-role ojcc_migrator `
+            --migration-password migrator-ci-synthetic-only `
+            --application-role ojcc_api `
+            --application-password api-ci-synthetic-only `
+            --application-group ojcc_app
+          if ($LASTEXITCODE -ne 0) { throw "Database role provisioning failed" }
+          Pop-Location
+
           @'
           import os
           import re
-          from sqlalchemy import create_engine, text
-          from sqlalchemy.engine import make_url
+          from urllib.parse import quote
+          from uuid import uuid4
 
-          names = (os.environ["API_DATABASE_NAME"], os.environ["LIVE_DATABASE_NAME"])
+          import psycopg
+          from psycopg import sql
+
+          bootstrap_user = "ojcc"
+          bootstrap_password = "local-synthetic-only"
+          migration_user = "ojcc_migrator"
+          migration_password = "migrator-ci-synthetic-only"
+          application_user = "ojcc_api"
+          application_password = "api-ci-synthetic-only"
+          names = tuple(f"ojcc_demo_{uuid4().hex}" for _ in range(2))
           if names[0] == names[1]:
               raise SystemExit("API and live verification databases must be different")
-          for name in names:
-              if re.fullmatch(r"ojcc_demo_[0-9a-f]{8,32}", name) is None:
-                  raise SystemExit(f"Unsafe disposable database name: {name}")
 
-          admin_url = make_url(os.environ["DATABASE_URL"]).set(database="postgres")
-          engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-          try:
-              with engine.connect() as connection:
+          maintenance_url = (
+              f"postgresql://{bootstrap_user}:{bootstrap_password}@127.0.0.1:5432/postgres"
+          )
+          with psycopg.connect(maintenance_url, autocommit=True) as connection:
+              with connection.cursor() as cursor:
                   for name in names:
-                      exists = connection.scalar(
-                          text("SELECT 1 FROM pg_database WHERE datname = :name"),
-                          {"name": name},
+                      if re.fullmatch(r"ojcc_demo_[0-9a-f]{32}", name) is None:
+                          raise SystemExit("Generated an unsafe disposable database name")
+                      if cursor.execute(
+                          "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
+                      ).fetchone() is not None:
+                          raise SystemExit("Refusing to reuse a disposable database")
+                      cursor.execute(
+                          sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                              sql.Identifier(name), sql.Identifier(migration_user)
+                          )
                       )
-                      if exists:
-                          raise SystemExit(f"Refusing to reuse disposable database: {name}")
-                      connection.execute(text(f'CREATE DATABASE "{name}"'))
-          finally:
-              engine.dispose()
+
+          def database_url(user, password, name):
+              return (
+                  f"postgresql+psycopg://{quote(user)}:{quote(password)}"
+                  f"@127.0.0.1:5432/{name}"
+              )
+
+          values = {
+              "API_DATABASE_NAME": names[0],
+              "LIVE_DATABASE_NAME": names[1],
+              "BOOTSTRAP_DATABASE_URL": database_url(
+                  bootstrap_user, bootstrap_password, names[0]
+              ),
+              "MIGRATION_DATABASE_URL": database_url(
+                  migration_user, migration_password, names[0]
+              ),
+              "DATABASE_URL": database_url(
+                  application_user, application_password, names[0]
+              ),
+              "LIVE_BOOTSTRAP_DATABASE_URL": database_url(
+                  bootstrap_user, bootstrap_password, names[1]
+              ),
+              "LIVE_MIGRATION_DATABASE_URL": database_url(
+                  migration_user, migration_password, names[1]
+              ),
+              "LIVE_DATABASE_URL": database_url(
+                  application_user, application_password, names[1]
+              ),
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              for key, value in values.items():
+                  environment.write(f"{key}={value}\n")
           '@ | python -
           if ($LASTEXITCODE -ne 0) { throw "Disposable database creation failed" }
-      - run: python -m alembic -c services/api/alembic.ini upgrade head
+      - name: Replay and seed API verification database
+        shell: pwsh
+        run: >-
+          ./scripts/reset_demo.ps1
+          -BootstrapDatabaseUrl $env:BOOTSTRAP_DATABASE_URL
+          -MigrationDatabaseUrl $env:MIGRATION_DATABASE_URL
+          -DatabaseUrl $env:DATABASE_URL
+          -ConfirmDatabaseName $env:API_DATABASE_NAME
       - run: npx --workspace apps/web playwright install --with-deps chromium
       - shell: pwsh
         run: >-
           ./scripts/verify.ps1
+          -LiveBootstrapDatabaseUrl $env:LIVE_BOOTSTRAP_DATABASE_URL
+          -LiveMigrationDatabaseUrl $env:LIVE_MIGRATION_DATABASE_URL
           -LiveDatabaseUrl $env:LIVE_DATABASE_URL
           -LiveConfirmDatabaseName $env:LIVE_DATABASE_NAME

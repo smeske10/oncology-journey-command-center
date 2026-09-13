@@ -14,7 +14,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
-from test_safety_signals import _seed_signal
 
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
@@ -24,6 +23,8 @@ from app.db.models import NavigationTask, PatientMessage, ReportedNeed, RoleAssi
 from app.db.session import get_session
 from app.domain.enums import UserRole
 from app.main import app
+from tests.database_support import user_triggers_disabled
+from tests.test_safety_signals import _seed_signal
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -39,9 +40,11 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture
 def db_session() -> Iterator[Session]:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for approval tests")
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup session isolated by a rollback."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for approval tests")
+    engine = create_engine(setup_database_url)
     connection = engine.connect()
     transaction = connection.begin()
     session = sessionmaker(
@@ -1093,12 +1096,11 @@ def test_final_approval_requalifies_every_stored_decision_before_application(
     assert first.status_code == 201
     assert first.json()["proposal_state"] == "pending"
 
-    db_session.execute(text("SET session_replication_role = replica"))
-    db_session.execute(
-        text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
-        {"role_id": first_role.id},
-    )
-    db_session.execute(text("SET session_replication_role = origin"))
+    with user_triggers_disabled(db_session, "role_assignment"):
+        db_session.execute(
+            text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
+            {"role_id": first_role.id},
+        )
     _actor(db_session, user_id=second_approver.id, organization_id=context["organization"].id)
     second = _request(
         "POST",
@@ -1143,12 +1145,11 @@ def test_no_longer_qualifying_decline_does_not_remain_terminal(db_session: Sessi
     assert declined.status_code == 201
     assert declined.json()["proposal_state"] == "declined"
 
-    db_session.execute(text("SET session_replication_role = replica"))
-    db_session.execute(
-        text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
-        {"role_id": role.id},
-    )
-    db_session.execute(text("SET session_replication_role = origin"))
+    with user_triggers_disabled(db_session, "role_assignment"):
+        db_session.execute(
+            text("UPDATE role_assignment SET role = 'administrator' WHERE id = :role_id"),
+            {"role_id": role.id},
+        )
     state = db_session.scalar(
         text(
             "SELECT effective_state FROM effective_proposed_change_state "

@@ -45,6 +45,7 @@ from app.domain.enums import (
     UserRole,
 )
 from app.main import app
+from tests.database_support import user_triggers_disabled
 
 
 @dataclass(frozen=True)
@@ -115,9 +116,11 @@ def _database_is_reachable(database_url: str) -> bool:
 
 @pytest.fixture
 def closed_loop_session() -> Iterator[Session]:
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for closed-loop tests")
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup session isolated by a rollback."""
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for closed-loop tests")
+    engine = create_engine(setup_database_url)
     connection = engine.connect()
     transaction = connection.begin()
     session = sessionmaker(
@@ -331,9 +334,10 @@ def approved_closed_loop_case(closed_loop_session: Session) -> ClosedLoopCase:
 @pytest.fixture
 def committed_closed_loop_case() -> Iterator[tuple[Engine, ClosedLoopCase]]:
     """Committed aggregate owned by one test for real multi-connection races."""
-    if not _database_is_reachable(settings.database_url):
-        pytest.skip("PostgreSQL DATABASE_URL is not reachable for closed-loop tests")
-    engine = create_engine(settings.database_url)
+    setup_database_url = settings.require_migration_database_url()
+    if not _database_is_reachable(setup_database_url):
+        pytest.skip("PostgreSQL MIGRATION_DATABASE_URL is not reachable for closed-loop tests")
+    engine = create_engine(setup_database_url)
     with Session(engine, expire_on_commit=False) as session:
         case = _seed_closed_loop_case(session, approve=True)
         session.commit()
@@ -341,32 +345,52 @@ def committed_closed_loop_case() -> Iterator[tuple[Engine, ClosedLoopCase]]:
         yield engine, case
     finally:
         with engine.begin() as connection:
-            connection.execute(text("SET LOCAL session_replication_role = replica"))
             parameters = {"organization_id": case.organization_id}
-            for statement in (
-                "DELETE FROM follow_up_response WHERE organization_id = :organization_id",
-                "DELETE FROM follow_up_request WHERE organization_id = :organization_id",
-                "DELETE FROM audit_event WHERE organization_id = :organization_id",
-                "DELETE FROM outcome WHERE organization_id = :organization_id",
-                "DELETE FROM navigation_task_resource WHERE organization_id = :organization_id",
-                "DELETE FROM approval_decision WHERE organization_id = :organization_id",
-                "DELETE FROM proposed_change WHERE organization_id = :organization_id",
-                "DELETE FROM approval_policy WHERE organization_id = :organization_id",
-                "DELETE FROM navigation_task WHERE organization_id = :organization_id",
-                "DELETE FROM reported_need WHERE organization_id = :organization_id",
-                "DELETE FROM check_in_submission WHERE organization_id = :organization_id",
-                "DELETE FROM episode_pathway_assignment WHERE organization_id = :organization_id",
-                "DELETE FROM check_in_definition WHERE organization_id = :organization_id",
-                "DELETE FROM care_episode WHERE organization_id = :organization_id",
-                "DELETE FROM pathway_definition WHERE organization_id = :organization_id",
-                "DELETE FROM patient_identity_link WHERE organization_id = :organization_id",
-                "DELETE FROM role_assignment WHERE organization_id = :organization_id",
-                "DELETE FROM synthetic_patient WHERE organization_id = :organization_id",
-                "DELETE FROM user_account WHERE primary_organization_id = :organization_id",
-                "DELETE FROM organization WHERE id = :organization_id",
-            ):
-                connection.execute(text(statement), parameters)
-            connection.execute(text("SET LOCAL session_replication_role = origin"))
+            tables = (
+                "follow_up_response",
+                "follow_up_request",
+                "audit_event",
+                "outcome",
+                "navigation_task_resource",
+                "approval_decision",
+                "proposed_change",
+                "navigation_task",
+                "approval_policy",
+                "reported_need",
+                "check_in_submission",
+                "episode_pathway_assignment",
+                "check_in_definition",
+                "care_episode",
+                "pathway_definition",
+                "patient_identity_link",
+                "role_assignment",
+                "synthetic_patient",
+                "user_account",
+                "organization",
+            )
+            with user_triggers_disabled(connection, *tables):
+                connection.execute(
+                    text(
+                        "UPDATE navigation_task SET authorized_proposed_change_id = NULL "
+                        "WHERE organization_id = :organization_id"
+                    ),
+                    parameters,
+                )
+                for table_name in tables:
+                    scope = (
+                        "primary_organization_id"
+                        if table_name == "user_account"
+                        else "id"
+                        if table_name == "organization"
+                        else "organization_id"
+                    )
+                    connection.execute(
+                        text(
+                            f'DELETE FROM public."{table_name}" '
+                            f"WHERE {scope} = :organization_id"
+                        ),
+                        parameters,
+                    )
         engine.dispose()
 
 

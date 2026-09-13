@@ -2,7 +2,15 @@ import os
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from app.db.targets import DatabaseTargetConfigurationError
 from app.domain.prioritization import OperationalPriorityWeights, policy_from_json
+
+
+def _required_environment(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise DatabaseTargetConfigurationError(f"{name} is required")
+    return value
 
 
 def _optional_uuid_from_environment(name: str) -> UUID | None:
@@ -13,10 +21,9 @@ def _optional_uuid_from_environment(name: str) -> UUID | None:
 @dataclass(frozen=True)
 class Settings:
     api_title: str = "Oncology Journey Command Center API"
-    database_url: str = field(
-        default_factory=lambda: os.getenv(
-            "DATABASE_URL", "postgresql+psycopg://ojcc:local-synthetic-only@localhost:5432/ojcc"
-        )
+    database_url: str = field(default_factory=lambda: _required_environment("DATABASE_URL"))
+    migration_database_url: str | None = field(
+        default_factory=lambda: os.getenv("MIGRATION_DATABASE_URL")
     )
     environment: str = field(default_factory=lambda: os.getenv("APP_ENV", "local"))
     demo_session_secret: str | None = field(
@@ -36,6 +43,12 @@ class Settings:
     def navigator_priority_policy(self) -> OperationalPriorityWeights:
         """Validated deployment policy; malformed environment JSON uses documented safe defaults."""
         return policy_from_json(self.navigator_priority_weights_json)
+
+    def require_migration_database_url(self) -> str:
+        value = self.migration_database_url
+        if value is None or not value.strip():
+            raise DatabaseTargetConfigurationError("MIGRATION_DATABASE_URL is required")
+        return value
 
     @property
     def is_local_development(self) -> bool:

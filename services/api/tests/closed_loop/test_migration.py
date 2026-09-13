@@ -1,80 +1,48 @@
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import pytest
 from sqlalchemy import MetaData, Table, create_engine, inspect, text
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import make_url
 
 from app.config import settings
+from tests.database_support import (
+    DisposableDatabase,
+    disposable_database,
+    run_alembic,
+    upgrade_database,
+)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DISPOSABLE_MIGRATION_DATABASE_PREFIX = "ojcc_migration_test_"
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-
-
-def _validate_disposable_migration_url(url: URL) -> None:
-    if (
-        url.get_backend_name() != "postgresql"
-        or url.host not in LOOPBACK_HOSTS
-        or url.port not in (None, 5432)
-    ):
-        raise ValueError("migration tests require loopback PostgreSQL on port 5432")
-    database = url.database or ""
-    suffix = database.removeprefix(DISPOSABLE_MIGRATION_DATABASE_PREFIX)
-    if (
-        not database.startswith(DISPOSABLE_MIGRATION_DATABASE_PREFIX)
-        or len(suffix) != 32
-        or any(character not in "0123456789abcdef" for character in suffix)
-    ):
-        raise ValueError("refusing non-disposable migration database")
 
 
 @contextmanager
 def _disposable_migration_database() -> Iterator[str]:
-    configured = make_url(settings.database_url)
-    if (
-        configured.get_backend_name() != "postgresql"
-        or configured.host not in LOOPBACK_HOSTS
-        or configured.port not in (None, 5432)
-    ):
-        pytest.skip("closed-loop migration tests require loopback PostgreSQL")
-    disposable = configured.set(
-        database=f"{DISPOSABLE_MIGRATION_DATABASE_PREFIX}{uuid4().hex}"
+    with disposable_database(
+        prefix=DISPOSABLE_MIGRATION_DATABASE_PREFIX,
+        migrate_to=None,
+    ) as database:
+        yield database.migration_url
+
+
+def _database_target(database_url: str) -> DisposableDatabase:
+    migration_url = make_url(database_url)
+    application_url = make_url(settings.database_url).set(
+        host=migration_url.host,
+        port=migration_url.port,
+        database=migration_url.database,
     )
-    _validate_disposable_migration_url(disposable)
-    database = disposable.database
-    assert database is not None
-    admin_engine = create_engine(
-        disposable.set(database="postgres"), isolation_level="AUTOCOMMIT"
+    assert migration_url.database is not None
+    return DisposableDatabase(
+        name=migration_url.database,
+        migration_url=database_url,
+        application_url=application_url.render_as_string(hide_password=False),
     )
-    created = False
-    try:
-        with admin_engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database}"'))
-        created = True
-        yield disposable.render_as_string(hide_password=False)
-    finally:
-        if created:
-            _validate_disposable_migration_url(disposable)
-            with admin_engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :database AND pid <> pg_backend_pid()"
-                    ),
-                    {"database": database},
-                )
-                connection.execute(text(f'DROP DATABASE "{database}"'))
-        admin_engine.dispose()
 
 
 def _run_alembic(
@@ -84,27 +52,15 @@ def _run_alembic(
     *,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alembic",
-            "-c",
-            "services/api/alembic.ini",
-            command,
-            revision,
-        ],
-        cwd=PROJECT_ROOT,
-        env=os.environ | {"DATABASE_URL": database_url},
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    database = _database_target(database_url)
+    if command == "upgrade":
+        return upgrade_database(database, revision, check=check)
+    return run_alembic(database, [command, revision], check=check)
 
 
 def test_0006_upgrades_an_empty_database_and_empty_extension_downgrades_cleanly() -> None:
     with _disposable_migration_database() as database_url:
-        _run_alembic(database_url, "upgrade", "head")
+        _run_alembic(database_url, "upgrade", "0006_navigator_closed_loop")
         engine = create_engine(database_url)
         try:
             inspector = inspect(engine)
@@ -172,6 +128,10 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
             "submission",
             "need",
             "task",
+            "assigned_task",
+            "in_progress_task",
+            "completed_task",
+            "cancelled_task",
             "policy",
             "resource",
             "proposal",
@@ -303,6 +263,7 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
                 status="open",
                 evidence=[{"field": "transportation", "text": "yes"}],
             )
+            connection.execute(text("ALTER TABLE navigation_task DISABLE TRIGGER USER"))
             insert(
                 "navigation_task",
                 id=ids["task"],
@@ -312,6 +273,29 @@ def _seed_representative_0005_history(database_url: str) -> dict[str, Any]:
                 title="Legacy unbound transportation task",
                 status="open",
             )
+            for status in ("assigned", "in_progress", "completed", "cancelled"):
+                task_values: dict[str, object] = {
+                    "id": ids[f"{status}_task"],
+                    "organization_id": ids["organization"],
+                    "patient_id": ids["patient"],
+                    "reported_need_id": ids["need"],
+                    "assignee_user_id": ids["approver"],
+                    "due_at": proposed_at + timedelta(days=1),
+                    "title": f"Legacy unbound {status} task",
+                    "status": status,
+                }
+                if status == "completed":
+                    task_values["completed_at"] = approved_at
+                if status == "cancelled":
+                    task_values.update(
+                        {
+                            "cancelled_by_user_id": ids["approver"],
+                            "cancelled_at": approved_at,
+                            "cancellation_reason": "need_closed",
+                        }
+                    )
+                insert("navigation_task", **task_values)
+            connection.execute(text("ALTER TABLE navigation_task ENABLE TRIGGER USER"))
             insert(
                 "approval_policy",
                 id=ids["policy"],
@@ -399,7 +383,7 @@ def test_0006_preserves_populated_0005_unbound_task_and_approved_v2_resources() 
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "upgrade", "0005_workflow_knowledge_audit")
         expected = _seed_representative_0005_history(database_url)
-        _run_alembic(database_url, "upgrade", "head")
+        _run_alembic(database_url, "upgrade", "0006_navigator_closed_loop")
 
         engine = create_engine(database_url)
         try:
@@ -444,11 +428,87 @@ def test_0006_preserves_populated_0005_unbound_task_and_approved_v2_resources() 
             engine.dispose()
 
 
+def test_0007_preserves_unbound_execution_history_for_every_task_state() -> None:
+    with _disposable_migration_database() as database_url:
+        _run_alembic(database_url, "upgrade", "0005_workflow_knowledge_audit")
+        expected = _seed_representative_0005_history(database_url)
+        _run_alembic(database_url, "upgrade", "0006_navigator_closed_loop")
+
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                before = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            "SELECT id, title, status, assignee_user_id, due_at, "
+                            "authorized_proposed_change_id, completed_at, "
+                            "cancelled_by_user_id, cancelled_at, cancellation_reason "
+                            "FROM navigation_task WHERE reported_need_id = :need_id "
+                            "ORDER BY id"
+                        ),
+                        {"need_id": expected["need"]},
+                    )
+                )
+                history_counts_before = connection.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT count(*) FROM proposed_change), "
+                        "(SELECT count(*) FROM approval_decision), "
+                        "(SELECT count(*) FROM audit_event)"
+                    )
+                ).one()
+        finally:
+            engine.dispose()
+
+        _run_alembic(database_url, "upgrade", "head")
+
+        engine = create_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                after = tuple(
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            "SELECT id, title, status, assignee_user_id, due_at, "
+                            "authorized_proposed_change_id, completed_at, "
+                            "cancelled_by_user_id, cancelled_at, cancellation_reason "
+                            "FROM navigation_task WHERE reported_need_id = :need_id "
+                            "ORDER BY id"
+                        ),
+                        {"need_id": expected["need"]},
+                    )
+                )
+                history_counts_after = connection.execute(
+                    text(
+                        "SELECT "
+                        "(SELECT count(*) FROM proposed_change), "
+                        "(SELECT count(*) FROM approval_decision), "
+                        "(SELECT count(*) FROM audit_event)"
+                    )
+                ).one()
+                version = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        finally:
+            engine.dispose()
+
+        assert after == before
+        assert history_counts_after == history_counts_before
+        assert {str(row[2]) for row in after} == {
+            "open",
+            "assigned",
+            "in_progress",
+            "completed",
+            "cancelled",
+        }
+        assert all(row[5] is None for row in after)
+        assert version == "0007_database_least_privilege"
+
+
 def test_0006_downgrade_refuses_to_discard_approved_execution_history() -> None:
     with _disposable_migration_database() as database_url:
         _run_alembic(database_url, "upgrade", "0005_workflow_knowledge_audit")
         expected = _seed_representative_0005_history(database_url)
-        _run_alembic(database_url, "upgrade", "head")
+        _run_alembic(database_url, "upgrade", "0006_navigator_closed_loop")
         engine = create_engine(database_url)
         try:
             with engine.begin() as connection:

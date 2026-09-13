@@ -1,80 +1,30 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from uuid import uuid4
 
 import httpx
 from sqlalchemy import create_engine, select, text
-from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.auth.dependencies import current_actor
 from app.auth.models import CurrentActor, Role
-from app.config import settings
 from app.db.integrity import inspect_integrity
 from app.db.models import CheckInSubmission
 from app.db.session import get_session
 from app.main import app
 from scripts.seed_demo import DEMO_IDS, seed_demo
+from tests.database_support import disposable_database
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 DISPOSABLE_PREFIX = "ojcc_task7_"
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-
-
-def _validate_local_url(url: URL) -> None:
-    if url.get_backend_name() != "postgresql" or url.host not in LOOPBACK_HOSTS:
-        raise ValueError("Seed contract tests require loopback PostgreSQL")
 
 
 @contextmanager
 def _seeded_disposable_database() -> Iterator[str]:
-    configured = make_url(settings.database_url)
-    _validate_local_url(configured)
-    disposable = configured.set(
-        host="127.0.0.1", database=f"{DISPOSABLE_PREFIX}{uuid4().hex}"
-    )
-    database_name = disposable.database
-    assert database_name is not None and database_name.startswith(DISPOSABLE_PREFIX)
-    admin = disposable.set(database="postgres")
-    admin_engine = create_engine(admin, isolation_level="AUTOCOMMIT")
-    created = False
-    try:
-        with admin_engine.connect() as connection:
-            connection.execute(text(f'CREATE DATABASE "{database_name}"'))
-        created = True
-        child_environment = {
-            key: value for key, value in os.environ.items() if not key.upper().startswith("PG")
-        }
-        child_environment["DATABASE_URL"] = disposable.render_as_string(hide_password=False)
-        migration = subprocess.run(
-            [sys.executable, "-m", "alembic", "-c", "services/api/alembic.ini", "upgrade", "head"],
-            cwd=PROJECT_ROOT,
-            env=child_environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert migration.returncode == 0, migration.stdout + migration.stderr
-        yield disposable.render_as_string(hide_password=False)
-    finally:
-        if created:
-            assert database_name.startswith(DISPOSABLE_PREFIX)
-            with admin_engine.connect() as connection:
-                connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :database_name AND pid <> pg_backend_pid()"
-                    ),
-                    {"database_name": database_name},
-                )
-                connection.execute(text(f'DROP DATABASE "{database_name}"'))
-        admin_engine.dispose()
+    with disposable_database(prefix=DISPOSABLE_PREFIX, migrate_to="head") as database:
+        yield database.migration_url
 
 
 def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths() -> None:

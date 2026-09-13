@@ -12,11 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 API_DATABASE_NAME = "ojcc_demo_11111111111111111111111111111111"
 LIVE_DATABASE_NAME = "ojcc_demo_22222222222222222222222222222222"
 API_DATABASE_URL = (
-    "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+    "postgresql+psycopg://ojcc_api:api-local-synthetic-only@127.0.0.1:5432/"
     f"{API_DATABASE_NAME}"
 )
 LIVE_DATABASE_URL = (
-    "postgresql+psycopg://ojcc:local-synthetic-only@127.0.0.1:5432/"
+    "postgresql+psycopg://ojcc_api:api-local-synthetic-only@127.0.0.1:5432/"
     f"{LIVE_DATABASE_NAME}"
 )
 CHILD_SENTINEL = "VERIFY_CHILD_WAS_INVOKED"
@@ -48,9 +48,22 @@ def _write_fake_command(
             if require_clean_pg
             else ""
         )
-        argument_log = (
-            f'echo {name} %*>>"%VERIFY_FAKE_LOG%"\n' if log_arguments else ""
-        )
+        argument_log = ""
+        if log_arguments:
+            argument_log = (
+                "setlocal EnableDelayedExpansion\n"
+                f"set \"SAFE_LOG={name}\"\n"
+                ":log_arguments\n"
+                "if \"%~1\"==\"\" goto arguments_logged\n"
+                "set \"ARGUMENT=%~1\"\n"
+                "echo(!ARGUMENT!| findstr /c:\"://\" >nul || "
+                "set \"SAFE_LOG=!SAFE_LOG! !ARGUMENT!\"\n"
+                "shift\n"
+                "goto log_arguments\n"
+                ":arguments_logged\n"
+                "echo !SAFE_LOG!>>\"%VERIFY_FAKE_LOG%\"\n"
+                "endlocal\n"
+            )
         (directory / f"{name}.cmd").write_text(
             f"@echo off\n{pg_check}{argument_log}echo {output}\nexit /b {exit_code}\n",
             encoding="utf-8",
@@ -63,11 +76,16 @@ def _write_fake_command(
         if require_clean_pg
         else ""
     )
-    argument_log = (
-        f"printf '%s %s\\n' '{name}' \"$*\" >> \"$VERIFY_FAKE_LOG\"\n"
-        if log_arguments
-        else ""
-    )
+    argument_log = ""
+    if log_arguments:
+        argument_log = (
+            f"printf '%s' '{name}' >> \"$VERIFY_FAKE_LOG\"\n"
+            "for argument in \"$@\"; do\n"
+            "  case \"$argument\" in *://*) ;; *) "
+            "printf ' %s' \"$argument\" >> \"$VERIFY_FAKE_LOG\" ;; esac\n"
+            "done\n"
+            "printf '\\n' >> \"$VERIFY_FAKE_LOG\"\n"
+        )
     command = directory / name
     command.write_text(
         f"#!/bin/sh\n{pg_check}{argument_log}echo {output}\nexit {exit_code}\n",
@@ -76,15 +94,46 @@ def _write_fake_command(
     command.chmod(0o755)
 
 
-def _verification_environment(fake_bin: Path, *, database_url: str | None) -> dict[str, str]:
+def _database_triple(target_url: str) -> tuple[str, str, str]:
+    from sqlalchemy.engine import make_url
+
+    target = make_url(target_url)
+    return (
+        target.set(username="ojcc", password="local-synthetic-only").render_as_string(
+            hide_password=False
+        ),
+        target.set(
+            username="ojcc_migrator", password="migrator-local-synthetic-only"
+        ).render_as_string(hide_password=False),
+        target.set(username="ojcc_api", password="api-local-synthetic-only").render_as_string(
+            hide_password=False
+        ),
+    )
+
+
+def _verification_environment(
+    fake_bin: Path,
+    *,
+    database_url: str | None,
+    include_bootstrap: bool = True,
+    include_migration: bool = True,
+) -> dict[str, str]:
     environment = {
-        key: value for key, value in os.environ.items() if not key.upper().startswith("PG")
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("PG")
+        and key.upper()
+        not in {"BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL"}
     }
     environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
     if database_url is None:
-        environment.pop("DATABASE_URL", None)
-    else:
-        environment["DATABASE_URL"] = database_url
+        return environment
+    bootstrap_url, migration_url, application_url = _database_triple(database_url)
+    if include_bootstrap:
+        environment["BOOTSTRAP_DATABASE_URL"] = bootstrap_url
+    if include_migration:
+        environment["MIGRATION_DATABASE_URL"] = migration_url
+    environment["DATABASE_URL"] = application_url
     return environment
 
 
@@ -93,7 +142,12 @@ def _run_verify(
     live_confirmation: str,
     *,
     environment: dict[str, str],
+    live_bootstrap_database_url: str | None = None,
+    live_migration_database_url: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
+        live_database_url
+    )
     return subprocess.run(
         [
             _powershell(),
@@ -102,8 +156,12 @@ def _run_verify(
             "Bypass",
             "-File",
             "scripts/verify.ps1",
+            "-LiveBootstrapDatabaseUrl",
+            live_bootstrap_database_url or live_bootstrap_url,
+            "-LiveMigrationDatabaseUrl",
+            live_migration_database_url or live_migration_url,
             "-LiveDatabaseUrl",
-            live_database_url,
+            live_application_url,
             "-LiveConfirmDatabaseName",
             live_confirmation,
         ],
@@ -118,6 +176,7 @@ def _run_verify(
 
 
 def _run_live_wrapper(*, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    bootstrap_url, migration_url, application_url = _database_triple(LIVE_DATABASE_URL)
     return subprocess.run(
         [
             _powershell(),
@@ -126,8 +185,12 @@ def _run_live_wrapper(*, environment: dict[str, str]) -> subprocess.CompletedPro
             "Bypass",
             "-File",
             "scripts/verify_live_journey.ps1",
+            "-BootstrapDatabaseUrl",
+            bootstrap_url,
+            "-MigrationDatabaseUrl",
+            migration_url,
             "-DatabaseUrl",
-            LIVE_DATABASE_URL,
+            application_url,
             "-ConfirmDatabaseName",
             LIVE_DATABASE_NAME,
         ],
@@ -232,6 +295,60 @@ def test_verify_requires_an_explicit_safe_api_target_before_any_child_process(
     assert CHILD_SENTINEL not in output
 
 
+@pytest.mark.parametrize("stage", ("api", "live"))
+def test_verify_rejects_shared_database_usernames_before_children(
+    tmp_path: Path, stage: str
+) -> None:
+    _write_fake_command(tmp_path, "python", exit_code=97)
+    environment = _verification_environment(tmp_path, database_url=API_DATABASE_URL)
+    live_migration_override = None
+    if stage == "api":
+        environment["MIGRATION_DATABASE_URL"] = environment["DATABASE_URL"]
+    else:
+        live_bootstrap_url, _, _ = _database_triple(LIVE_DATABASE_URL)
+        live_migration_override = live_bootstrap_url
+    result = _run_verify(
+        LIVE_DATABASE_URL,
+        LIVE_DATABASE_NAME,
+        environment=environment,
+        live_migration_database_url=live_migration_override,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert "distinct" in output.lower()
+    assert "usernames" in output.lower()
+    assert CHILD_SENTINEL not in output
+
+
+@pytest.mark.parametrize(
+    ("include_bootstrap", "include_migration", "expected"),
+    ((False, True, "bootstrap_database_url"), (True, False, "migration_database_url")),
+)
+def test_verify_requires_all_api_credentials_before_any_child_process(
+    tmp_path: Path,
+    include_bootstrap: bool,
+    include_migration: bool,
+    expected: str,
+) -> None:
+    _write_fake_command(tmp_path, "python", exit_code=97)
+    result = _run_verify(
+        LIVE_DATABASE_URL,
+        LIVE_DATABASE_NAME,
+        environment=_verification_environment(
+            tmp_path,
+            database_url=API_DATABASE_URL,
+            include_bootstrap=include_bootstrap,
+            include_migration=include_migration,
+        ),
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert expected in output.lower()
+    assert CHILD_SENTINEL not in output
+
+
 def test_verify_returns_nonzero_when_a_required_child_fails(tmp_path: Path) -> None:
     """Production break: a failed required gate is treated as successful verification."""
     _write_fake_command(tmp_path, "python", exit_code=41)
@@ -257,6 +374,9 @@ def test_verify_removes_and_restores_inherited_pg_environment_on_failure(
     wrapper = tmp_path / "probe.ps1"
     verify_path = PROJECT_ROOT / "scripts" / "verify.ps1"
     escaped_verify_path = str(verify_path).replace("'", "''")
+    live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
+        LIVE_DATABASE_URL
+    )
     wrapper.write_text(
         "$ErrorActionPreference = 'Stop'\n"
         "$env:PGHOST = 'unsafe.example.test'\n"
@@ -265,7 +385,9 @@ def test_verify_removes_and_restores_inherited_pg_environment_on_failure(
         "$caught = $null\n"
         "try {\n"
         f"  . '{escaped_verify_path}' "
-        f"-LiveDatabaseUrl '{LIVE_DATABASE_URL}' "
+        f"-LiveBootstrapDatabaseUrl '{live_bootstrap_url}' "
+        f"-LiveMigrationDatabaseUrl '{live_migration_url}' "
+        f"-LiveDatabaseUrl '{live_application_url}' "
         f"-LiveConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
         "}\n"
         "catch { $caught = $_.Exception.Message }\n"
@@ -364,6 +486,9 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
 
     wrapper = tmp_path / "tool-environment-probe.ps1"
     escaped_verify_path = str(PROJECT_ROOT / "scripts" / "verify.ps1").replace("'", "''")
+    live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
+        LIVE_DATABASE_URL
+    )
     wrapper.write_text(
         "$ErrorActionPreference = 'Stop'\n"
         "$env:NO_COLOR = 'preserve-no-color'\n"
@@ -372,7 +497,9 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
         "$caught = $null\n"
         "try {\n"
         f"  . '{escaped_verify_path}' "
-        f"-LiveDatabaseUrl '{LIVE_DATABASE_URL}' "
+        f"-LiveBootstrapDatabaseUrl '{live_bootstrap_url}' "
+        f"-LiveMigrationDatabaseUrl '{live_migration_url}' "
+        f"-LiveDatabaseUrl '{live_application_url}' "
         f"-LiveConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
         "}\n"
         "catch { $caught = $_.Exception.Message }\n"
@@ -465,8 +592,51 @@ def test_live_wrapper_audits_integrity_after_each_browser_journey(tmp_path: Path
     audits = [
         index
         for index, command in enumerate(commands)
-        if "scripts/check_integrity.py --database-url" in command
+        if "-m scripts.check_integrity --database-url" in command
     ]
     assert len(live_runs) == 2
-    assert len(audits) == 4
-    assert live_runs[0] < audits[1] < live_runs[1] < audits[3]
+    assert len(audits) == 6
+    assert live_runs[0] < audits[2] < live_runs[1] < audits[5]
+
+
+def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
+    config = (PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts").read_text()
+    journey = (
+        PROJECT_ROOT
+        / "apps"
+        / "web"
+        / "e2e-live"
+        / "closed-loop-transportation.spec.ts"
+    ).read_text()
+
+    assert "...process.env" not in config
+    assert "MIGRATION_DATABASE_URL" not in config
+    assert "BOOTSTRAP_DATABASE_URL" not in config
+    assert "current_user" in journey
+    assert "session_user" in journey
+    assert "OJCC_MIGRATION_USERNAME" in journey
+
+
+def test_ci_provisions_uuid_databases_and_distinct_roles_without_cache_regression() -> None:
+    workflow = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    readme = (PROJECT_ROOT / "README.md").read_text()
+
+    assert 'tuple(f"ojcc_demo_{uuid4().hex}" for _ in range(2))' in workflow
+    assert "sql.Identifier(name)" in workflow
+    assert "ojcc_migrator" in workflow
+    assert "ojcc_api" in workflow
+    assert "python -m scripts.provision_database_roles" in workflow
+    assert "expected_roles =" not in workflow
+    assert "python -m scripts.provision_database_roles" in readme
+    for field in (
+        "BOOTSTRAP_DATABASE_URL",
+        "MIGRATION_DATABASE_URL",
+        "DATABASE_URL",
+        "LIVE_BOOTSTRAP_DATABASE_URL",
+        "LIVE_MIGRATION_DATABASE_URL",
+        "LIVE_DATABASE_URL",
+    ):
+        assert field in workflow
+    assert "cache: npm" in workflow
+    assert "cache: pip" in workflow
+    assert "Restore Next.js build cache" in workflow

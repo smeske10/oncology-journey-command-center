@@ -1,6 +1,14 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
+    [string]$LiveBootstrapDatabaseUrl,
+
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
+    [string]$LiveMigrationDatabaseUrl,
+
+    [Parameter(Mandatory = $true)]
+    [ValidateNotNullOrEmpty()]
     [string]$LiveDatabaseUrl,
 
     [Parameter(Mandatory = $true)]
@@ -66,7 +74,45 @@ function Assert-SafeDatabaseTarget {
     if ($Confirmation -and $databaseName -cne $Confirmation) {
         throw "$Purpose database confirmation does not match its validated name."
     }
-    return $databaseName
+    $username = [System.Uri]::UnescapeDataString($parsed.UserInfo.Split(":")[0])
+    if ([string]::IsNullOrWhiteSpace($username)) {
+        throw "$Purpose requires an explicit username."
+    }
+    return [PSCustomObject]@{
+        Name = $databaseName
+        Host = $parsed.Host.ToLowerInvariant()
+        Port = $parsed.Port
+        Username = $username
+    }
+}
+
+function Assert-DatabaseTargetTriple {
+    param(
+        [string]$BootstrapUrl,
+        [string]$MigrationUrl,
+        [string]$ApplicationUrl,
+        [string]$Purpose,
+        [string]$Confirmation = ""
+    )
+
+    $bootstrap = Assert-SafeDatabaseTarget $BootstrapUrl "$Purpose BOOTSTRAP_DATABASE_URL"
+    $migration = Assert-SafeDatabaseTarget $MigrationUrl "$Purpose MIGRATION_DATABASE_URL"
+    $application = Assert-SafeDatabaseTarget `
+        $ApplicationUrl "$Purpose DATABASE_URL" $Confirmation
+    foreach ($candidate in @($bootstrap, $migration)) {
+        if ($candidate.Name -cne $application.Name -or
+            $candidate.Host -cne $application.Host -or
+            $candidate.Port -ne $application.Port) {
+            throw "$Purpose database targets must use the same host, port, and database name."
+        }
+    }
+    $distinctCount = @(
+        $bootstrap.Username, $migration.Username, $application.Username
+    ) | Sort-Object -Unique | Measure-Object | Select-Object -ExpandProperty Count
+    if ($distinctCount -ne 3) {
+        throw "$Purpose bootstrap, migration, and application require distinct usernames."
+    }
+    return $application.Name
 }
 
 function Invoke-VerificationCommand {
@@ -79,11 +125,18 @@ function Invoke-VerificationCommand {
     }
 }
 
+$apiBootstrapDatabaseUrl = [System.Environment]::GetEnvironmentVariable(
+    "BOOTSTRAP_DATABASE_URL", "Process"
+)
+$apiMigrationDatabaseUrl = [System.Environment]::GetEnvironmentVariable(
+    "MIGRATION_DATABASE_URL", "Process"
+)
 $apiDatabaseUrl = [System.Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
-$apiDatabaseName = Assert-SafeDatabaseTarget $apiDatabaseUrl "API verification"
-$liveDatabaseName = Assert-SafeDatabaseTarget (
-    $LiveDatabaseUrl
-) "Live verification" $LiveConfirmDatabaseName
+$apiDatabaseName = Assert-DatabaseTargetTriple `
+    $apiBootstrapDatabaseUrl $apiMigrationDatabaseUrl $apiDatabaseUrl "API verification"
+$liveDatabaseName = Assert-DatabaseTargetTriple `
+    $LiveBootstrapDatabaseUrl $LiveMigrationDatabaseUrl $LiveDatabaseUrl `
+    "Live verification" $LiveConfirmDatabaseName
 if ($apiDatabaseName -ceq $liveDatabaseName) {
     throw "API and live verification require different disposable databases."
 }
@@ -119,6 +172,8 @@ try {
     Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run test:e2e }
     Invoke-VerificationCommand {
         & (Join-Path $PSScriptRoot "verify_live_journey.ps1") `
+            -BootstrapDatabaseUrl $LiveBootstrapDatabaseUrl `
+            -MigrationDatabaseUrl $LiveMigrationDatabaseUrl `
             -DatabaseUrl $LiveDatabaseUrl `
             -ConfirmDatabaseName $LiveConfirmDatabaseName
     }

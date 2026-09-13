@@ -21,7 +21,8 @@ TASK5_WORKFLOW_TABLES = {
 
 @pytest.fixture
 def connection() -> Iterator[Connection]:
-    engine = create_engine(settings.database_url)
+    """Owner-credential setup connection isolated by a rollback."""
+    engine = create_engine(settings.require_migration_database_url())
     with engine.connect() as value:
         transaction = value.begin()
         try:
