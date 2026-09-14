@@ -9,6 +9,12 @@
 **Spec:** [Design](../specs/2026-09-12-demo-session-cardinality-hardening-design.md)
 **Evidence:** [Progress ledger](../progress/2026-09-12-demo-session-cardinality-hardening.md)
 
+**Latest acceptance:** Final review fixes and the entire Task 6 rerun passed at repaired source
+`769eb577110fe34fe0f5507bce10189224259014` on 2026-09-14. Standalone/root API suites each passed
+727 tests; web lint, 34 Vitest tests, production build, three mocked browser tests, and both live
+viewports passed. Fresh API/live targets were ordinarily dropped after owner/zero-session checks
+and confirmed absent. Earlier attempts remain historical in the ledger.
+
 ## Global constraints
 
 - Work only in `.worktrees/demo-session-cardinality-hardening`, branch `feature/demo-session-cardinality-hardening`, based on `0a3cda82203d850992f2efc3653b653c8253459c`.
@@ -278,6 +284,24 @@ Expected: locked dependency install, Ruff, Pyright, runtime integrity, all pytes
 - [x] Update ledger with evidence, intentional limitations and next exact step; commit documentation. Stop for user review. Do not merge/deploy/remove worktrees or start a deferred milestone.
 
 ## Required scenario traceability
+
+### Final review closure (completed after the original Task 6 acceptance)
+
+- [x] Observe root frontend environment regressions RED, including the installed Playwright
+  mocked Next child; sanitize the six API-only variables around the entire root frontend block
+  and restore exact prior values in `finally` on success/failure before the live wrapper.
+- [x] Observe deterministic patient organization mismatch RED in a fresh owned database with no
+  grant/link rows; add SELECT-only preflight refusal before inserts/trigger changes. Verify full
+  digest preservation and no repair or user primary-organization condition.
+- [x] Rerun focused/static/hash/frozen/cache/web gates, then the entire Task 6 from scratch at
+  repaired source `769eb57` using newly recorded `ojcc_demo_77dfdec72f444052b47b12b908cc2646`
+  (API) and `ojcc_demo_b856543e2455487d8a31432b3d74f369` (live). Both were absent before creation,
+  owned by `ojcc_migrator`, audited successfully, and ordinarily dropped with absence confirmed.
+- [x] Preserve earlier attempts, correct superseded status/next-step labels, and refresh only
+  the three approved tracked evidence documents. Record the separate existing live-wrapper
+  absent-to-empty restoration observation without expanding scope. Stop for user review.
+
+### Original scenario mapping
 
 | Requested scenario | Failing-first/proof location |
 |---|---|

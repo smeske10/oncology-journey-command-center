@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Tasks 1–6 complete. Full security and desktop/mobile journey acceptance passed at `868f630`; awaiting user review.
+**Status:** Tasks 1–6 and the final review fix wave are complete. Fresh full security and desktop/mobile acceptance passed at repaired source `769eb577110fe34fe0f5507bce10189224259014` on 2026-09-14; awaiting user review. Earlier attempts below remain historical evidence.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -601,5 +601,123 @@ At this conditional-approval checkpoint, no production or test file had been cha
 database had been accessed. The later Task 1 execution record above supersedes that historical
 working-tree statement.
 
-**Next exact step:** Report the Task 5 execution checkpoint and wait for explicit authorization
-before Task 6.
+**Historical next step (superseded by Task 6 and the final fix wave below):** Report the Task 5
+execution checkpoint and wait for explicit authorization before Task 6.
+
+## Final whole-branch review fix wave — 2026-09-14
+
+Review of `0a3cda8..2536b2a` identified two remaining safeguards: root frontend children inherited
+API configuration, and an unlinked deterministic patient in a different organization reached seed
+mutation. Both were corrected in `769eb577110fe34fe0f5507bce10189224259014`
+(`fix: close final demo acceptance gaps`). This commit changes exactly `scripts/verify.ps1`,
+`services/api/scripts/seed_demo.py`, and their existing seed/verifier test files.
+
+The root frontend block now saves, removes, and restores the six API-only environment variables
+in `finally` before the live wrapper and on frontend failure. The regression executes all four
+root web command children and a harmless mocked Next child through the installed Playwright
+launcher, checking effective absence plus exact restoration on success/failure. The existing
+live isolation and all three CI cache blocks are unchanged. Seed preflight now SELECTs the
+deterministic patient's organization: absence or the intended organization is allowed; mismatch
+raises the existing stable sanitized conflict before any insert or trigger change. It adds no
+user primary-organization condition and performs no repair.
+
+### Failing-first and focused evidence
+
+- Exact RED/GREEN command from `services/api`:
+  `python -m pytest tests/test_verify_harness.py::test_root_frontend_effective_environments_and_restoration tests/test_demo_seed.py::test_seed_refuses_wrong_organization_for_intended_patient_before_mutation -q -s --tb=short`.
+- Intended RED before production edits: **4 failed in 10.66s**. Present-value root cases observed
+  all six variables in lint/Vitest/build/mocked and mocked Next children; the absent-demo failure
+  case still observed the three database variables. Output contained presence booleans only.
+  Patient preflight observed `digest_unchanged=True`, `trigger_changes=[False]`,
+  `database_error=True`, and failed the sanitized-refusal assertion. Its fixture contained only
+  another valid organization and the deterministic patient, with zero role/link rows.
+- GREEN: **4 passed in 10.62s**. Patient pre/post full database digests matched with
+  `trigger_changes=[]`, `database_error=False`, and the exact stable sanitized refusal. RED
+  fixture `ojcc_task7_de7a98106c18454a8b64df49fa84b5d9` and GREEN fixture
+  `ojcc_task7_c9b2a631b24f4fd48aba7adda04751fa` were ordinarily dropped by the owned helper.
+- Initial fixture development omitted required demographics and failed during setup; that is
+  not RED evidence. Its `ojcc_task7_0ca562d170a74d09a966eb8dcde82d44` fixture was ordinarily
+  dropped. A later mismatched synthetic base-name invocation failed target validation before
+  creation; the corrected run supplied one shared base name.
+- Complete focused seed/verifier/frozen selection: **73 passed, 25 core-migration cases
+  deselected in 91.47s**. Separate immutable hashes: **7 passed**; frozen v0007: **2 passed**;
+  three-cache guard: **1 passed**. Full Ruff/Pyright, all root PowerShell parsing, and diff checks
+  passed. Pre-commit web lint, **34 Vitest**, production build, and **3 mocked Playwright** passed.
+
+### Entire Task 6 rerun at repaired source HEAD
+
+Two new UUIDv4 names were generated and recorded before creation, confirmed absent, provisioned
+with distinct bootstrap/owner/runtime credentials, and verified as owned by `ojcc_migrator`
+with zero sessions. No previous acceptance target or persistent `ojcc` was accessed.
+
+| Purpose | Fresh exact name | Final disposition |
+|---|---|---|
+| API | `ojcc_demo_77dfdec72f444052b47b12b908cc2646` | Owner verified; 0 sessions; ordinary owner drop; absence confirmed |
+| Desktop/mobile live | `ojcc_demo_b856543e2455487d8a31432b3d74f369` | Owner verified; 0 sessions; ordinary owner drop; absence confirmed |
+
+The API reset/replay reached head, two seeds produced matching inventories, and owner/runtime
+integrity audits were clean. Standalone `python -m pytest -q -ra`: **727 passed in 443.67s**, with
+zero failures/skips. This includes every new security case and the complete existing privilege,
+runtime attestation, history, seed, migration/replay, provisioning, and target-safety suites.
+Alembic current was `0007_database_least_privilege (head)`; check found no upgrade operations.
+All seven original SHA-256 values matched and the frozen contract suite passed **2 tests**.
+
+OpenAPI and installed TypeScript generation each ran twice, remained byte-stable, and produced no
+Git drift or internal auth model names. Raw hashes remain OpenAPI
+`56eb4aab2d0e650e121091be68737cc12b8dcd5254814ecaa1ddd1767b106882` and TypeScript
+`9c46a9cb6a2654ed0e41a964fd86d7f9479ccd5874ef5f0adff188bcf70ddc46`. An initial supplemental
+export invocation used the wrong cwd and failed before executing the script; the ignored runner's
+cwd/console encoding were corrected and the full migration/contract group passed. No source
+defect or database mutation resulted from that invocation error.
+
+The exact root verifier ran uninterrupted with the API triple exported and the distinct live
+triple supplied through `LiveBootstrapDatabaseUrl`, `LiveMigrationDatabaseUrl`,
+`LiveDatabaseUrl`, and `LiveConfirmDatabaseName`. It exited 0 after **531.33s**.
+
+| Root gate stage | Result at `769eb57` |
+|---|---|
+| Locked Python install and editable no-dependency install | Passed |
+| Ruff and Pyright | Passed; 0 type errors/warnings/informations |
+| Runtime integrity | 0 violations |
+| Complete API/security pytest | **727 passed in 443.28s**, no failures/skips |
+| Web lint | Passed |
+| Vitest | **6 files, 34 passed in 1.70s** |
+| Next production build | Compile, types, static generation, optimization and traces passed |
+| Mocked Playwright | **3 passed in 6.9s** |
+| Desktop live | **1 passed in 13.1s** |
+| Mobile live | **1 passed in 12.8s** |
+
+Each live viewport reset/double-seeded the owned live target, passed owner/API pre-audits, and
+completed the real signed-cookie story: exact evidence → approve → claim → start → complete →
+patient resolved follow-up → navigator refresh → outcome preview/confirmation → reload persisted
+navigator and patient history. Mobile also checked viewport width and horizontal overflow. Both
+post-journey runtime audits returned zero violations. Live assertions checked the real non-owner
+login and exact persisted counts, without overriding application authorization.
+
+Fresh final runtime queries on both targets returned `current_user=session_user=ojcc_api`,
+database owner `ojcc_migrator`, and public table owner `ojcc_migrator`. The transportation story
+had exactly one request, response, Outcome, and schema-version-2 binding; three task audits; and
+completed task status. Fresh final API/live integrity audits returned zero violations. Ports
+8011/3011 had no listener. Both targets were checked again for owner and zero sessions, ordinarily
+dropped by the owner, and confirmed absent. No force-drop, unknown-session termination, unknown
+process stop, or worktree removal occurred.
+
+### Clarity, scope, and remaining limitations
+
+The final stale Task 5 next-step text above is explicitly historical. The ignored Task 6 report
+now labels its opening failure as the superseded first attempt and points to the latest fix-wave
+report; the SDD controller summary records this completed fix wave and fresh acceptance.
+
+During initial regression development, traversing the unchanged live wrapper with absent demo
+values showed that it restores them as empty strings on this PowerShell runtime. That separate
+pre-existing behavior is retained as an observation for review. Root present-value success and
+failure restoration and root absent-value frontend-failure restoration are tested; full acceptance
+supplied explicit demo values. No live-wrapper scope expansion was made.
+
+No migration 0008, schema/privilege, dependency, CI, workflow/domain, or existing live-config change
+was made. The design's prior intentional limitations remain in force. The successful runs at
+`868f630` and the earlier blocked attempt remain historical; this fresh run is the latest source
+acceptance. The final evidence commit changes only the approved plan, design, and this ledger.
+
+**Current next exact step:** User review of the repaired source and fresh acceptance evidence.
+Do not merge, push, deploy, remove the worktree, or begin a deferred milestone without direction.
