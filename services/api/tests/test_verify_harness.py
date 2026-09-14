@@ -894,6 +894,8 @@ def test_root_frontend_effective_environments_and_restoration(
     names = [
         "DATABASE_URL", "MIGRATION_DATABASE_URL", "BOOTSTRAP_DATABASE_URL",
         "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON",
+        "LIVE_BOOTSTRAP_DATABASE_URL", "LIVE_MIGRATION_DATABASE_URL",
+        "LIVE_DATABASE_URL",
     ]
     probe.write_text(
         """

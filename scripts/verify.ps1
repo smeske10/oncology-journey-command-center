@@ -168,7 +168,9 @@ try {
 
     $frontendApiEnvironmentNames = @(
         "DATABASE_URL", "MIGRATION_DATABASE_URL", "BOOTSTRAP_DATABASE_URL",
-        "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON"
+        "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON",
+        "LIVE_BOOTSTRAP_DATABASE_URL", "LIVE_MIGRATION_DATABASE_URL",
+        "LIVE_DATABASE_URL"
     )
     $priorFrontendApiEnvironment = @{}
     foreach ($name in $frontendApiEnvironmentNames) {
