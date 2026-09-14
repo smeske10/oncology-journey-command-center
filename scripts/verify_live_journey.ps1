@@ -18,7 +18,7 @@ $webRoot = Join-Path $projectRoot "apps/web"
 $apiRoot = Join-Path $projectRoot "services/api"
 $taskEnvironmentNames = @(
     "BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL", "APP_ENV",
-    "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID",
+    "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON",
     "OJCC_API_ORIGIN", "PLAYWRIGHT_BASE_URL", "OJCC_LIVE_DEVICE",
     "OJCC_MIGRATION_USERNAME"
 )
@@ -138,6 +138,20 @@ try {
         Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
     }
 
+    Push-Location $apiRoot
+    try {
+        $demoActorsJson = & python -m scripts.seed_demo --print-demo-actors
+        if ($LASTEXITCODE -ne 0) {
+            throw "Synthetic demo actor configuration failed with exit code $LASTEXITCODE."
+        }
+        if ([string]::IsNullOrWhiteSpace($demoActorsJson)) {
+            throw "Synthetic demo actor configuration was empty."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
     foreach ($device in @("desktop", "mobile")) {
         Assert-PortAvailable 8011
         Assert-PortAvailable 3011
@@ -153,6 +167,7 @@ try {
         [System.Environment]::SetEnvironmentVariable("APP_ENV", "local", "Process")
         [System.Environment]::SetEnvironmentVariable("DEMO_SESSION_SECRET", "synthetic-live-session-secret-with-32-characters", "Process")
         [System.Environment]::SetEnvironmentVariable("DEMO_ORGANIZATION_ID", "aeb456d4-3728-5f64-ac05-afed26cd0edc", "Process")
+        [System.Environment]::SetEnvironmentVariable("DEMO_ACTORS_JSON", $demoActorsJson, "Process")
         [System.Environment]::SetEnvironmentVariable("OJCC_API_ORIGIN", "http://127.0.0.1:8011", "Process")
         [System.Environment]::SetEnvironmentVariable("PLAYWRIGHT_BASE_URL", "http://127.0.0.1:3011", "Process")
         [System.Environment]::SetEnvironmentVariable("OJCC_LIVE_DEVICE", $device, "Process")

@@ -49,6 +49,7 @@ export default defineConfig({
         APP_ENV: "local",
         DEMO_SESSION_SECRET: requiredEnvironment("DEMO_SESSION_SECRET"),
         DEMO_ORGANIZATION_ID: requiredEnvironment("DEMO_ORGANIZATION_ID"),
+        DEMO_ACTORS_JSON: requiredEnvironment("DEMO_ACTORS_JSON"),
       },
       port: 8011,
       reuseExistingServer: false,

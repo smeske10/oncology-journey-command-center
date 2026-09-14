@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, text
@@ -75,6 +78,17 @@ def _disposable_database() -> Iterator[str]:
         yield database.migration_url
 
 
+@contextmanager
+def _disposable_session() -> Iterator[Session]:
+    with _disposable_database() as database_url:
+        engine = create_engine(database_url)
+        try:
+            with Session(engine) as session:
+                yield session
+        finally:
+            engine.dispose()
+
+
 def _seed_digest(session: Session) -> str:
     rows: list[str] = []
     organization_id = DEMO_IDS["organization"]
@@ -95,6 +109,93 @@ def _seed_digest(session: Session) -> str:
             ).scalars()
         )
     return hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+
+def _database_digest(session: Session) -> str:
+    rows: list[str] = []
+    for table in SCOPED_TABLES:
+        rows.extend(
+            session.execute(
+                text(
+                    f"SELECT row_to_json(all_rows)::text FROM "
+                    f"(SELECT * FROM {table} ORDER BY id) AS all_rows"
+                )
+            ).scalars()
+        )
+    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+
+def _insert_identity_prerequisites(
+    session: Session,
+    *,
+    organization_id: UUID,
+    user_id: UUID,
+    patient_id: UUID | None = None,
+) -> None:
+    created_at = datetime.now(UTC)
+    session.execute(
+        text(
+            "INSERT INTO organization (id, name, created_at) "
+            "VALUES (:organization_id, :name, :created_at)"
+        ),
+        {
+            "organization_id": organization_id,
+            "name": f"Synthetic fixture {organization_id}",
+            "created_at": created_at,
+        },
+    )
+    session.execute(
+        text(
+            "INSERT INTO user_account "
+            "(id, primary_organization_id, email, display_name, is_active, created_at) "
+            "VALUES (:user_id, :organization_id, :email, 'Fixture user', true, :created_at)"
+        ),
+        {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "email": f"fixture-{user_id}@example.test",
+            "created_at": created_at,
+        },
+    )
+    if patient_id is not None:
+        session.execute(
+            text(
+                "INSERT INTO synthetic_patient "
+                "(id, organization_id, external_ref, display_name, birth_date, demographics, created_at) "
+                "VALUES (:patient_id, :organization_id, :external_ref, "
+                "'Fixture patient', NULL, '{}'::jsonb, :created_at)"
+            ),
+            {
+                "patient_id": patient_id,
+                "organization_id": organization_id,
+                "external_ref": f"fixture-{patient_id}",
+                "created_at": created_at,
+            },
+        )
+
+
+def _assert_seed_refuses_identity_conflict(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session.commit()
+    before_digest = _database_digest(session)
+    trigger_changes: list[bool] = []
+    original_set_seed_user_triggers = seed_demo_script._set_seed_user_triggers
+
+    def record_trigger_change(changed_session: Session, *, enabled: bool) -> None:
+        trigger_changes.append(enabled)
+        original_set_seed_user_triggers(changed_session, enabled=enabled)
+
+    monkeypatch.setattr(seed_demo_script, "_set_seed_user_triggers", record_trigger_change)
+
+    with pytest.raises(
+        RuntimeError, match="Existing demo identity conflicts with synthetic seed"
+    ):
+        seed_demo(session)
+
+    assert trigger_changes == []
+    assert _database_digest(session) == before_digest
 
 
 def _resolve_powershell_executable(
@@ -168,6 +269,50 @@ def _seed_arguments(target_url: str) -> list[str]:
         "--database-url",
         application_url,
     ]
+
+
+def test_print_demo_actors_is_connection_free_and_emits_exact_sorted_ids(
+    tmp_path: Path,
+) -> None:
+    """Production break: operators cannot configure the exact synthetic actor roster."""
+    sentinel = "database engine creation was attempted"
+    (tmp_path / "sitecustomize.py").write_text(
+        "import sqlalchemy\n"
+        "def blocked_create_engine(*args, **kwargs):\n"
+        f"    raise AssertionError({sentinel!r})\n"
+        "sqlalchemy.create_engine = blocked_create_engine\n",
+        encoding="utf-8",
+    )
+    python_path = str(tmp_path)
+    if existing_python_path := os.environ.get("PYTHONPATH"):
+        python_path += os.pathsep + existing_python_path
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "scripts.seed_demo",
+            "--print-demo-actors",
+        ],
+        cwd=PROJECT_ROOT / "services" / "api",
+        env=os.environ | {"PYTHONPATH": python_path},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    expected = {
+        "administrator": {"user_id": "0a71cbf4-43a7-52b6-aee4-d88cdfc4fb16"},
+        "navigator": {"user_id": "47c99329-0479-5fdd-97c4-dbfd97490dff"},
+        "supporting_actor": {
+            "patient_id": "bca3e068-4b0f-5434-a6b7-879e3a9e2d89",
+            "user_id": "5c12bf9d-c570-52b2-8a7f-4b55f66c7c30",
+        },
+    }
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == json.dumps(expected, sort_keys=True) + "\n"
+    assert result.stderr == ""
+    assert sentinel not in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
@@ -450,6 +595,277 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
             assert second_digest == first_digest
             assert inspect_integrity(session) == []
         engine.dispose()
+
+
+def test_seed_refuses_wrong_user_for_intended_role_id_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production break: deterministic role identity drift is silently accepted."""
+    with _disposable_session() as session:
+        _insert_identity_prerequisites(
+            session,
+            organization_id=DEMO_IDS["organization"],
+            user_id=DEMO_IDS["administrator_user"],
+        )
+        session.execute(
+            text(
+                "INSERT INTO role_assignment "
+                "(id, organization_id, user_id, role, granted_at, revoked_at, created_at) "
+                "VALUES (:role_assignment_id, :organization_id, :wrong_user_id, "
+                "'navigator', :created_at, NULL, :created_at)"
+            ),
+            {
+                "role_assignment_id": DEMO_IDS["navigator_role"],
+                "organization_id": DEMO_IDS["organization"],
+                "wrong_user_id": DEMO_IDS["administrator_user"],
+                "created_at": datetime.now(UTC),
+            },
+        )
+        _assert_seed_refuses_identity_conflict(session, monkeypatch)
+
+
+def test_seed_refuses_wrong_organization_for_intended_role_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrong_organization_id = uuid4()
+    with _disposable_session() as session:
+        _insert_identity_prerequisites(
+            session,
+            organization_id=wrong_organization_id,
+            user_id=DEMO_IDS["navigator_user"],
+        )
+        session.execute(
+            text(
+                "INSERT INTO role_assignment "
+                "(id, organization_id, user_id, role, granted_at, revoked_at, created_at) "
+                "VALUES (:role_assignment_id, :organization_id, :user_id, "
+                "'navigator', :created_at, NULL, :created_at)"
+            ),
+            {
+                "role_assignment_id": DEMO_IDS["navigator_role"],
+                "organization_id": wrong_organization_id,
+                "user_id": DEMO_IDS["navigator_user"],
+                "created_at": datetime.now(UTC),
+            },
+        )
+        _assert_seed_refuses_identity_conflict(session, monkeypatch)
+
+
+def test_seed_refuses_wrong_role_for_intended_role_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _disposable_session() as session:
+        _insert_identity_prerequisites(
+            session,
+            organization_id=DEMO_IDS["organization"],
+            user_id=DEMO_IDS["navigator_user"],
+        )
+        session.execute(
+            text(
+                "INSERT INTO role_assignment "
+                "(id, organization_id, user_id, role, granted_at, revoked_at, created_at) "
+                "VALUES (:role_assignment_id, :organization_id, :user_id, "
+                "'administrator', :created_at, NULL, :created_at)"
+            ),
+            {
+                "role_assignment_id": DEMO_IDS["navigator_role"],
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["navigator_user"],
+                "created_at": datetime.now(UTC),
+            },
+        )
+        _assert_seed_refuses_identity_conflict(session, monkeypatch)
+
+
+def test_seed_refuses_wrong_user_for_intended_patient_link_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _disposable_session() as session:
+        _insert_identity_prerequisites(
+            session,
+            organization_id=DEMO_IDS["organization"],
+            user_id=DEMO_IDS["administrator_user"],
+            patient_id=DEMO_IDS["patient"],
+        )
+        session.execute(
+            text(
+                "INSERT INTO patient_identity_link "
+                "(id, organization_id, user_id, patient_id, linked_at, revoked_at, created_at) "
+                "VALUES (:link_id, :organization_id, :wrong_user_id, :patient_id, "
+                ":created_at, NULL, :created_at)"
+            ),
+            {
+                "link_id": DEMO_IDS["patient_identity_link"],
+                "organization_id": DEMO_IDS["organization"],
+                "wrong_user_id": DEMO_IDS["administrator_user"],
+                "patient_id": DEMO_IDS["patient"],
+                "created_at": datetime.now(UTC),
+            },
+        )
+        _assert_seed_refuses_identity_conflict(session, monkeypatch)
+
+
+def test_seed_refuses_wrong_patient_for_intended_patient_link_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrong_patient_id = uuid4()
+    with _disposable_session() as session:
+        _insert_identity_prerequisites(
+            session,
+            organization_id=DEMO_IDS["organization"],
+            user_id=DEMO_IDS["patient_user"],
+            patient_id=wrong_patient_id,
+        )
+        session.execute(
+            text(
+                "INSERT INTO patient_identity_link "
+                "(id, organization_id, user_id, patient_id, linked_at, revoked_at, created_at) "
+                "VALUES (:link_id, :organization_id, :user_id, :wrong_patient_id, "
+                ":created_at, NULL, :created_at)"
+            ),
+            {
+                "link_id": DEMO_IDS["patient_identity_link"],
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["patient_user"],
+                "wrong_patient_id": wrong_patient_id,
+                "created_at": datetime.now(UTC),
+            },
+        )
+        _assert_seed_refuses_identity_conflict(session, monkeypatch)
+
+
+def test_seed_never_reactivates_an_inactive_intended_user() -> None:
+    with _disposable_session() as session:
+        seed_demo(session)
+        session.commit()
+        session.execute(
+            text("UPDATE user_account SET is_active = false WHERE id = :user_id"),
+            {"user_id": DEMO_IDS["patient_user"]},
+        )
+        session.commit()
+        before_digest = _database_digest(session)
+
+        seed_demo(session)
+        session.commit()
+
+        assert _database_digest(session) == before_digest
+        assert session.scalar(
+            text("SELECT is_active FROM user_account WHERE id = :user_id"),
+            {"user_id": DEMO_IDS["patient_user"]},
+        ) is False
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM role_assignment "
+                "WHERE organization_id = :organization_id AND user_id = :user_id "
+                "AND role = 'supporting_actor'"
+            ),
+            {
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["patient_user"],
+            },
+        ) == 1
+
+
+def test_seed_never_clears_revocation_or_replaces_an_intended_grant() -> None:
+    with _disposable_session() as session:
+        seed_demo(session)
+        session.commit()
+        revoked_at = datetime.now(UTC)
+        session.execute(
+            text(
+                "UPDATE role_assignment SET revoked_at = :revoked_at "
+                "WHERE id = :role_assignment_id"
+            ),
+            {
+                "revoked_at": revoked_at,
+                "role_assignment_id": DEMO_IDS["navigator_role"],
+            },
+        )
+        session.commit()
+        before_digest = _database_digest(session)
+
+        seed_demo(session)
+        session.commit()
+
+        assert _database_digest(session) == before_digest
+        assert session.scalar(
+            text("SELECT revoked_at FROM role_assignment WHERE id = :id"),
+            {"id": DEMO_IDS["navigator_role"]},
+        ) == revoked_at
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM role_assignment "
+                "WHERE organization_id = :organization_id AND user_id = :user_id "
+                "AND role = 'navigator'"
+            ),
+            {
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["navigator_user"],
+            },
+        ) == 2
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM role_assignment "
+                "WHERE organization_id = :organization_id AND user_id = :user_id "
+                "AND role = 'navigator' AND granted_at <= :at "
+                "AND (revoked_at IS NULL OR :at < revoked_at)"
+            ),
+            {
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["navigator_user"],
+                "at": revoked_at,
+            },
+        ) == 0
+
+
+def test_seed_never_clears_revocation_or_replaces_an_intended_patient_link() -> None:
+    with _disposable_session() as session:
+        seed_demo(session)
+        session.commit()
+        revoked_at = datetime.now(UTC)
+        session.execute(
+            text(
+                "UPDATE patient_identity_link SET revoked_at = :revoked_at "
+                "WHERE id = :link_id"
+            ),
+            {
+                "revoked_at": revoked_at,
+                "link_id": DEMO_IDS["patient_identity_link"],
+            },
+        )
+        session.commit()
+        before_digest = _database_digest(session)
+
+        seed_demo(session)
+        session.commit()
+
+        assert _database_digest(session) == before_digest
+        assert session.scalar(
+            text("SELECT revoked_at FROM patient_identity_link WHERE id = :id"),
+            {"id": DEMO_IDS["patient_identity_link"]},
+        ) == revoked_at
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM patient_identity_link "
+                "WHERE organization_id = :organization_id AND user_id = :user_id"
+            ),
+            {
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["patient_user"],
+            },
+        ) == 1
+        assert session.scalar(
+            text(
+                "SELECT count(*) FROM patient_identity_link "
+                "WHERE organization_id = :organization_id AND user_id = :user_id "
+                "AND linked_at <= :at AND (revoked_at IS NULL OR :at < revoked_at)"
+            ),
+            {
+                "organization_id": DEMO_IDS["organization"],
+                "user_id": DEMO_IDS["patient_user"],
+                "at": revoked_at,
+            },
+        ) == 0
 
 
 def test_reseeding_after_closed_loop_activity_preserves_the_completed_story() -> None:

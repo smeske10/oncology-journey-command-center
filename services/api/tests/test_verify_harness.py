@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -202,6 +203,52 @@ def _run_live_wrapper(*, environment: dict[str, str]) -> subprocess.CompletedPro
         timeout=20,
         check=False,
     )
+
+
+def _live_web_server_environment_keys() -> list[list[str]]:
+    config_path = PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts"
+    script = """
+const fs = require("fs");
+const path = require("path");
+const Module = require("module");
+const ts = require("typescript");
+const filename = process.argv[1];
+const source = fs.readFileSync(filename, "utf8");
+const output = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    esModuleInterop: true,
+  },
+}).outputText;
+const compiled = new Module(filename, module);
+compiled.filename = filename;
+compiled.paths = Module._nodeModulePaths(path.dirname(filename));
+compiled._compile(output, filename);
+const config = compiled.exports.default;
+process.stdout.write(JSON.stringify(config.webServer.map((server) =>
+  Object.keys(server.env || {}).sort()
+)));
+"""
+    environment = os.environ | {
+        "DATABASE_URL": API_DATABASE_URL,
+        "DEMO_SESSION_SECRET": "synthetic-live-session-secret-with-32-characters",
+        "DEMO_ORGANIZATION_ID": "aeb456d4-3728-5f64-ac05-afed26cd0edc",
+        "DEMO_ACTORS_JSON": "{}",
+    }
+    result = subprocess.run(
+        ["node", "-e", script, str(config_path)],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    assert isinstance(parsed, list)
+    return parsed
 
 
 @pytest.mark.parametrize(
@@ -599,6 +646,69 @@ def test_live_wrapper_audits_integrity_after_each_browser_journey(tmp_path: Path
     assert live_runs[0] < audits[2] < live_runs[1] < audits[5]
 
 
+@pytest.mark.parametrize("npm_exit_code", (0, 41), ids=("success", "forced-failure"))
+def test_live_wrapper_restores_prior_demo_actor_configuration(
+    tmp_path: Path,
+    npm_exit_code: int,
+) -> None:
+    """Production break: live verification leaks its synthetic actor roster."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_command(fake_bin, "python", exit_code=0, output="FAKE_PYTHON_OK")
+    _write_fake_command(fake_bin, "npm", exit_code=npm_exit_code, output="FAKE_NPM")
+    wrapper = tmp_path / "live-roster-environment-probe.ps1"
+    escaped_live_path = str(
+        PROJECT_ROOT / "scripts" / "verify_live_journey.ps1"
+    ).replace("'", "''")
+    live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
+        LIVE_DATABASE_URL
+    )
+    expected_failure = (
+        "if ($caught -notmatch '41') { throw \"Unexpected failure: $caught\" }\n"
+        if npm_exit_code
+        else "if ($null -ne $caught) { throw \"Unexpected failure: $caught\" }\n"
+    )
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$env:DEMO_ACTORS_JSON = 'prior-demo-actors-json'\n"
+        "$caught = $null\n"
+        "try {\n"
+        f"  . '{escaped_live_path}' "
+        f"-BootstrapDatabaseUrl '{live_bootstrap_url}' "
+        f"-MigrationDatabaseUrl '{live_migration_url}' "
+        f"-DatabaseUrl '{live_application_url}' "
+        f"-ConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
+        "}\n"
+        "catch { $caught = $_.Exception.Message }\n"
+        + expected_failure
+        + "if ($env:DEMO_ACTORS_JSON -ne 'prior-demo-actors-json') {\n"
+        "  throw 'Demo actor configuration was not restored'\n"
+        "}\n"
+        "Write-Output 'DEMO_ACTORS_JSON_RESTORED'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            _powershell(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(wrapper),
+        ],
+        cwd=PROJECT_ROOT,
+        env=_verification_environment(fake_bin, database_url=API_DATABASE_URL),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DEMO_ACTORS_JSON_RESTORED" in result.stdout
+
+
 def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
     config = (PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts").read_text()
     journey = (
@@ -612,6 +722,21 @@ def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
     assert "...process.env" not in config
     assert "MIGRATION_DATABASE_URL" not in config
     assert "BOOTSTRAP_DATABASE_URL" not in config
+    api_environment, next_environment = map(set, _live_web_server_environment_keys())
+    assert {
+        "DATABASE_URL",
+        "APP_ENV",
+        "DEMO_SESSION_SECRET",
+        "DEMO_ORGANIZATION_ID",
+        "DEMO_ACTORS_JSON",
+    } <= api_environment
+    assert {
+        "DATABASE_URL",
+        "MIGRATION_DATABASE_URL",
+        "BOOTSTRAP_DATABASE_URL",
+        "DEMO_SESSION_SECRET",
+        "DEMO_ACTORS_JSON",
+    }.isdisjoint(next_environment)
     assert "current_user" in journey
     assert "session_user" in journey
     assert "OJCC_MIGRATION_USERNAME" in journey

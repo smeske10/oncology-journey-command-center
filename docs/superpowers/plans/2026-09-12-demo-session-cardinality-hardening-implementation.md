@@ -236,20 +236,20 @@ assert len([c for c in client.cookies.jar if c.name == "ojcc_session"]) == 1
 `validate_existing_demo_identities(session: Session) -> None` checks immutable identity relationships before seed mutation; conflict raises sanitized seed error.
 Use explicit settings/config in HTTP fixtures and runtime live environment.
 
-- [ ] Write the connection-forbidden `--print-demo-actors` CLI test with exact literal keys/IDs. Run it. Expected RED: missing CLI mode or URL requirement.
-- [ ] Implement pure `demo_actor_configuration()` and an early CLI exit that prints sorted JSON IDs only. Rerun. Expected GREEN with engine creation blocked.
-- [ ] Write one deterministic-ID drift test: reuse the intended role-assignment ID for the wrong user, capture complete pre/post digest, and assert refusal before insert/trigger toggle. Run. Expected RED.
-- [ ] Implement the read-only intended-role identity preflight before mutation. Rerun. Expected GREEN and unchanged digest.
-- [ ] Add separate wrong organization, role, patient-link user, and patient fixtures. Run. Extend only exact comparisons that fail; rerun GREEN.
-- [ ] Write non-repair tests for inactive user, revoked grant, and revoked link. Assert seed never reactivates, clears revocation, or inserts replacement authority. Run. Expected RED for any repair behavior.
-- [ ] Add the minimal non-repair refusal behavior and rerun. Confirm repeated normal seed and completed-journey reseed retain full digest/history counts.
-- [ ] Write a harness test that requires DEMO_ACTORS_JSON in the FastAPI child and forbids it, session secret, bootstrap URL, and migration URL in Next. Run. Expected RED: roster absent from API propagation.
-- [ ] Make the live wrapper obtain roster JSON from the connection-free CLI and forward it only to FastAPI. Rerun allowlist test. Expected GREEN.
-- [ ] Write success and forced-failure restoration tests for a prior DEMO_ACTORS_JSON value. Run. Expected RED until the variable joins the existing save/remove/restore lifecycle.
-- [ ] Implement exact restoration and rerun. Expected GREEN.
-- [ ] Update the non-owner journey to use explicit roster and version-2 issuance. Run only that journey; expected GREEN with runtime current_user/session_user equal the API login.
-- [ ] Run the complete Task 5 pytest command, web lint, PowerShell parsing, Ruff/Pyright, seven hashes, cache-block guard, and `git diff --check`.
-- [ ] Update the ledger with every RED/GREEN and disposable database disposition; commit `chore: configure the intended synthetic demo actors`.
+- [x] Write the connection-forbidden `--print-demo-actors` CLI test with exact literal keys/IDs. Run it. Expected RED: missing CLI mode or URL requirement.
+- [x] Implement pure `demo_actor_configuration()` and an early CLI exit that prints sorted JSON IDs only. Rerun. Expected GREEN with engine creation blocked.
+- [x] Write one deterministic-ID drift test: reuse the intended role-assignment ID for the wrong user, capture complete pre/post digest, and assert refusal before insert/trigger toggle. Run. Expected RED.
+- [x] Implement the read-only intended-role identity preflight before mutation. Rerun. Expected GREEN and unchanged digest.
+- [x] Add separate wrong organization, role, patient-link user, and patient fixtures. Run. Extend only exact comparisons that fail; rerun GREEN.
+- [x] Write non-repair tests for inactive user, revoked grant, and revoked link. Assert seed never reactivates, clears revocation, or inserts replacement authority. Run. Expected RED for any repair behavior.
+- [x] Add the minimal non-repair refusal behavior and rerun. Confirm repeated normal seed and completed-journey reseed retain full digest/history counts.
+- [x] Write a harness test that requires DEMO_ACTORS_JSON in the FastAPI child and forbids it, session secret, bootstrap URL, and migration URL in Next. Run. Expected RED: roster absent from API propagation.
+- [x] Make the live wrapper obtain roster JSON from the connection-free CLI and forward it only to FastAPI. Rerun allowlist test. Expected GREEN.
+- [x] Write success and forced-failure restoration tests for a prior DEMO_ACTORS_JSON value. Run. Expected RED until the variable joins the existing save/remove/restore lifecycle.
+- [x] Implement exact restoration and rerun. Expected GREEN.
+- [x] Update the non-owner journey to use explicit roster and version-2 issuance. Run only that journey; expected GREEN with runtime current_user/session_user equal the API login.
+- [x] Run the complete Task 5 pytest command, web lint, PowerShell parsing, Ruff/Pyright, seven hashes, cache-block guard, and `git diff --check`.
+- [x] Update the ledger with every RED/GREEN and disposable database disposition; commit `chore: configure the intended synthetic demo actors`.
 
 ## Task 6: Complete security and journey acceptance
 

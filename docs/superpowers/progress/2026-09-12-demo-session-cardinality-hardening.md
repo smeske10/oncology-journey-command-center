@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Architecture and amended implementation plan approved. Tasks 1–4 are complete. Task 5 has not started.
+**Status:** Architecture and amended implementation plan approved. Tasks 1–5 are complete. Task 6 has not started.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -345,7 +345,104 @@ The user accepted the Task 3 checkpoint and explicitly authorized Task 4. Task 5
   bootstrap role that already existed before the final gate. They were not created by Task 4 and
   were left untouched under the unknown-target cleanup rule.
 
-Task 5 remains pending and was not started.
+The user accepted the Task 4 checkpoint and explicitly authorized Task 5. Task 6 remained pending.
+
+### Task 5 — seed intent and live configuration
+
+- Starting-state guards: HEAD was `c5ba1c43fc844cfa94b7a6d279d8ecf9e301588f` on the
+  required feature branch; the approved base remained an ancestor; the worktree was clean; all
+  seven migration hashes matched this ledger; and no migration 0008 existed. The focused baseline
+  for the three Task 5 files produced **56 passed in 54.80s**. Its six fresh targets
+  `ojcc_task7_a02c136b234e4c45821ddcee0a4da5c8`,
+  `ojcc_task7_77a459ccbbc14ef4996a1c6e1add4a79`,
+  `ojcc_task7_4e1e0b6c57d04db283a5ceec87aa901d`,
+  `ojcc_task7_8206e362b4d04b6aa77ac7b1f66831d7`,
+  `ojcc_task7_fd5336ec74ff4ebe8d4d45247f1a0025`, and
+  `ojcc_task7_e68f56fab4ed4eb2b03450360687fad2` all dropped normally.
+- Actor-roster CLI RED/GREEN: after correcting an initial invocation that lacked the collection-only
+  synthetic URL environment, the focused test failed because `--print-demo-actors` was unknown and
+  both database URL arguments were still required (**1 failed**). The pure roster helper and early
+  exit then produced **1 passed** with engine creation forbidden, exact literal actor/patient UUIDs,
+  sorted JSON, empty stderr, and no URL requirement or connection attempt.
+- Deterministic identity RED/GREEN: the first fixture design tried to update a fully referenced seed
+  row and was rejected by the existing approval foreign key before testing seed behavior. Its fresh
+  target `ojcc_task7_0b390b698c4c41dd82aef25081c4dc4f` was reported in use by helper cleanup after
+  the failed process, then ordinary-dropped once that owned process exited; no force or session
+  termination was used. The corrected minimal fixture reused the intended navigator assignment ID
+  for the wrong user. Without preflight, seed entered mutation and failed later at the approval
+  foreign key instead of sanitized preflight refusal (**1 failed**); target
+  `ojcc_task7_a16b1fb8d43e484ba2bfa9ffd1794220` had the same safe ordinary-drop disposition. The
+  read-only preflight moved before trigger changes/inserts and then produced **1 passed** with the
+  complete database digest unchanged and no trigger-toggle call; target
+  `ojcc_task7_88b12c63d32d4b0882106a840a3e5385` dropped normally.
+- Exact comparison expansion: separate wrong-user, wrong-organization, wrong-role,
+  patient-link-user, and patient-link-patient cases produced **5 passed, 38 deselected** without
+  requiring broader comparisons. Fresh targets
+  `ojcc_task7_2e87c873b57041ceb4a58acf8e37a2c1`,
+  `ojcc_task7_1c824cd26d8146768c1e04440e69045b`,
+  `ojcc_task7_405f738762614939a506245276c2b5ee`,
+  `ojcc_task7_3719e28e53894ddd8357860ed8f273d7`, and
+  `ojcc_task7_5b84ac39012b4ad7a79f73638e14c7ca` all dropped normally.
+- Non-repair preservation: inactive intended user, revoked intended grant, and revoked intended
+  patient link cases were already non-repairing and produced **3 passed, 43 deselected**. Each
+  retained the full database digest and exact history count with no replacement authority. Targets
+  `ojcc_task7_93ab41741c23401da67fc3dd94e7a002`,
+  `ojcc_task7_8c9e772c3a52491abd44edad5fa8e06c`, and
+  `ojcc_task7_b733b4b46ce0484280ba0e424415ee6f` dropped normally. Repeated normal seed and
+  completed-journey reseed preservation then produced **2 passed** with full digest/history checks;
+  targets `ojcc_task7_cdbec7191d474d2694f75383cdef6ab6` and
+  `ojcc_task7_764938ad67c249d1b3299ba8661551ac` dropped normally.
+- Live child propagation RED/GREEN: evaluation of the real transpiled Playwright configuration
+  produced **1 failed** because the FastAPI child lacked `DEMO_ACTORS_JSON`. The live wrapper now
+  obtains the sorted roster through the connection-free CLI and Playwright passes it only to the
+  FastAPI child; the allowlist test then produced **1 passed**. Next receives none of the roster,
+  session secret, application URL, migration URL, or bootstrap URL.
+- Environment restoration RED/GREEN: prior-roster probes for both success and a forced child
+  failure produced **2 failed** because the live wrapper leaked its replacement value. Adding the
+  roster to the existing exact save/remove/restore list produced **2 passed**.
+- Non-owner journey: the fixture now supplies the serialized generated roster through explicit
+  settings and the real issuance/reauthorization service factories. It asserts version 2 plus exact
+  role-assignment and patient-link provenance. The focused journey produced **1 passed in 6.21s**;
+  runtime `current_user` and `session_user` remained `ojcc_api`, and fresh target
+  `ojcc_task7_ee587354c92f4625a1c84c65b3082860` dropped normally.
+- Complete Task 5 focused gate: `test_demo_seed.py`, `test_verify_harness.py`, and
+  `test_non_owner_closed_loop.py` produced **67 passed in 96.28s**, zero skips. Its fourteen fresh
+  targets `ojcc_task7_fb89dfa87cc045a79c4856ff1fbbea06`,
+  `ojcc_task7_7cfd7c3fc903488bb68f018cb4c8e6a7`,
+  `ojcc_task7_d954d70fc15d446cb432b00c6e61f622`,
+  `ojcc_task7_922772bf8cac47d9b20512fe33f124ee`,
+  `ojcc_task7_5fb5d9669b8a45b5b4ac16e8ad67b393`,
+  `ojcc_task7_80f756ea13bb4731b5fa9b84d4e408bd`,
+  `ojcc_task7_c62f48e459b34eed95b8731203127b6e`,
+  `ojcc_task7_ca92c51980474fb9a5273d3e5ed12fb7`,
+  `ojcc_task7_d4967c7248b24246b2ef6b0ba63f8337`,
+  `ojcc_task7_c5af9d8222ab4177aada0d86b4173e1c`,
+  `ojcc_task7_182be607e90a4041a6d0f9a67dd1efb5`,
+  `ojcc_task7_35853bf7a9b3414899f57664c82a5b86`,
+  `ojcc_task7_98d605cb01f74faf9fa3c7a80412a77c`, and
+  `ojcc_task7_083c2efd0ce24ec697ac1328d34d5031` all dropped normally.
+- Fresh pre-commit rerun after the test-fixture clarity and documentation edits produced **67 passed
+  in 90.00s**, zero skips. Its fourteen fresh targets
+  `ojcc_task7_fee21417b4db40c491504f69bb8450c1`,
+  `ojcc_task7_c37c389fbb604eb88ec9db747bf6985a`,
+  `ojcc_task7_8224cfd018494e83bab2f49d427023f9`,
+  `ojcc_task7_1b4e8491b0114f5dad14f85dd44e6127`,
+  `ojcc_task7_5ac3fdde7d7c4a68bb0e5dc75cf474a7`,
+  `ojcc_task7_d5a7cb67e534454e9b279926d7bc1902`,
+  `ojcc_task7_51651f435d7a479d83adcbbc96b79846`,
+  `ojcc_task7_baa16c9dc52a488c838c38fc95ec104b`,
+  `ojcc_task7_bc35895a311f429fa3a0c54e310e1112`,
+  `ojcc_task7_474f7a8fa5574c4f87c6e722222df3eb`,
+  `ojcc_task7_b50a5457fa2f4535aa2d97881eb20206`,
+  `ojcc_task7_2797258010044fef9e1fcff03b5a1941`,
+  `ojcc_task7_f0ccec79bdb749fe9dc2122af9ea0c4a`, and
+  `ojcc_task7_0d3d03405c234fb0bd114b46fa477ae9` all dropped normally.
+- Static and preservation gates: web lint passed; all three verifier/reset PowerShell scripts parsed;
+  Ruff passed; Pyright reported **0 errors, 0 warnings, 0 informations**; the automated immutable
+  guard produced **7 passed, 18 deselected**; all seven hashes exactly match the ledger; all three
+  CI cache guards remain and the CI workflow is unchanged; no dependency declaration, schema,
+  privilege, migration, or domain behavior changed; and `git diff --check` passed with only Windows
+  line-ending notices.
 
 ## Conditional-approval amendment
 
@@ -372,5 +469,5 @@ At this conditional-approval checkpoint, no production or test file had been cha
 database had been accessed. The later Task 1 execution record above supersedes that historical
 working-tree statement.
 
-**Next exact step:** Report the Task 4 execution checkpoint and wait for explicit authorization
-before Task 5.
+**Next exact step:** Report the Task 5 execution checkpoint and wait for explicit authorization
+before Task 6.
