@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Tasks 1–6 and the final review fix wave are complete. Fresh full security and desktop/mobile acceptance passed at repaired source `769eb577110fe34fe0f5507bce10189224259014` on 2026-09-14; awaiting user review. Earlier attempts below remain historical evidence.
+**Status:** Tasks 1–6 and the bounded CI live-environment repair are complete. Fresh full security and desktop/mobile acceptance passed at repaired source `36435bb21eb6880fc6770a342bd3eb92c4bdb9a2` on 2026-09-14 with the CI live-database aliases populated; awaiting user review. Earlier attempts below remain historical evidence.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -719,5 +719,83 @@ was made. The design's prior intentional limitations remain in force. The succes
 `868f630` and the earlier blocked attempt remain historical; this fresh run is the latest source
 acceptance. The final evidence commit changes only the approved plan, design, and this ledger.
 
-**Current next exact step:** User review of the repaired source and fresh acceptance evidence.
+**Historical next exact step (superseded by the bounded CI live-environment repair):** User review
+of the earlier repaired source and acceptance evidence.
+Do not merge, push, deploy, remove the worktree, or begin a deferred milestone without direction.
+
+## Bounded CI live-environment repair — 2026-09-14
+
+The scoped re-review of `2536b2a..c575e7d` found that the root frontend boundary removed the API
+database triple and demo configuration but not the three database URL aliases exported by CI.
+That residual is repaired at source `36435bb21eb6880fc6770a342bd3eb92c4bdb9a2`
+(`fix: sanitize live CI credentials from frontend checks`). Exactly the existing verifier lifecycle
+and its actual-child regression changed; CI, dependencies, migrations, privileges, schema,
+Playwright live isolation, seed/domain behavior, and web application behavior are unchanged.
+
+### Failing-first and focused/static verification
+
+- The expanded actual-child regression's initial run produced **2 failed, 1 passed in 6.73s**.
+  At lint, Vitest, build, mocked Playwright, and the actual mocked-Next child the absence vector was
+  exactly `[true, true, true, true, true, true, false, false, false]`: the prior six names were
+  absent and the exact three `LIVE_*_DATABASE_URL` names remained inherited. The probe reported
+  booleans and stage names only, used no database, and exact parent restoration still passed.
+- After the minimal three-name lifecycle extension, the same success, forced-frontend-failure, and
+  initially-absent cases produced **3 passed in 6.30s**. The complete verifier harness produced
+  **24 passed in 20.57s**. This proves all nine names absent in all five child stages and exact
+  restoration on success/failure.
+- All three root PowerShell scripts parsed with zero errors. Ruff passed; Pyright reported **0
+  errors, 0 warnings, 0 informations**. The immutable guard produced **7 passed, 18 deselected**;
+  frozen v0007 produced **2 passed**; and the three-cache guard produced **1 passed, 23
+  deselected**. Web lint passed, Vitest produced **6 files and 34 tests passed**, the production
+  build completed compile/types/static generation/optimization/traces, and mocked Playwright
+  produced **3 passed**. Diff checks showed only the two authorized source/test files and no
+  protected-source change.
+- The first standalone immutable command omitted its required inert `DATABASE_URL` and stopped at
+  collection; it is a command-setup error, not product evidence. The corrected connection-free
+  invocation used a disposable-format unreachable target and produced the seven passing guards
+  above. No database was accessed by either invocation.
+
+### Fresh complete acceptance at repaired source
+
+Two new names were generated and recorded before creation, confirmed absent, and provisioned with
+distinct bootstrap, owner, and runtime credentials. Each was owned by `ojcc_migrator` and had zero
+sessions immediately after creation. No credential value was recorded.
+
+| Purpose | Fresh exact name | Final disposition |
+|---|---|---|
+| API | `ojcc_demo_121a0b5527294d43a166202cae77d010` | Owner verified; 0 sessions; ordinary owner drop; absence confirmed |
+| Desktop/mobile live | `ojcc_demo_11ebd1c12a3447e1b7d933c73c463305` | Owner verified; 0 sessions; ordinary owner drop; absence confirmed |
+
+The API reset reached 0007 head, seeded twice with identical inventories, and returned zero owner
+and runtime integrity violations. Standalone `python -m pytest -q -ra` produced **727 passed in
+486.37s**, with zero failures/skips. Alembic current was `0007_database_least_privilege (head)`;
+check found no new upgrade operations. All seven immutable hashes matched; frozen v0007 passed two
+tests. OpenAPI and TypeScript generation each ran twice, stayed byte-stable and Git-clean, excluded
+the internal auth model names, and retained SHA-256 values
+`56eb4aab2d0e650e121091be68737cc12b8dcd5254814ecaa1ddd1767b106882` and
+`9c46a9cb6a2654ed0e41a964fd86d7f9479ccd5874ef5f0adff188bcf70ddc46`.
+
+The exact root verifier ran uninterrupted at `36435bb` with the API triple exported, the distinct
+live triple passed through all four approved arguments, and the three actual CI live URL aliases
+also present in the parent environment. It exited 0 after **622.30s**: locked installs, Ruff,
+Pyright, zero runtime integrity violations, **727 API tests in 483.70s**, web lint, **34 Vitest
+tests**, production build, **3 mocked browser tests in 8.6s**, desktop live **1 passed in 13.5s**,
+and mobile live **1 passed in 13.4s**.
+
+Both real signed-cookie journeys selected exact evidence, approved, claimed, started, and completed
+the transportation task, saved the resolved patient follow-up, refreshed the navigator workspace,
+previewed and confirmed the resolved Outcome, and reloaded both views to prove persisted history.
+Mobile retained its sub-600-pixel/no-overflow check. Fresh API-login reads proved
+`current_user=session_user=ojcc_api`, database/public-table owner `ojcc_migrator`, exact persisted
+counts `(1, 1, 1, 1, 3)`, and completed task status. Fresh API/live integrity audits returned zero
+violations, and ports 8011/3011 were free.
+
+Immediately before cleanup both recorded names again had owner `ojcc_migrator` and zero sessions.
+Both were ordinarily dropped by the owner and confirmed absent. No force-drop, session termination,
+unknown-process stop, persistent-target access, push, merge, deployment, worktree removal, or
+deferred work occurred. The separately documented pre-existing live-wrapper absent-to-empty
+observation remains outside this bounded fix and did not produce a new failure in the required
+regression or explicit-configuration acceptance.
+
+**Current next exact step:** User review of the repaired source and refreshed acceptance evidence.
 Do not merge, push, deploy, remove the worktree, or begin a deferred milestone without direction.

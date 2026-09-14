@@ -9,11 +9,12 @@
 **Spec:** [Design](../specs/2026-09-12-demo-session-cardinality-hardening-design.md)
 **Evidence:** [Progress ledger](../progress/2026-09-12-demo-session-cardinality-hardening.md)
 
-**Latest acceptance:** Final review fixes and the entire Task 6 rerun passed at repaired source
-`769eb577110fe34fe0f5507bce10189224259014` on 2026-09-14. Standalone/root API suites each passed
-727 tests; web lint, 34 Vitest tests, production build, three mocked browser tests, and both live
-viewports passed. Fresh API/live targets were ordinarily dropped after owner/zero-session checks
-and confirmed absent. Earlier attempts remain historical in the ledger.
+**Latest acceptance:** The bounded CI live-environment repair and the entire Task 6 rerun passed at
+repaired source `36435bb21eb6880fc6770a342bd3eb92c4bdb9a2` on 2026-09-14. Standalone/root
+API suites each passed 727 tests; web lint, 34 Vitest tests, production build, three mocked browser
+tests, and both live viewports passed with the actual CI `LIVE_*_DATABASE_URL` aliases populated.
+Fresh API/live targets were ordinarily dropped after owner/zero-session checks and confirmed
+absent. Earlier attempts remain historical in the ledger.
 
 ## Global constraints
 
@@ -300,6 +301,23 @@ Expected: locked dependency install, Ruff, Pyright, runtime integrity, all pytes
 - [x] Preserve earlier attempts, correct superseded status/next-step labels, and refresh only
   the three approved tracked evidence documents. Record the separate existing live-wrapper
   absent-to-empty restoration observation without expanding scope. Stop for user review.
+
+### Bounded CI live-environment follow-up
+
+- [x] Extend the existing harmless actual-child regression with exactly
+  `LIVE_BOOTSTRAP_DATABASE_URL`, `LIVE_MIGRATION_DATABASE_URL`, and `LIVE_DATABASE_URL`; observe
+  all three inherited by lint, Vitest, build, mocked Playwright, and mocked Next before production
+  changes, while the prior six names remain absent.
+- [x] Add the three CI aliases to the existing root frontend save/remove/restore lifecycle and
+  prove all nine names absent in every root frontend child with exact prior-value restoration on
+  success, forced failure, and initially absent values.
+- [x] Rerun focused/static/hash/frozen/cache/web gates and the entire Task 6 at repaired source
+  `36435bb` with the CI aliases populated, using fresh API/live targets
+  `ojcc_demo_121a0b5527294d43a166202cae77d010` and
+  `ojcc_demo_11ebd1c12a3447e1b7d933c73c463305`. Both were absent before creation, owned by
+  `ojcc_migrator`, audited successfully, and ordinarily dropped with absence confirmed.
+- [x] Preserve the separately documented live-wrapper absent-to-empty observation without
+  expanding this repair into deferred work. Refresh only approved evidence and stop for review.
 
 ### Original scenario mapping
 
