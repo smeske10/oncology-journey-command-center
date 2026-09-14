@@ -392,11 +392,12 @@ The user accepted the Task 4 checkpoint and explicitly authorized Task 5. Task 6
   completed-journey reseed preservation then produced **2 passed** with full digest/history checks;
   targets `ojcc_task7_cdbec7191d474d2694f75383cdef6ab6` and
   `ojcc_task7_764938ad67c249d1b3299ba8661551ac` dropped normally.
-- Live child propagation RED/GREEN: evaluation of the real transpiled Playwright configuration
-  produced **1 failed** because the FastAPI child lacked `DEMO_ACTORS_JSON`. The live wrapper now
-  obtains the sorted roster through the connection-free CLI and Playwright passes it only to the
-  FastAPI child; the allowlist test then produced **1 passed**. Next receives none of the roster,
-  session secret, application URL, migration URL, or bootstrap URL.
+- Initial live child propagation cycle: evaluation of the transpiled Playwright configuration
+  produced **1 failed** because the FastAPI child configuration lacked `DEMO_ACTORS_JSON`. The live
+  wrapper then obtained the sorted roster through the connection-free CLI and the configuration-key
+  test produced **1 passed**. Independent review later established that this test inspected only
+  `webServer.env` overrides, not Playwright's effective child environments, so that earlier GREEN
+  did not prove the claimed FastAPI-only process boundary.
 - Environment restoration RED/GREEN: prior-roster probes for both success and a forced child
   failure produced **2 failed** because the live wrapper leaked its replacement value. Adding the
   roster to the existing exact save/remove/restore list produced **2 passed**.
@@ -443,6 +444,58 @@ The user accepted the Task 4 checkpoint and explicitly authorized Task 5. Task 6
   CI cache guards remain and the CI workflow is unchanged; no dependency declaration, schema,
   privilege, migration, or domain behavior changed; and `git diff --check` passed with only Windows
   line-ending notices.
+- Post-review effective-environment RED/GREEN: a harmless child launched through the installed
+  Playwright `WebServerPlugin` first produced **1 failed in 1.31s**. The API child received
+  parent-only synthetic bootstrap, migration, base-URL, device, migration-username, and API-origin
+  markers; the launcher would also expose the inherited application URL, session secret, and actor
+  roster to Next. The probe emitted booleans rather than environment values, accessed no database,
+  and its owned child was stopped in `finally` through Playwright teardown with a bounded self-exit.
+  Each live server environment now removes every inherited key before adding approved platform and
+  child-specific values. The same effective-launch probe then produced **1 passed in 1.38s**:
+  FastAPI received the exact configured application URL, local environment, session secret,
+  organization, and roster, while Next received only its intended API origin from the tested live
+  variables and neither child received bootstrap/migration URLs. The restoration, configuration-key,
+  and effective-launch set subsequently produced **4 passed in 3.80s** on success and forced-failure
+  paths.
+- The complete post-review Task 5 gate produced **68 passed in 91.78s**, zero skips. Fresh targets
+  `ojcc_task7_5a6556764367493fad8080561fc0a1e6`,
+  `ojcc_task7_10919c2e9ec744d38fc7f1ff690e013e`,
+  `ojcc_task7_a3fd4b2870644d66b8102be61db4dd21`,
+  `ojcc_task7_544e9cb70210484c9a8ec29f72e765e5`,
+  `ojcc_task7_c060c39f959947bba0685f0471b0acb4`,
+  `ojcc_task7_50459928199a4115833c39d30c5639bf`,
+  `ojcc_task7_43c210db031a4a3e974e3b95b8e66cfe`,
+  `ojcc_task7_ccce9886ded743a991fb74a83aeb0c77`,
+  `ojcc_task7_cfa09b9f223944de9617508dc3e79ee9`,
+  `ojcc_task7_1070f9f748be4861a3761d1af444b24f`,
+  `ojcc_task7_c490169a85b442beb1da724ae85d67cc`,
+  `ojcc_task7_69a92aab104448378765705a0a150a21`,
+  `ojcc_task7_835415beea814dbdbe560c96a713ffc9`, and
+  `ojcc_task7_22887d92425f4c35aebaad2a7070face` were all created through the existing
+  helper and dropped normally.
+- A fresh completion rerun after adding the explicit owned-child stop assertion produced **68 passed
+  in 91.24s**, zero skips. Fresh targets
+  `ojcc_task7_fa45f9e59aed41d28034a13e32744686`,
+  `ojcc_task7_0683a41a990a42e9aa8f3dd7bae34def`,
+  `ojcc_task7_7a390ae5f3914c47a7598cfd32aad451`,
+  `ojcc_task7_4b3c81c458ea4862afeedc3188975bb7`,
+  `ojcc_task7_072a3464300a4bd281a2206503834dad`,
+  `ojcc_task7_ffbbc030f2374d74b744652e583fbd63`,
+  `ojcc_task7_d50507a0768347ffba974653dee2f8eb`,
+  `ojcc_task7_1a218ae196224de39cd457b3033564e1`,
+  `ojcc_task7_4fbd23f119484219b4871caeb01579a0`,
+  `ojcc_task7_7f40432ca8ed43929ccf0f0ff1edb09b`,
+  `ojcc_task7_9e1a4e86db274676ba95892339a0746a`,
+  `ojcc_task7_a02f8fcb0c65430eb535acb0000fefe8`,
+  `ojcc_task7_467d34836f8242cfa380b2974f00c859`, and
+  `ojcc_task7_2a813c8837394c968b3ddfeab1c6dd6b` were all created through the existing
+  helper and dropped normally. No database was created or accessed by the launcher probe itself.
+- Post-review static/preservation verification passed: web lint had zero warnings/errors; all three
+  PowerShell files parsed with zero errors; Ruff reported `All checks passed!`; Pyright reported
+  **0 errors, 0 warnings, 0 informations**; the immutable guard produced **7 passed, 18 deselected**;
+  all seven hashes remained exact; the cache guard produced **1 passed**; all three CI cache blocks
+  remain; no migration 0008, migration diff, CI change, or dependency change exists; and
+  `git diff --check` passed with only line-ending notices.
 
 ## Conditional-approval amendment
 

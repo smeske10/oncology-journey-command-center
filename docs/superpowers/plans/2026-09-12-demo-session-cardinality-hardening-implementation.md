@@ -250,6 +250,8 @@ Use explicit settings/config in HTTP fixtures and runtime live environment.
 - [x] Update the non-owner journey to use explicit roster and version-2 issuance. Run only that journey; expected GREEN with runtime current_user/session_user equal the API login.
 - [x] Run the complete Task 5 pytest command, web lint, PowerShell parsing, Ruff/Pyright, seven hashes, cache-block guard, and `git diff --check`.
 - [x] Update the ledger with every RED/GREEN and disposable database disposition; commit `chore: configure the intended synthetic demo actors`.
+- [x] After independent review, replace the config-key-only environment claim with an actual installed-Playwright launcher probe. Observe inherited sensitive/runtime markers in RED, then isolate each child environment and rerun GREEN with owned probe teardown.
+- [x] Rerun the complete Task 5 verification and record the review-fix evidence before a separate `fix: isolate live child process environments` commit. Task 6 remains unstarted.
 
 ## Task 6: Complete security and journey acceptance
 

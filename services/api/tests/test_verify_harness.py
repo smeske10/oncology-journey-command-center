@@ -227,7 +227,10 @@ compiled.paths = Module._nodeModulePaths(path.dirname(filename));
 compiled._compile(output, filename);
 const config = compiled.exports.default;
 process.stdout.write(JSON.stringify(config.webServer.map((server) =>
-  Object.keys(server.env || {}).sort()
+  Object.entries(server.env || {})
+    .filter(([, value]) => value !== undefined)
+    .map(([name]) => name)
+    .sort()
 )));
 """
     environment = os.environ | {
@@ -249,6 +252,172 @@ process.stdout.write(JSON.stringify(config.webServer.map((server) =>
     parsed = json.loads(result.stdout)
     assert isinstance(parsed, list)
     return parsed
+
+
+def _probe_live_child_environments(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Launch harmless children through Playwright's real web-server plugin."""
+    config_path = PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts"
+    plugin_path = (
+        PROJECT_ROOT
+        / "node_modules"
+        / "playwright"
+        / "lib"
+        / "plugins"
+        / "webServerPlugin.js"
+    )
+    probe_path = tmp_path / "environment-probe.cjs"
+    launcher_path = tmp_path / "playwright-web-server-probe.cjs"
+    probe_path.write_text(
+        """
+const fs = require("fs");
+const role = process.argv[2];
+const outputPath = process.argv[3];
+const exact = (name, expected) => process.env[name] === expected;
+const absent = (name) => process.env[name] === undefined;
+const commonIsolation = {
+  bootstrapAbsent: absent("BOOTSTRAP_DATABASE_URL"),
+  migrationAbsent: absent("MIGRATION_DATABASE_URL"),
+  baseUrlAbsent: absent("PLAYWRIGHT_BASE_URL"),
+  deviceAbsent: absent("OJCC_LIVE_DEVICE"),
+  migrationUsernameAbsent: absent("OJCC_MIGRATION_USERNAME"),
+};
+const result = role === "api" ? {
+  ...commonIsolation,
+  databaseExact: exact("DATABASE_URL", "synthetic-application-marker"),
+  appEnvironmentExact: exact("APP_ENV", "local"),
+  sessionSecretExact: exact("DEMO_SESSION_SECRET", "synthetic-secret-marker"),
+  organizationExact: exact("DEMO_ORGANIZATION_ID", "synthetic-organization-marker"),
+  actorsExact: exact("DEMO_ACTORS_JSON", "synthetic-roster-marker"),
+  apiOriginAbsent: absent("OJCC_API_ORIGIN"),
+} : {
+  ...commonIsolation,
+  databaseAbsent: absent("DATABASE_URL"),
+  appEnvironmentAbsent: absent("APP_ENV"),
+  sessionSecretAbsent: absent("DEMO_SESSION_SECRET"),
+  organizationAbsent: absent("DEMO_ORGANIZATION_ID"),
+  actorsAbsent: absent("DEMO_ACTORS_JSON"),
+  apiOriginExact: exact("OJCC_API_ORIGIN", "http://127.0.0.1:8011"),
+};
+fs.writeFileSync(outputPath, JSON.stringify({ pid: process.pid, environment: result }));
+setTimeout(() => process.exit(0), 10000);
+""",
+        encoding="utf-8",
+    )
+    launcher_path.write_text(
+        """
+const fs = require("fs");
+const path = require("path");
+const Module = require("module");
+const configPath = process.argv[2];
+const pluginPath = process.argv[3];
+const probePath = process.argv[4];
+const outputDirectory = process.argv[5];
+const projectRequire = Module.createRequire(configPath);
+const ts = projectRequire("typescript");
+const source = fs.readFileSync(configPath, "utf8");
+const output = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    esModuleInterop: true,
+  },
+}).outputText;
+const compiled = new Module(configPath, module);
+compiled.filename = configPath;
+compiled.paths = Module._nodeModulePaths(path.dirname(configPath));
+compiled._compile(output, configPath);
+const servers = compiled.exports.default.webServer;
+const { WebServerPlugin } = require(pluginPath);
+const quote = (value) => `"${value.replaceAll('"', '""')}"`;
+
+async function waitForFile(filename) {
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(filename)) {
+    if (Date.now() >= deadline) throw new Error(`Probe did not write ${path.basename(filename)}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function requireStopped(pid) {
+  const deadline = Date.now() + 5000;
+  while (true) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) throw new Error("Owned probe child was not stopped");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function launch(server, role) {
+  const outputPath = path.join(outputDirectory, `${role}.json`);
+  const command = [process.execPath, probePath, role, outputPath].map(quote).join(" ");
+  const plugin = new WebServerPlugin({
+    ...server,
+    command,
+    cwd: outputDirectory,
+    port: undefined,
+    url: undefined,
+    stdout: "ignore",
+    stderr: "ignore",
+  }, false);
+  let result;
+  try {
+    await plugin.setup({}, path.dirname(configPath), {});
+    await waitForFile(outputPath);
+    result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+  } finally {
+    await plugin.teardown();
+  }
+  await requireStopped(result.pid);
+  return result.environment;
+}
+
+(async () => {
+  const api = await launch(servers[0], "api");
+  const next = await launch(servers[1], "next");
+  process.stdout.write(JSON.stringify({ api, next }));
+})().catch((error) => {
+  process.stderr.write(String(error && error.message ? error.message : error));
+  process.exitCode = 1;
+});
+""",
+        encoding="utf-8",
+    )
+    markers = {
+        "DATABASE_URL": "synthetic-application-marker",
+        "BOOTSTRAP_DATABASE_URL": "synthetic-bootstrap-marker",
+        "MIGRATION_DATABASE_URL": "synthetic-migration-marker",
+        "DEMO_SESSION_SECRET": "synthetic-secret-marker",
+        "DEMO_ORGANIZATION_ID": "synthetic-organization-marker",
+        "DEMO_ACTORS_JSON": "synthetic-roster-marker",
+        "OJCC_API_ORIGIN": "synthetic-parent-origin-marker",
+        "PLAYWRIGHT_BASE_URL": "synthetic-base-url-marker",
+        "OJCC_LIVE_DEVICE": "synthetic-device-marker",
+        "OJCC_MIGRATION_USERNAME": "synthetic-migration-username-marker",
+    }
+    result = subprocess.run(
+        [
+            "node",
+            str(launcher_path),
+            str(config_path),
+            str(plugin_path),
+            str(probe_path),
+            str(tmp_path),
+        ],
+        cwd=PROJECT_ROOT,
+        env=os.environ | markers,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    combined_output = result.stdout + result.stderr
+    for marker in markers.values():
+        assert marker not in combined_output
+    return result
 
 
 @pytest.mark.parametrize(
@@ -740,6 +909,25 @@ def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
     assert "current_user" in journey
     assert "session_user" in journey
     assert "OJCC_MIGRATION_USERNAME" in journey
+
+
+def test_live_child_processes_receive_isolated_effective_environments(
+    tmp_path: Path,
+) -> None:
+    """Production break: Playwright merges the parent environment into both children."""
+    result = _probe_live_child_environments(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    environments = json.loads(result.stdout)
+
+    assert set(environments) == {"api", "next"}
+    assert all(
+        type(value) is bool
+        for environment in environments.values()
+        for value in environment.values()
+    )
+    assert all(environments["api"].values()), environments["api"]
+    assert all(environments["next"].values()), environments["next"]
 
 
 def test_ci_provisions_uuid_databases_and_distinct_roles_without_cache_regression() -> None:
