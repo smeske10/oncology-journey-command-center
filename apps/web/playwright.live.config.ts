@@ -32,14 +32,16 @@ function platformEnvironment(): Record<string, string> {
 function isolatedEnvironment(approved: Record<string, string>): Record<string, string> {
   // Playwright merges process.env into web-server env. Undefined overrides remove
   // every inherited key before the approved platform and child values are added.
-  const inheritedEnvironmentRemovals = Object.fromEntries(
+  const inheritedEnvironmentRemovals: Record<string, undefined> = Object.fromEntries(
     Object.keys(process.env).map((name) => [name, undefined]),
-  ) as Record<string, string>;
+  );
+  // Playwright types env values as strings, while its launcher forwards undefined
+  // to Node's child-process environment specifically to remove inherited keys.
   return {
     ...inheritedEnvironmentRemovals,
     ...platformEnvironment(),
     ...approved,
-  };
+  } as unknown as Record<string, string>;
 }
 
 export default defineConfig({
