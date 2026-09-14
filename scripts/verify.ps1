@@ -166,10 +166,37 @@ try {
         Pop-Location
     }
 
-    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run lint }
-    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web test -- --run }
-    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run build }
-    Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run test:e2e }
+    $frontendApiEnvironmentNames = @(
+        "DATABASE_URL", "MIGRATION_DATABASE_URL", "BOOTSTRAP_DATABASE_URL",
+        "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON"
+    )
+    $priorFrontendApiEnvironment = @{}
+    foreach ($name in $frontendApiEnvironmentNames) {
+        $priorFrontendApiEnvironment[$name] = [System.Environment]::GetEnvironmentVariable(
+            $name, "Process"
+        )
+    }
+    try {
+        foreach ($name in $frontendApiEnvironmentNames) {
+            Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        }
+        Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run lint }
+        Invoke-VerificationCommand { & $npmExecutable --workspace apps/web test -- --run }
+        Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run build }
+        Invoke-VerificationCommand { & $npmExecutable --workspace apps/web run test:e2e }
+    }
+    finally {
+        foreach ($name in $frontendApiEnvironmentNames) {
+            if ($null -eq $priorFrontendApiEnvironment[$name]) {
+                Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+            }
+            else {
+                [System.Environment]::SetEnvironmentVariable(
+                    $name, $priorFrontendApiEnvironment[$name], "Process"
+                )
+            }
+        }
+    }
     Invoke-VerificationCommand {
         & (Join-Path $PSScriptRoot "verify_live_journey.ps1") `
             -BootstrapDatabaseUrl $LiveBootstrapDatabaseUrl `

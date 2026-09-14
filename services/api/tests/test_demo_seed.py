@@ -734,6 +734,54 @@ def test_seed_refuses_wrong_patient_for_intended_patient_link_id(
         _assert_seed_refuses_identity_conflict(session, monkeypatch)
 
 
+def test_seed_refuses_wrong_organization_for_intended_patient_before_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production break: an unlinked deterministic patient reaches inserts and raw FK failure."""
+    with _disposable_session() as session:
+        organization_id = uuid4()
+        session.execute(
+            text("INSERT INTO organization (id, name) VALUES (:id, 'Patient conflict fixture')"),
+            {"id": organization_id},
+        )
+        session.execute(
+            text(
+                "INSERT INTO synthetic_patient (id, organization_id, external_ref, display_name, demographics) "
+                "VALUES (:id, :organization_id, 'conflicting-patient', 'Fixture patient', '{}'::jsonb)"
+            ),
+            {"id": DEMO_IDS["patient"], "organization_id": organization_id},
+        )
+        session.commit()
+        assert session.scalar(text("SELECT count(*) FROM role_assignment")) == 0
+        assert session.scalar(text("SELECT count(*) FROM patient_identity_link")) == 0
+        before_digest = _database_digest(session)
+        trigger_changes: list[bool] = []
+        original_toggle = seed_demo_script._set_seed_user_triggers
+
+        def observe_toggle(changed_session: Session, *, enabled: bool) -> None:
+            trigger_changes.append(enabled)
+            original_toggle(changed_session, enabled=enabled)
+
+        monkeypatch.setattr(seed_demo_script, "_set_seed_user_triggers", observe_toggle)
+        refusal = False
+        database_error = False
+        try:
+            seed_demo(session)
+        except RuntimeError as error:
+            refusal = str(error) == "Existing demo identity conflicts with synthetic seed"
+        except SQLAlchemyError:
+            # Do not format a database exception: RED must expose only safe observations.
+            database_error = True
+            session.rollback()
+        after_digest = _database_digest(session)
+        print(f"PATIENT_PREFLIGHT digest_unchanged={before_digest == after_digest} "
+              f"trigger_changes={trigger_changes} database_error={database_error}")
+        assert refusal, "Expected sanitized preflight refusal before mutation"
+        assert not database_error
+        assert trigger_changes == []
+        assert after_digest == before_digest
+
+
 def test_seed_never_reactivates_an_inactive_intended_user() -> None:
     with _disposable_session() as session:
         seed_demo(session)

@@ -271,6 +271,13 @@ def validate_existing_demo_identities(session: Session) -> None:
     ):
         raise RuntimeError("Existing demo identity conflicts with synthetic seed")
 
+    patient_organization_id = session.scalar(
+        text("SELECT organization_id FROM synthetic_patient WHERE id = :id"),
+        {"id": DEMO_IDS["patient"]},
+    )
+    if patient_organization_id is not None and patient_organization_id != DEMO_IDS["organization"]:
+        raise RuntimeError("Existing demo identity conflicts with synthetic seed")
+
 
 def _seed_identity_and_pathways(
     session: Session, ids: dict[str, UUID], values: dict[str, Any]
