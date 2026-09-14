@@ -1,7 +1,7 @@
 # Demo-session/cardinality hardening progress ledger
 
 **Created:** 2026-09-12, America/New_York
-**Status:** Architecture and amended implementation plan approved. Tasks 1–5 are complete. Task 6 has not started.
+**Status:** Tasks 1–6 complete. Full security and desktop/mobile journey acceptance passed at `868f630`; awaiting user review.
 **Milestone:** Navigator closed-loop post-merge security and operational hardening; Week 1 auth gaps / Week 4 readiness.
 
 ## Approved task boundary
@@ -496,6 +496,85 @@ The user accepted the Task 4 checkpoint and explicitly authorized Task 5. Task 6
   all seven hashes remained exact; the cache guard produced **1 passed**; all three CI cache blocks
   remain; no migration 0008, migration diff, CI change, or dependency change exists; and
   `git diff --check` passed with only line-ending notices.
+
+## Task 6 complete security and journey acceptance
+
+- The first acceptance attempt at `96c6f66` correctly stopped when the complete verifier exposed
+  TypeScript error TS2352 in `apps/web/playwright.live.config.ts`; no source was changed in that
+  acceptance attempt. API/security tests had produced **723 passed** both standalone and inside the
+  verifier, Vitest produced **34 passed**, and the ordered verifier stopped at the production build
+  before mocked or live browser tests. Fresh API/live targets
+  `ojcc_demo_6e6c0ac8e8104051a35ceb7030a9fe86` and
+  `ojcc_demo_9620a684da7c4371a110a8e4fd09797c` were each verified as owned by
+  `ojcc_migrator` with zero sessions, ordinarily dropped by that owner, and confirmed absent.
+- The blocker was independently fixed and reviewed in `868f630` (`fix: type isolated Playwright
+  environments`). Task 6 restarted from the beginning at that exact HEAD and did not modify the
+  corrected source.
+- Before second-attempt creation, fresh distinct API/live names
+  `ojcc_demo_cd0f3599aed3471f8eedbaa039cfd75a` and
+  `ojcc_demo_ecf316d6b2f44dbdb692ed72aff8eac5` were recorded, confirmed absent, and then created
+  through the documented local service with owner `ojcc_migrator`. Existing bootstrap,
+  migration-owner, application-login, and group-role properties were validated; credentials stayed
+  separate and were not recorded. Both targets had zero sessions after creation.
+- The API target reset used the bounded bootstrap/owner replay bridge, seeded twice with identical
+  inventories, and returned zero integrity violations under both owner and API credentials. The
+  roster came from the connection-free seed CLI; API tests received the explicit roster,
+  organization and session settings.
+- Fresh standalone API/security verification produced **723 passed in 472.82s**, zero failures and
+  zero skips. It includes all new malformed-config/auth/token/resolver/HTTP/Uvicorn/process and
+  actual Playwright-launcher isolation cases plus the existing privilege, runtime-attestation,
+  real non-owner, identity/history, restore-integrity, seed, migration, offline replay,
+  provisioning, and target-safety suites.
+- Alembic reported `0007_database_least_privilege (head)` and `No new upgrade operations detected.`
+  The frozen v0007 test produced **2 passed in 0.18s**. All seven migration SHA-256 values matched
+  the immutable baseline above, and no migration 0008 exists.
+- OpenAPI and TypeScript contracts were generated twice using the checked-in scripts. Both second
+  generations were byte-stable; Git blob hashes matched `HEAD`; generated diff was empty; and the
+  internal names `VerifiedDemoSession`, `ResolvedAuthority`, and `CurrentActor` were absent. The
+  resulting raw SHA-256 values were
+  `56eb4aab2d0e650e121091be68737cc12b8dcd5254814ecaa1ddd1767b106882` for OpenAPI and
+  `9c46a9cb6a2654ed0e41a964fd86d7f9479ccd5874ef5f0adff188bcf70ddc46` for TypeScript.
+- The exact complete repository verifier ran uninterrupted from the repository root with the API
+  credential triple exported and the separate live triple supplied through the four required live
+  arguments. Locked dependency installation passed; Ruff passed; Pyright reported **0 errors,
+  0 warnings, 0 informations**; the API runtime integrity audit reported zero violations; pytest
+  produced **723 passed in 466.64s**; web lint passed; Vitest produced **6 files and 34 tests passed
+  in 1.80s**; the Next.js production build completed compilation, TypeScript checking, static page
+  generation, optimization and trace collection; and mocked Playwright produced **3 passed in
+  11.0s**.
+- The same root verifier reset the live target independently for each viewport. Each reset seeded
+  twice with identical inventories and returned zero owner/API pre-run integrity violations.
+  Desktop Playwright produced **1 passed in 13.9s** and mobile Playwright produced **1 passed in
+  13.8s**. Both journeys selected exact evidence, approved the transportation proposal, claimed,
+  started and completed its task, saved the patient resolved follow-up, refreshed the navigator
+  workspace, previewed and confirmed the resolved Outcome, removed the closed need from the queue,
+  then reloaded navigator and patient pages to prove persisted need, response and Outcome history.
+  Mobile additionally verified a sub-600-pixel viewport without horizontal overflow.
+- The live test's database assertion ran through the application URL and required
+  `current_user=session_user=ojcc_api`, distinct from `ojcc_migrator`; it proved exactly one
+  follow-up request, response, Outcome and schema-version-2 proposal binding plus at least three
+  task audits. A fresh final read-only API-login query confirmed those four counts at one, exactly
+  three task audits, `navigation_task.status=completed`, and the same runtime identity. Fresh final
+  integrity audits of both named API/live targets again returned zero violations.
+- Task 6 made no workflow, migration, dependency, contract, privilege, target, test, configuration,
+  or production-source change. Diff from the acceptance base was empty for every protected source
+  category; `git diff --check` passed; ports 8011 and 3011 were free; and generated build/line-ending
+  side effects had the exact `HEAD` blobs before documentation edits. The privilege, attestation,
+  target-safety, provisioning, CI cache and child-environment guards all ran inside both 723-test
+  passes. No credential, raw SQL parameter, cookie, signing secret, token, or traceback was added to
+  tracked output or documentation.
+- Before cleanup, both second-attempt targets were revalidated against the exact recorded UUID names,
+  owner `ojcc_migrator`, and zero sessions. Both were ordinarily dropped by `ojcc_migrator` and a
+  final catalog query confirmed both absent. No force-drop, connection termination, unknown-process
+  stop, persistent `ojcc` access, push, merge, deployment, worktree removal, or deferred milestone
+  occurred.
+- Intentional limitations remain those in the approved design: this synthetic demo does not claim
+  database-wide temporal exclusion, implicit actor discovery, seed repair, persistent cookie
+  expiry, new workflow/provider/admin UI, real-data or clinical use, external booking/outreach, or
+  deployment readiness. Deferred milestones remain deferred.
+
+**Next exact step:** User review of the completed Task 6 evidence and documentation commit. Do not
+merge, push, deploy, remove the worktree, or begin a deferred milestone without separate direction.
 
 ## Conditional-approval amendment
 

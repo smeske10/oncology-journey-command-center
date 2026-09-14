@@ -259,11 +259,11 @@ Use explicit settings/config in HTTP fixtures and runtime live environment.
 - Update only this plan, design status, and new ledger after evidence exists.
 - No implementation feature expansion.
 
-- [ ] Generate and record fresh API/live UUID names and known ownership. Provision with the existing separate-credential tooling; reset/replay/seed via the owner/bootstrap bridge. Export explicit roster and demo org/secret for API tests. Never copy a persistent target.
-- [ ] Run all new auth/config/resolver/HTTP/process cases with required PostgreSQL availability. Run existing privilege, runtime attestation, non-owner journey, identity/history, restore-integrity, seed, migration and offline replay suites.
-- [ ] Verify `alembic current` is 0007 head, `alembic check` has no drift, all seven migration hashes match the ledger, and the frozen v0007 test passes.
-- [ ] Generate OpenAPI/TypeScript contracts using existing scripts; verify no request/response schema change is accidentally introduced by internal token types.
-- [ ] Run the complete verifier from repository root, with the API credential triple exported and separate live triple held in these named variables:
+- [x] Generate and record fresh API/live UUID names and known ownership. Provision with the existing separate-credential tooling; reset/replay/seed via the owner/bootstrap bridge. Export explicit roster and demo org/secret for API tests. Never copy a persistent target.
+- [x] Run all new auth/config/resolver/HTTP/process cases with required PostgreSQL availability. Run existing privilege, runtime attestation, non-owner journey, identity/history, restore-integrity, seed, migration and offline replay suites.
+- [x] Verify `alembic current` is 0007 head, `alembic check` has no drift, all seven migration hashes match the ledger, and the frozen v0007 test passes.
+- [x] Generate OpenAPI/TypeScript contracts using existing scripts; verify no request/response schema change is accidentally introduced by internal token types.
+- [x] Run the complete verifier from repository root, with the API credential triple exported and separate live triple held in these named variables:
 ```powershell
 ./scripts/verify.ps1 `
   -LiveBootstrapDatabaseUrl $liveBootstrapDatabaseUrl `
@@ -272,10 +272,10 @@ Use explicit settings/config in HTTP fixtures and runtime live environment.
   -LiveConfirmDatabaseName $liveDatabaseName
 ```
 Expected: locked dependency install, Ruff, Pyright, runtime integrity, all pytest, web lint/Vitest/build, mocked browser tests, and live desktop/mobile transportation journeys. No skipped security tests.
-- [ ] Preserve exact live story: review → approve → claim → start → complete → patient follow-up → outcome → reload persisted history. Verify runtime current_user/session_user are the real non-owner login and all pre/post integrity audits are clean.
-- [ ] Check no workflow source changes, no seven migration changes, no dependency changes, no credential/SQL/token leakage, and no privilege/target weakening. Record complete test counts and statuses.
-- [ ] Stop only owned processes/connections; validate recorded database names and owners, check sessions, ordinarily drop only known disposable databases. Leave and record uncertain/active leftovers; never terminate unknown sessions.
-- [ ] Update ledger with evidence, intentional limitations and next exact step; commit documentation. Stop for user review. Do not merge/deploy/remove worktrees or start a deferred milestone.
+- [x] Preserve exact live story: review → approve → claim → start → complete → patient follow-up → outcome → reload persisted history. Verify runtime current_user/session_user are the real non-owner login and all pre/post integrity audits are clean.
+- [x] Check no workflow source changes, no seven migration changes, no dependency changes, no credential/SQL/token leakage, and no privilege/target weakening. Record complete test counts and statuses.
+- [x] Stop only owned processes/connections; validate recorded database names and owners, check sessions, ordinarily drop only known disposable databases. Leave and record uncertain/active leftovers; never terminate unknown sessions.
+- [x] Update ledger with evidence, intentional limitations and next exact step; commit documentation. Stop for user review. Do not merge/deploy/remove worktrees or start a deferred milestone.
 
 ## Required scenario traceability
 
