@@ -33,6 +33,10 @@ from app.domain.outcomes import record_outcome
 from scripts import seed_demo as seed_demo_script
 from scripts.seed_demo import DEMO_IDS, seed_demo
 from tests.database_support import disposable_database
+from tests.test_verify_harness import (
+    _environment_round_trip,
+    _skip_unsupported_empty_environment,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DISPOSABLE_PREFIX = "ojcc_task7_"
@@ -1295,27 +1299,33 @@ def test_reset_removes_all_libpq_environment_before_engine_creation(tmp_path: Pa
     assert dirty_sentinel not in output
 
 
-def test_reset_restores_all_database_and_libpq_environment_after_child_failure(
+@pytest.mark.parametrize("parent_state", ("absent", "empty", "populated"))
+@pytest.mark.parametrize("python_exit_code", (0, 41), ids=("success", "child-failure"))
+def test_reset_restores_all_database_and_libpq_environment(
     tmp_path: Path,
+    parent_state: str,
+    python_exit_code: int,
 ) -> None:
+    """Production break: reset cleanup turns missing parent credentials into empty entries."""
     fake_python = tmp_path / ("python.cmd" if os.name == "nt" else "python")
     if os.name == "nt":
-        fake_python.write_text("@echo off\nexit /b 41\n", encoding="utf-8")
+        fake_python.write_text(f"@echo off\nexit /b {python_exit_code}\n", encoding="utf-8")
     else:
-        fake_python.write_text("#!/bin/sh\nexit 41\n", encoding="utf-8")
+        fake_python.write_text(f"#!/bin/sh\nexit {python_exit_code}\n", encoding="utf-8")
         fake_python.chmod(0o755)
     bootstrap_url, migration_url, application_url = _database_triple(
         "postgresql+psycopg://ignored:ignored@127.0.0.1:5432/ojcc_demo_deadbeef"
     )
     reset_path = str(PROJECT_ROOT / "scripts" / "reset_demo.ps1").replace("'", "''")
     wrapper = tmp_path / "reset-environment-probe.ps1"
+    setup, assertion = _environment_round_trip(
+        ["BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL", "PGHOST"],
+        parent_state,
+    )
     wrapper.write_text(
         "$ErrorActionPreference = 'Stop'\n"
-        "$env:BOOTSTRAP_DATABASE_URL = 'prior-bootstrap'\n"
-        "$env:MIGRATION_DATABASE_URL = 'prior-migration'\n"
-        "$env:DATABASE_URL = 'prior-application'\n"
-        "$env:PGHOST = 'prior-host'\n"
-        "$caught = $null\n"
+        + setup
+        + "$caught = $null\n"
         "try {\n"
         f"  . '{reset_path}' "
         f"-BootstrapDatabaseUrl '{bootstrap_url}' "
@@ -1324,13 +1334,13 @@ def test_reset_restores_all_database_and_libpq_environment_after_child_failure(
         "-ConfirmDatabaseName 'ojcc_demo_deadbeef'\n"
         "}\n"
         "catch { $caught = $_.Exception.Message }\n"
-        "if ($caught -notmatch '41') { throw \"Unexpected failure: $caught\" }\n"
-        "if ($env:BOOTSTRAP_DATABASE_URL -ne 'prior-bootstrap' -or "
-        "$env:MIGRATION_DATABASE_URL -ne 'prior-migration' -or "
-        "$env:DATABASE_URL -ne 'prior-application' -or $env:PGHOST -ne 'prior-host') {\n"
-        "  throw 'Database or PG environment was not restored'\n"
-        "}\n"
-        "Write-Output 'RESET_ENVIRONMENT_RESTORED'\n",
+        + (
+            "if ($caught -notmatch '41') { throw 'Expected reset child failure' }\n"
+            if python_exit_code else
+            "if ($null -ne $caught) { throw \"Unexpected failure: $caught\" }\n"
+        )
+        + assertion
+        + "Write-Output 'RESET_ENVIRONMENT_RESTORED'\n",
         encoding="utf-8",
     )
     environment = {
@@ -1352,9 +1362,12 @@ def test_reset_restores_all_database_and_libpq_environment_after_child_failure(
         env=environment,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=20,
         check=False,
     )
 
+    _skip_unsupported_empty_environment(result)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RESET_ENVIRONMENT_RESTORED" in result.stdout
 
