@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -12,12 +14,12 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.api.demo_sessions import get_demo_session_service
-from app.auth.dependencies import get_current_demo_session_service
-from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
+from app.api import demo_sessions
+from app.auth import dependencies
+from app.config import Settings
 from app.db.session import get_session
 from app.main import app
-from scripts.seed_demo import DEMO_IDS, seed_demo
+from scripts.seed_demo import DEMO_IDS, demo_actor_configuration, seed_demo
 from tests.database_support import DisposableDatabase, disposable_database
 
 SESSION_SECRET = "non-owner-closed-loop-signed-cookie-secret"
@@ -36,29 +38,42 @@ def non_owner_database() -> Iterator[DisposableDatabase]:
 
 
 @contextmanager
-def _runtime_dependencies(database: DisposableDatabase) -> Iterator[None]:
+def _runtime_dependencies(
+    database: DisposableDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
     runtime_engine = create_engine(database.application_url, pool_pre_ping=True)
-    authentication_session = Session(runtime_engine)
-    session_service = DemoSessionService(
-        actor_repository=SqlAlchemyActorRepository(authentication_session),
-        secret=SESSION_SECRET,
-        ttl_minutes=30,
-        organization_id=DEMO_IDS["organization"],
+    configured_settings = Settings(
+        database_url=database.application_url,
+        environment="local",
+        demo_session_secret=SESSION_SECRET,
+        demo_session_ttl_minutes=30,
+        demo_organization_id=DEMO_IDS["organization"],
+        demo_actors_json=json.dumps(demo_actor_configuration(), sort_keys=True),
     )
 
     def runtime_session() -> Iterator[Session]:
         with Session(runtime_engine, autoflush=False, expire_on_commit=False) as session:
             yield session
 
+    monkeypatch.setattr(demo_sessions, "settings", configured_settings)
+    monkeypatch.setattr(dependencies, "settings", configured_settings)
     app.dependency_overrides[get_session] = runtime_session
-    app.dependency_overrides[get_demo_session_service] = lambda: session_service
-    app.dependency_overrides[get_current_demo_session_service] = lambda: session_service
     try:
         yield
     finally:
         app.dependency_overrides.clear()
-        authentication_session.close()
         runtime_engine.dispose()
+
+
+def _session_payload(client: httpx.AsyncClient) -> dict[str, Any]:
+    token = client.cookies.get("ojcc_session")
+    assert token is not None
+    encoded_payload = token.split(".")[1]
+    padding = "=" * (-len(encoded_payload) % 4)
+    value = json.loads(base64.urlsafe_b64decode(encoded_payload + padding))
+    assert isinstance(value, dict)
+    return value
 
 
 async def _assert_success(response: httpx.Response, expected: int = 200) -> dict[str, Any]:
@@ -78,6 +93,14 @@ async def _run_signed_cookie_journey(database: DisposableDatabase) -> None:
     ):
         await _assert_success(await navigator.post("/v1/demo/session/navigator"), 204)
         await _assert_success(await patient.post("/v1/demo/session/supporting_actor"), 204)
+        navigator_payload = _session_payload(navigator)
+        patient_payload = _session_payload(patient)
+        assert navigator_payload["ver"] == 2
+        assert navigator_payload["ra"] == str(DEMO_IDS["navigator_role"])
+        assert "pil" not in navigator_payload
+        assert patient_payload["ver"] == 2
+        assert patient_payload["ra"] == str(DEMO_IDS["patient_role"])
+        assert patient_payload["pil"] == str(DEMO_IDS["patient_identity_link"])
 
         current_check_in = await _assert_success(
             await patient.get("/v1/patient/check-ins/current")
@@ -246,6 +269,7 @@ async def _run_signed_cookie_journey(database: DisposableDatabase) -> None:
 
 def test_real_signed_cookie_closed_loop_runs_as_non_owner(
     non_owner_database: DisposableDatabase,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner_engine = create_engine(non_owner_database.migration_url)
     runtime_engine = create_engine(non_owner_database.application_url)
@@ -272,7 +296,7 @@ def test_real_signed_cookie_closed_loop_runs_as_non_owner(
         owner_engine.dispose()
         runtime_engine.dispose()
 
-    with _runtime_dependencies(non_owner_database):
+    with _runtime_dependencies(non_owner_database, monkeypatch):
         asyncio.run(_run_signed_cookie_journey(non_owner_database))
 
     runtime_engine = create_engine(non_owner_database.application_url)

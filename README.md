@@ -20,6 +20,10 @@ The API health endpoint is available at `GET /health` and returns `{"status":"ok
 
 `/demo/patient` uses a same-origin `/api` rewrite, creates a short-lived synthetic demo session, then loads the current check-in definition before allowing submission. It requires the deterministic synthetic supporting actor and active check-in definition created by the reset workflow; without that seed, the page shows the safe demo-unavailable state rather than accepting an unauthenticated submission. Configure `OJCC_API_ORIGIN` only for the server-side rewrite target; browser requests remain same-origin and credentialed.
 
+`DEMO_ACTORS_JSON` is a server-only roster of the intended synthetic users. Generate it with the
+connection-free seed CLI mode shown below; do not expose the roster, session secret, or database
+URLs to the Next.js child process.
+
 ### Deterministic synthetic reset
 
 The application, migration process, and bootstrap process use different credentials:
@@ -78,6 +82,15 @@ $env:BOOTSTRAP_DATABASE_URL = $bootstrapDatabaseUrl
 $env:MIGRATION_DATABASE_URL = $migrationDatabaseUrl
 $env:DATABASE_URL = $applicationDatabaseUrl
 $env:DEMO_ORGANIZATION_ID = "aeb456d4-3728-5f64-ac05-afed26cd0edc"
+Push-Location .\services\api
+try {
+    $demoActorsJson = python -m scripts.seed_demo --print-demo-actors
+    if ($LASTEXITCODE -ne 0) { throw "Synthetic demo actor configuration failed" }
+}
+finally {
+    Pop-Location
+}
+$env:DEMO_ACTORS_JSON = $demoActorsJson
 .\\scripts\\verify.ps1 `
     -LiveBootstrapDatabaseUrl $liveBootstrapDatabaseUrl `
     -LiveMigrationDatabaseUrl $liveMigrationDatabaseUrl `

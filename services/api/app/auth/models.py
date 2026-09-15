@@ -12,3 +12,15 @@ class CurrentActor:
     organization_id: UUID
     role: Role
     patient_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedAuthority:
+    actor: CurrentActor
+    role_assignment_id: UUID
+    patient_identity_link_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class VerifiedDemoSession:
+    authority: ResolvedAuthority

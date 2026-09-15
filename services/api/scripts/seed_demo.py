@@ -104,6 +104,17 @@ DEMO_IDS = {
 }
 
 
+def demo_actor_configuration() -> dict[str, dict[str, str]]:
+    return {
+        "navigator": {"user_id": str(DEMO_IDS["navigator_user"])},
+        "administrator": {"user_id": str(DEMO_IDS["administrator_user"])},
+        "supporting_actor": {
+            "user_id": str(DEMO_IDS["patient_user"]),
+            "patient_id": str(DEMO_IDS["patient"]),
+        },
+    }
+
+
 @dataclass(frozen=True)
 class SeedSummary:
     organization_id: UUID
@@ -204,6 +215,68 @@ def _set_seed_user_triggers(session: Session, *, enabled: bool) -> None:
         session.execute(
             text(f"ALTER TABLE public.{table_name} {action} TRIGGER USER")
         )
+
+
+def validate_existing_demo_identities(session: Session) -> None:
+    expected_roles = {
+        DEMO_IDS["patient_role"]: (
+            DEMO_IDS["organization"],
+            DEMO_IDS["patient_user"],
+            "supporting_actor",
+        ),
+        DEMO_IDS["navigator_historical_role"]: (
+            DEMO_IDS["organization"],
+            DEMO_IDS["navigator_user"],
+            "navigator",
+        ),
+        DEMO_IDS["navigator_role"]: (
+            DEMO_IDS["organization"],
+            DEMO_IDS["navigator_user"],
+            "navigator",
+        ),
+        DEMO_IDS["administrator_role"]: (
+            DEMO_IDS["organization"],
+            DEMO_IDS["administrator_user"],
+            "administrator",
+        ),
+    }
+    role_rows = session.execute(
+        text(
+            "SELECT id, organization_id, user_id, role::text AS role "
+            "FROM role_assignment WHERE id = ANY(:ids)"
+        ),
+        {"ids": list(expected_roles)},
+    ).all()
+    if any(
+        (row.organization_id, row.user_id, row.role) != expected_roles[row.id]
+        for row in role_rows
+    ):
+        raise RuntimeError("Existing demo identity conflicts with synthetic seed")
+
+    link_row = session.execute(
+        text(
+            "SELECT organization_id, user_id, patient_id "
+            "FROM patient_identity_link WHERE id = :id"
+        ),
+        {"id": DEMO_IDS["patient_identity_link"]},
+    ).one_or_none()
+    if link_row is not None and (
+        link_row.organization_id,
+        link_row.user_id,
+        link_row.patient_id,
+    ) != (
+        DEMO_IDS["organization"],
+        DEMO_IDS["patient_user"],
+        DEMO_IDS["patient"],
+    ):
+        raise RuntimeError("Existing demo identity conflicts with synthetic seed")
+
+    patient_organization_id = session.scalar(
+        text("SELECT organization_id FROM synthetic_patient WHERE id = :id"),
+        {"id": DEMO_IDS["patient"]},
+    )
+    if patient_organization_id is not None and patient_organization_id != DEMO_IDS["organization"]:
+        raise RuntimeError("Existing demo identity conflicts with synthetic seed")
 
 
 def _seed_identity_and_pathways(
@@ -1269,6 +1342,7 @@ def seed_demo(session: Session) -> SeedSummary:
     """Insert one fixed, entirely synthetic and idempotent reconciled-domain dataset."""
     ids = DEMO_IDS
     values: dict[str, Any] = ids | TIMES
+    validate_existing_demo_identities(session)
     _set_seed_user_triggers(session, enabled=False)
     restore_trigger_enforcement = True
     try:
@@ -1322,13 +1396,20 @@ def without_libpq_environment() -> Iterator[None]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed the deterministic synthetic public demo.")
-    parser.add_argument("--migration-database-url", required=True)
-    parser.add_argument("--database-url", required=True)
+    parser.add_argument("--migration-database-url")
+    parser.add_argument("--database-url")
+    parser.add_argument("--print-demo-actors", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = _parser().parse_args(argv)
+    parser = _parser()
+    arguments = parser.parse_args(argv)
+    if arguments.print_demo_actors:
+        print(json.dumps(demo_actor_configuration(), sort_keys=True))
+        return 0
+    if arguments.migration_database_url is None or arguments.database_url is None:
+        parser.error("--migration-database-url and --database-url are required")
     with without_libpq_environment():
         validated_migration_url = validate_disposable_database_url(
             arguments.migration_database_url

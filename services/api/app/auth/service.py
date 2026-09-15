@@ -11,11 +11,17 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.auth.models import CurrentActor, Role
-from app.db.models import PatientIdentityLink, RoleAssignment, User
+from app.auth.authority import (
+    AuthorityDatabaseUnavailableError,
+    AuthorityUnavailableError,
+    authority_from_row,
+    build_authority_statement,
+)
+from app.auth.demo_actors import DemoActorConfigurationError, DemoActorSelection
+from app.auth.models import CurrentActor, ResolvedAuthority, Role, VerifiedDemoSession
 
 TOKEN_ISSUER = "ojcc-demo"
 TOKEN_AUDIENCE = "ojcc-web"
@@ -23,100 +29,45 @@ MAX_SESSION_LIFETIME_SECONDS = 2 * 60 * 60
 
 
 class ActorRepository(Protocol):
-    def find_active_actor(
-        self, *, organization_id: UUID, role: Role, at: datetime | None = None
-    ) -> CurrentActor | None: ...
-
-
-class SqlAlchemyActorRepository:
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    def find_active_actor(
-        self, *, organization_id: UUID, role: Role, at: datetime | None = None
-    ) -> CurrentActor | None:
-        at = datetime.now(UTC) if at is None else at
-        statement = (
-            select(
-                User.id,
-                RoleAssignment.organization_id,
-                RoleAssignment.role,
-                PatientIdentityLink.patient_id,
-            )
-            .join(
-                RoleAssignment,
-                and_(
-                    RoleAssignment.user_id == User.id,
-                ),
-            )
-            .outerjoin(
-                PatientIdentityLink,
-                and_(
-                    PatientIdentityLink.user_id == User.id,
-                    PatientIdentityLink.organization_id == RoleAssignment.organization_id,
-                    PatientIdentityLink.linked_at <= at,
-                    PatientIdentityLink.revoked_at.is_(None)
-                    | (at < PatientIdentityLink.revoked_at),
-                ),
-            )
-            .where(
-                RoleAssignment.organization_id == organization_id,
-                RoleAssignment.role == role,
-                RoleAssignment.granted_at <= at,
-                (RoleAssignment.revoked_at.is_(None) | (at < RoleAssignment.revoked_at)),
-                User.is_active.is_(True),
-            )
-        )
-        if role == Role.SUPPORTING_ACTOR:
-            statement = statement.where(PatientIdentityLink.patient_id.is_not(None))
-        row = self._session.execute(statement).one_or_none()
-        if row is None:
-            return None
-        return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2], patient_id=row[3])
-
-    def find_active_actor_for_user(
+    def resolve_authority(
         self,
         *,
         organization_id: UUID,
         user_id: UUID,
         role: Role,
         at: datetime | None = None,
-    ) -> CurrentActor | None:
-        at = datetime.now(UTC) if at is None else at
-        statement = (
-            select(
-                User.id,
-                RoleAssignment.organization_id,
-                RoleAssignment.role,
-                PatientIdentityLink.patient_id,
-            )
-            .join(RoleAssignment, RoleAssignment.user_id == User.id)
-            .outerjoin(
-                PatientIdentityLink,
-                and_(
-                    PatientIdentityLink.user_id == User.id,
-                    PatientIdentityLink.organization_id == RoleAssignment.organization_id,
-                    PatientIdentityLink.linked_at <= at,
-                    PatientIdentityLink.revoked_at.is_(None)
-                    | (at < PatientIdentityLink.revoked_at),
-                ),
-            )
-            .where(
-                User.id == user_id,
-                RoleAssignment.organization_id == organization_id,
-                RoleAssignment.role == role,
-                RoleAssignment.granted_at <= at,
-                RoleAssignment.revoked_at.is_(None) | (at < RoleAssignment.revoked_at),
-                User.is_active.is_(True),
-            )
-        )
-        if role == Role.SUPPORTING_ACTOR:
-            statement = statement.where(PatientIdentityLink.patient_id.is_not(None))
-        row = self._session.execute(statement).one_or_none()
-        if row is None:
-            return None
-        return CurrentActor(user_id=row[0], organization_id=row[1], role=row[2], patient_id=row[3])
+    ) -> ResolvedAuthority | None: ...
 
+class SqlAlchemyActorRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def resolve_authority(
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        role: Role,
+        at: datetime | None = None,
+    ) -> ResolvedAuthority | None:
+        checked_at = datetime.now(UTC) if at is None else at
+        try:
+            row = self._session.execute(
+                build_authority_statement(
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    role=role,
+                    at=checked_at,
+                )
+            ).one_or_none()
+        except SQLAlchemyError:
+            raise AuthorityDatabaseUnavailableError() from None
+        return authority_from_row(
+            row,
+            organization_id=organization_id,
+            user_id=user_id,
+            role=role,
+        )
 
 class DemoSessionService:
     def __init__(
@@ -126,6 +77,7 @@ class DemoSessionService:
         secret: str | None,
         ttl_minutes: int,
         organization_id: UUID | None,
+        demo_actors: Mapping[Role, DemoActorSelection] | None = None,
     ) -> None:
         if not secret:
             raise ValueError("DEMO_SESSION_SECRET must be configured")
@@ -135,24 +87,48 @@ class DemoSessionService:
         self._secret = secret.encode("utf-8")
         self._ttl_seconds = ttl_minutes * 60
         self._organization_id = organization_id
+        self._demo_actors = dict(demo_actors) if demo_actors is not None else None
 
     def create_session(self, role: Role) -> str:
-        if self._actor_repository is None or self._organization_id is None:
+        if (
+            self._actor_repository is None
+            or self._organization_id is None
+            or self._demo_actors is None
+        ):
             raise RuntimeError("Demo session actor repository is not configured")
-        actor = self._actor_repository.find_active_actor(
-            organization_id=self._organization_id, role=role
+        selection = self._demo_actors.get(role)
+        if selection is None:
+            raise DemoActorConfigurationError(
+                "DEMO_ACTORS_JSON has no entry for the requested role"
+            )
+        authority = self._actor_repository.resolve_authority(
+            organization_id=self._organization_id,
+            user_id=selection.user_id,
+            role=role,
         )
-        if actor is None:
-            raise LookupError("No active demo actor is available for this role")
-        return self.create_token(actor)
+        if authority is None or authority.actor.patient_id != selection.patient_id:
+            raise AuthorityUnavailableError()
+        return self.create_token(authority)
+
+    def is_configured_actor(self, actor: CurrentActor) -> bool:
+        if self._organization_id is None or self._demo_actors is None:
+            return False
+        selection = self._demo_actors.get(actor.role)
+        return (
+            selection is not None
+            and actor.organization_id == self._organization_id
+            and actor.user_id == selection.user_id
+            and actor.patient_id == selection.patient_id
+        )
 
     def create_token(
         self,
-        actor: CurrentActor,
+        authority: ResolvedAuthority,
         *,
         issued_at: int | None = None,
         expires_at: int | None = None,
     ) -> str:
+        actor = authority.actor
         issued_at = int(time.time()) if issued_at is None else issued_at
         expires_at = issued_at + self._ttl_seconds if expires_at is None else expires_at
         header = {"alg": "HS256", "typ": "JWT"}
@@ -164,16 +140,23 @@ class DemoSessionService:
             "jti": secrets.token_urlsafe(16),
             "nbf": issued_at,
             "org": str(actor.organization_id),
+            "ra": str(authority.role_assignment_id),
             "role": actor.role.value,
             "sub": str(actor.user_id),
+            "ver": 2,
         }
-        if actor.patient_id is not None:
+        if actor.role == Role.SUPPORTING_ACTOR:
+            if actor.patient_id is None or authority.patient_identity_link_id is None:
+                raise ValueError("Supporting actor authority requires patient provenance")
             payload["patient"] = str(actor.patient_id)
+            payload["pil"] = str(authority.patient_identity_link_id)
+        elif actor.patient_id is not None or authority.patient_identity_link_id is not None:
+            raise ValueError("Staff authority cannot include patient provenance")
         signing_input = f"{_encode_json(header)}.{_encode_json(payload)}".encode("ascii")
         signature = hmac.new(self._secret, signing_input, hashlib.sha256).digest()
         return f"{signing_input.decode('ascii')}.{_encode_bytes(signature)}"
 
-    def current_actor(self, token: str, *, now: int | None = None) -> CurrentActor:
+    def verify_session(self, token: str, *, now: int | None = None) -> VerifiedDemoSession:
         try:
             encoded_header, encoded_payload, encoded_signature = token.split(".")
             signing_input = f"{encoded_header}.{encoded_payload}".encode("ascii")
@@ -185,7 +168,22 @@ class DemoSessionService:
             payload = _decode_json(encoded_payload)
             if header != {"alg": "HS256", "typ": "JWT"}:
                 raise ValueError
-            return _actor_from_claims(payload, now=int(time.time()) if now is None else now)
+            version = payload.get("ver")
+            if type(version) is not int or version != 2:
+                raise ValueError
+            actor = _actor_from_claims(payload, now=int(time.time()) if now is None else now)
+            patient_identity_link_id = (
+                _uuid_claim(payload, "pil")
+                if actor.role == Role.SUPPORTING_ACTOR
+                else None
+            )
+            return VerifiedDemoSession(
+                authority=ResolvedAuthority(
+                    actor=actor,
+                    role_assignment_id=_uuid_claim(payload, "ra"),
+                    patient_identity_link_id=patient_identity_link_id,
+                )
+            )
         except (KeyError, TypeError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
             raise ValueError("Invalid or expired demo session") from None
 
@@ -206,11 +204,19 @@ def _actor_from_claims(payload: Mapping[str, object], *, now: int) -> CurrentAct
         or expires_at - issued_at > MAX_SESSION_LIFETIME_SECONDS
     ):
         raise ValueError
+    role = Role(_string_claim(payload, "role"))
+    if role == Role.SUPPORTING_ACTOR:
+        patient_id = _uuid_claim(payload, "patient")
+        _uuid_claim(payload, "pil")
+    else:
+        if "patient" in payload or "pil" in payload:
+            raise ValueError
+        patient_id = None
     return CurrentActor(
-        user_id=UUID(_string_claim(payload, "sub")),
-        organization_id=UUID(_string_claim(payload, "org")),
-        role=Role(_string_claim(payload, "role")),
-        patient_id=UUID(_string_claim(payload, "patient")) if "patient" in payload else None,
+        user_id=_uuid_claim(payload, "sub"),
+        organization_id=_uuid_claim(payload, "org"),
+        role=role,
+        patient_id=patient_id,
     )
 
 
@@ -226,6 +232,10 @@ def _string_claim(payload: Mapping[str, object], name: str) -> str:
     if not isinstance(value, str):
         raise ValueError
     return value
+
+
+def _uuid_claim(payload: Mapping[str, object], name: str) -> UUID:
+    return UUID(_string_claim(payload, name))
 
 
 def _encode_json(value: Mapping[str, object]) -> str:

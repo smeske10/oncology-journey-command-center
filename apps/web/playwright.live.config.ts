@@ -29,7 +29,20 @@ function platformEnvironment(): Record<string, string> {
   );
 }
 
-const baseEnvironment = platformEnvironment();
+function isolatedEnvironment(approved: Record<string, string>): Record<string, string> {
+  // Playwright merges process.env into web-server env. Undefined overrides remove
+  // every inherited key before the approved platform and child values are added.
+  const inheritedEnvironmentRemovals: Record<string, undefined> = Object.fromEntries(
+    Object.keys(process.env).map((name) => [name, undefined]),
+  );
+  // Playwright types env values as strings, while its launcher forwards undefined
+  // to Node's child-process environment specifically to remove inherited keys.
+  return {
+    ...inheritedEnvironmentRemovals,
+    ...platformEnvironment(),
+    ...approved,
+  } as unknown as Record<string, string>;
+}
 
 export default defineConfig({
   testDir: "./e2e-live",
@@ -43,13 +56,13 @@ export default defineConfig({
     {
       command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8011",
       cwd: "../../services/api",
-      env: {
-        ...baseEnvironment,
+      env: isolatedEnvironment({
         DATABASE_URL: requiredEnvironment("DATABASE_URL"),
         APP_ENV: "local",
         DEMO_SESSION_SECRET: requiredEnvironment("DEMO_SESSION_SECRET"),
         DEMO_ORGANIZATION_ID: requiredEnvironment("DEMO_ORGANIZATION_ID"),
-      },
+        DEMO_ACTORS_JSON: requiredEnvironment("DEMO_ACTORS_JSON"),
+      }),
       port: 8011,
       reuseExistingServer: false,
       timeout: 120_000,
@@ -57,10 +70,9 @@ export default defineConfig({
     {
       command: "npm run dev -- --hostname 127.0.0.1 --port 3011",
       cwd: ".",
-      env: {
-        ...baseEnvironment,
+      env: isolatedEnvironment({
         OJCC_API_ORIGIN: "http://127.0.0.1:8011",
-      },
+      }),
       port: 3011,
       reuseExistingServer: false,
       timeout: 120_000,

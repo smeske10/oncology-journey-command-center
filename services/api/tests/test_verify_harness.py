@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import socket
@@ -202,6 +203,221 @@ def _run_live_wrapper(*, environment: dict[str, str]) -> subprocess.CompletedPro
         timeout=20,
         check=False,
     )
+
+
+def _live_web_server_environment_keys() -> list[list[str]]:
+    config_path = PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts"
+    script = """
+const fs = require("fs");
+const path = require("path");
+const Module = require("module");
+const ts = require("typescript");
+const filename = process.argv[1];
+const source = fs.readFileSync(filename, "utf8");
+const output = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    esModuleInterop: true,
+  },
+}).outputText;
+const compiled = new Module(filename, module);
+compiled.filename = filename;
+compiled.paths = Module._nodeModulePaths(path.dirname(filename));
+compiled._compile(output, filename);
+const config = compiled.exports.default;
+process.stdout.write(JSON.stringify(config.webServer.map((server) =>
+  Object.entries(server.env || {})
+    .filter(([, value]) => value !== undefined)
+    .map(([name]) => name)
+    .sort()
+)));
+"""
+    environment = os.environ | {
+        "DATABASE_URL": API_DATABASE_URL,
+        "DEMO_SESSION_SECRET": "synthetic-live-session-secret-with-32-characters",
+        "DEMO_ORGANIZATION_ID": "aeb456d4-3728-5f64-ac05-afed26cd0edc",
+        "DEMO_ACTORS_JSON": "{}",
+    }
+    result = subprocess.run(
+        ["node", "-e", script, str(config_path)],
+        cwd=PROJECT_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    parsed = json.loads(result.stdout)
+    assert isinstance(parsed, list)
+    return parsed
+
+
+def _probe_live_child_environments(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Launch harmless children through Playwright's real web-server plugin."""
+    config_path = PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts"
+    plugin_path = (
+        PROJECT_ROOT
+        / "node_modules"
+        / "playwright"
+        / "lib"
+        / "plugins"
+        / "webServerPlugin.js"
+    )
+    probe_path = tmp_path / "environment-probe.cjs"
+    launcher_path = tmp_path / "playwright-web-server-probe.cjs"
+    probe_path.write_text(
+        """
+const fs = require("fs");
+const role = process.argv[2];
+const outputPath = process.argv[3];
+const exact = (name, expected) => process.env[name] === expected;
+const absent = (name) => process.env[name] === undefined;
+const commonIsolation = {
+  bootstrapAbsent: absent("BOOTSTRAP_DATABASE_URL"),
+  migrationAbsent: absent("MIGRATION_DATABASE_URL"),
+  baseUrlAbsent: absent("PLAYWRIGHT_BASE_URL"),
+  deviceAbsent: absent("OJCC_LIVE_DEVICE"),
+  migrationUsernameAbsent: absent("OJCC_MIGRATION_USERNAME"),
+};
+const result = role === "api" ? {
+  ...commonIsolation,
+  databaseExact: exact("DATABASE_URL", "synthetic-application-marker"),
+  appEnvironmentExact: exact("APP_ENV", "local"),
+  sessionSecretExact: exact("DEMO_SESSION_SECRET", "synthetic-secret-marker"),
+  organizationExact: exact("DEMO_ORGANIZATION_ID", "synthetic-organization-marker"),
+  actorsExact: exact("DEMO_ACTORS_JSON", "synthetic-roster-marker"),
+  apiOriginAbsent: absent("OJCC_API_ORIGIN"),
+} : {
+  ...commonIsolation,
+  databaseAbsent: absent("DATABASE_URL"),
+  appEnvironmentAbsent: absent("APP_ENV"),
+  sessionSecretAbsent: absent("DEMO_SESSION_SECRET"),
+  organizationAbsent: absent("DEMO_ORGANIZATION_ID"),
+  actorsAbsent: absent("DEMO_ACTORS_JSON"),
+  apiOriginExact: exact("OJCC_API_ORIGIN", "http://127.0.0.1:8011"),
+};
+fs.writeFileSync(outputPath, JSON.stringify({ pid: process.pid, environment: result }));
+setTimeout(() => process.exit(0), 10000);
+""",
+        encoding="utf-8",
+    )
+    launcher_path.write_text(
+        """
+const fs = require("fs");
+const path = require("path");
+const Module = require("module");
+const configPath = process.argv[2];
+const pluginPath = process.argv[3];
+const probePath = process.argv[4];
+const outputDirectory = process.argv[5];
+const projectRequire = Module.createRequire(configPath);
+const ts = projectRequire("typescript");
+const source = fs.readFileSync(configPath, "utf8");
+const output = ts.transpileModule(source, {
+  compilerOptions: {
+    module: ts.ModuleKind.CommonJS,
+    target: ts.ScriptTarget.ES2022,
+    esModuleInterop: true,
+  },
+}).outputText;
+const compiled = new Module(configPath, module);
+compiled.filename = configPath;
+compiled.paths = Module._nodeModulePaths(path.dirname(configPath));
+compiled._compile(output, configPath);
+const servers = compiled.exports.default.webServer;
+const { WebServerPlugin } = require(pluginPath);
+const quote = (value) => `"${value.replaceAll('"', '""')}"`;
+
+async function waitForFile(filename) {
+  const deadline = Date.now() + 5000;
+  while (!fs.existsSync(filename)) {
+    if (Date.now() >= deadline) throw new Error(`Probe did not write ${path.basename(filename)}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function requireStopped(pid) {
+  const deadline = Date.now() + 5000;
+  while (true) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) throw new Error("Owned probe child was not stopped");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function launch(server, role) {
+  const outputPath = path.join(outputDirectory, `${role}.json`);
+  const command = [process.execPath, probePath, role, outputPath].map(quote).join(" ");
+  const plugin = new WebServerPlugin({
+    ...server,
+    command,
+    cwd: outputDirectory,
+    port: undefined,
+    url: undefined,
+    stdout: "ignore",
+    stderr: "ignore",
+  }, false);
+  let result;
+  try {
+    await plugin.setup({}, path.dirname(configPath), {});
+    await waitForFile(outputPath);
+    result = JSON.parse(fs.readFileSync(outputPath, "utf8"));
+  } finally {
+    await plugin.teardown();
+  }
+  await requireStopped(result.pid);
+  return result.environment;
+}
+
+(async () => {
+  const api = await launch(servers[0], "api");
+  const next = await launch(servers[1], "next");
+  process.stdout.write(JSON.stringify({ api, next }));
+})().catch((error) => {
+  process.stderr.write(String(error && error.message ? error.message : error));
+  process.exitCode = 1;
+});
+""",
+        encoding="utf-8",
+    )
+    markers = {
+        "DATABASE_URL": "synthetic-application-marker",
+        "BOOTSTRAP_DATABASE_URL": "synthetic-bootstrap-marker",
+        "MIGRATION_DATABASE_URL": "synthetic-migration-marker",
+        "DEMO_SESSION_SECRET": "synthetic-secret-marker",
+        "DEMO_ORGANIZATION_ID": "synthetic-organization-marker",
+        "DEMO_ACTORS_JSON": "synthetic-roster-marker",
+        "OJCC_API_ORIGIN": "synthetic-parent-origin-marker",
+        "PLAYWRIGHT_BASE_URL": "synthetic-base-url-marker",
+        "OJCC_LIVE_DEVICE": "synthetic-device-marker",
+        "OJCC_MIGRATION_USERNAME": "synthetic-migration-username-marker",
+    }
+    result = subprocess.run(
+        [
+            "node",
+            str(launcher_path),
+            str(config_path),
+            str(plugin_path),
+            str(probe_path),
+            str(tmp_path),
+        ],
+        cwd=PROJECT_ROOT,
+        env=os.environ | markers,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    combined_output = result.stdout + result.stderr
+    for marker in markers.values():
+        assert marker not in combined_output
+    return result
 
 
 @pytest.mark.parametrize(
@@ -599,6 +815,199 @@ def test_live_wrapper_audits_integrity_after_each_browser_journey(tmp_path: Path
     assert live_runs[0] < audits[2] < live_runs[1] < audits[5]
 
 
+@pytest.mark.parametrize("npm_exit_code", (0, 41), ids=("success", "forced-failure"))
+def test_live_wrapper_restores_prior_demo_actor_configuration(
+    tmp_path: Path,
+    npm_exit_code: int,
+) -> None:
+    """Production break: live verification leaks its synthetic actor roster."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_command(fake_bin, "python", exit_code=0, output="FAKE_PYTHON_OK")
+    _write_fake_command(fake_bin, "npm", exit_code=npm_exit_code, output="FAKE_NPM")
+    wrapper = tmp_path / "live-roster-environment-probe.ps1"
+    escaped_live_path = str(
+        PROJECT_ROOT / "scripts" / "verify_live_journey.ps1"
+    ).replace("'", "''")
+    live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
+        LIVE_DATABASE_URL
+    )
+    expected_failure = (
+        "if ($caught -notmatch '41') { throw \"Unexpected failure: $caught\" }\n"
+        if npm_exit_code
+        else "if ($null -ne $caught) { throw \"Unexpected failure: $caught\" }\n"
+    )
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$env:DEMO_ACTORS_JSON = 'prior-demo-actors-json'\n"
+        "$caught = $null\n"
+        "try {\n"
+        f"  . '{escaped_live_path}' "
+        f"-BootstrapDatabaseUrl '{live_bootstrap_url}' "
+        f"-MigrationDatabaseUrl '{live_migration_url}' "
+        f"-DatabaseUrl '{live_application_url}' "
+        f"-ConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
+        "}\n"
+        "catch { $caught = $_.Exception.Message }\n"
+        + expected_failure
+        + "if ($env:DEMO_ACTORS_JSON -ne 'prior-demo-actors-json') {\n"
+        "  throw 'Demo actor configuration was not restored'\n"
+        "}\n"
+        "Write-Output 'DEMO_ACTORS_JSON_RESTORED'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            _powershell(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(wrapper),
+        ],
+        cwd=PROJECT_ROOT,
+        env=_verification_environment(fake_bin, database_url=API_DATABASE_URL),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DEMO_ACTORS_JSON_RESTORED" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "with_demo_values"), ((0, True), (41, True), (41, False)),
+    ids=("success", "frontend-failure", "absent-frontend-failure"),
+)
+def test_root_frontend_effective_environments_and_restoration(
+    tmp_path: Path, exit_code: int, with_demo_values: bool,
+) -> None:
+    """Production break: root web commands or mocked Next inherit API-only settings."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_command(fake_bin, "python", exit_code=0, output="FAKE_PYTHON_OK")
+    probe = tmp_path / "root-web-probe.cjs"
+    log = tmp_path / "environments.jsonl"
+    names = [
+        "DATABASE_URL", "MIGRATION_DATABASE_URL", "BOOTSTRAP_DATABASE_URL",
+        "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON",
+        "LIVE_BOOTSTRAP_DATABASE_URL", "LIVE_MIGRATION_DATABASE_URL",
+        "LIVE_DATABASE_URL",
+    ]
+    probe.write_text(
+        """
+const fs = require('fs');
+const path = require('path');
+const Module = require('module');
+const names = JSON.parse(process.env.VERIFY_PROBE_NAMES);
+const record = (stage) => fs.appendFileSync(process.env.VERIFY_PROBE_LOG,
+  JSON.stringify({stage, absent: names.map(name => process.env[name] === undefined)}) + '\\n');
+if (process.argv[2] === 'mock-next') {
+  record('mock-next');
+  setTimeout(() => process.exit(0), 10000);
+} else {
+  (async () => {
+    const args = process.argv.slice(2);
+    if (args.includes('test:e2e:live')) return;
+    const stage = args.includes('test:e2e') ? 'mocked' :
+      args.includes('build') ? 'build' : args.includes('lint') ? 'lint' : 'vitest';
+    record(stage);
+    if (stage !== 'mocked') return;
+    const configPath = path.join(process.env.VERIFY_PROJECT_ROOT, 'apps/web/playwright.config.ts');
+    const projectRequire = Module.createRequire(configPath);
+    const ts = projectRequire('typescript');
+    const compiled = new Module(configPath, module);
+    compiled.filename = configPath;
+    compiled.paths = Module._nodeModulePaths(path.dirname(configPath));
+    compiled._compile(ts.transpileModule(fs.readFileSync(configPath, 'utf8'), {
+      compilerOptions: {module: ts.ModuleKind.CommonJS, esModuleInterop: true},
+    }).outputText, configPath);
+    const {WebServerPlugin} = require(path.join(process.env.VERIFY_PROJECT_ROOT,
+      'node_modules/playwright/lib/plugins/webServerPlugin.js'));
+    const quote = value => '"' + value.replaceAll('"', '""') + '"';
+    const plugin = new WebServerPlugin({...compiled.exports.default.webServer,
+      command: [process.execPath, __filename, 'mock-next'].map(quote).join(' '),
+      port: undefined, url: undefined, stdout: 'ignore', stderr: 'ignore'}, false);
+    try {
+      await plugin.setup({}, path.dirname(configPath), {});
+      const deadline = Date.now() + 5000;
+      while (!fs.readFileSync(process.env.VERIFY_PROBE_LOG, 'utf8').includes('mock-next')) {
+        if (Date.now() >= deadline) throw new Error('Mock Next probe did not start');
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    } finally {
+      await plugin.teardown();
+    }
+    process.exitCode = Number(process.env.VERIFY_PROBE_EXIT);
+  })().catch(() => { process.stderr.write('Root child probe failed'); process.exitCode = 98; });
+}
+""",
+        encoding="utf-8",
+    )
+    node = shutil.which("node")
+    assert node is not None
+    npm = fake_bin / ("npm.cmd" if os.name == "nt" else "npm")
+    npm.write_text(
+        f'@echo off\n"{node}" "{probe}" %*\nexit /b %errorlevel%\n'
+        if os.name == "nt" else f'#!/bin/sh\nexec "{node}" "{probe}" "$@"\n',
+        encoding="utf-8",
+    )
+    if os.name != "nt":
+        npm.chmod(0o755)
+    wrapper = tmp_path / "root-environment-probe.ps1"
+    verify = str(PROJECT_ROOT / "scripts" / "verify.ps1").replace("'", "''")
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$probeNames = $env:VERIFY_PROBE_NAMES | ConvertFrom-Json\n"
+        "$probePrior = @{}\n"
+        "foreach ($key in $probeNames) { $probePrior[$key] = "
+        "[Environment]::GetEnvironmentVariable($key, 'Process') }\n"
+        "$probeFailed = $false\n"
+        "try {\n"
+        f"  . '{verify}' -LiveBootstrapDatabaseUrl $env:VERIFY_LIVE_BOOTSTRAP "
+        "-LiveMigrationDatabaseUrl $env:VERIFY_LIVE_MIGRATION "
+        "-LiveDatabaseUrl $env:VERIFY_LIVE_APPLICATION "
+        f"-LiveConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
+        "} catch { if ($_.Exception.Message -notmatch '41') "
+        "{ throw 'Unexpected verifier failure' }; "
+        "$probeFailed = $true }\n"
+        "foreach ($key in $probeNames) {\n"
+        "  if ([Environment]::GetEnvironmentVariable($key, 'Process') -cne $probePrior[$key]) "
+        "{ throw 'API environment not restored' }\n}\n"
+        f"if ($probeFailed -ne ${str(bool(exit_code)).lower()}) "
+        "{ throw 'Unexpected verifier outcome' }\n"
+        "Write-Output 'ROOT_API_ENVIRONMENT_RESTORED'\n",
+        encoding="utf-8",
+    )
+    environment = _verification_environment(fake_bin, database_url=API_DATABASE_URL)
+    for name in names[3:]:
+        environment.pop(name, None)
+        if with_demo_values:
+            environment[name] = "synthetic-demo-marker"
+    live_bootstrap, live_migration, live_application = _database_triple(LIVE_DATABASE_URL)
+    environment.update({
+        "VERIFY_PROBE_NAMES": json.dumps(names), "VERIFY_PROBE_LOG": str(log),
+        "VERIFY_PROBE_EXIT": str(exit_code), "VERIFY_PROJECT_ROOT": str(PROJECT_ROOT),
+        "VERIFY_LIVE_BOOTSTRAP": live_bootstrap, "VERIFY_LIVE_MIGRATION": live_migration,
+        "VERIFY_LIVE_APPLICATION": live_application,
+    })
+    result = subprocess.run(
+        [_powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
+        cwd=PROJECT_ROOT, env=environment, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ROOT_API_ENVIRONMENT_RESTORED" in result.stdout
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    assert [record["stage"] for record in records] == [
+        "lint", "vitest", "build", "mocked", "mock-next",
+    ]
+    assert all(all(record["absent"]) for record in records), records
+
+
 def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
     config = (PROJECT_ROOT / "apps" / "web" / "playwright.live.config.ts").read_text()
     journey = (
@@ -612,9 +1021,43 @@ def test_live_child_processes_use_allowlisted_runtime_environments() -> None:
     assert "...process.env" not in config
     assert "MIGRATION_DATABASE_URL" not in config
     assert "BOOTSTRAP_DATABASE_URL" not in config
+    api_environment, next_environment = map(set, _live_web_server_environment_keys())
+    assert {
+        "DATABASE_URL",
+        "APP_ENV",
+        "DEMO_SESSION_SECRET",
+        "DEMO_ORGANIZATION_ID",
+        "DEMO_ACTORS_JSON",
+    } <= api_environment
+    assert {
+        "DATABASE_URL",
+        "MIGRATION_DATABASE_URL",
+        "BOOTSTRAP_DATABASE_URL",
+        "DEMO_SESSION_SECRET",
+        "DEMO_ACTORS_JSON",
+    }.isdisjoint(next_environment)
     assert "current_user" in journey
     assert "session_user" in journey
     assert "OJCC_MIGRATION_USERNAME" in journey
+
+
+def test_live_child_processes_receive_isolated_effective_environments(
+    tmp_path: Path,
+) -> None:
+    """Production break: Playwright merges the parent environment into both children."""
+    result = _probe_live_child_environments(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    environments = json.loads(result.stdout)
+
+    assert set(environments) == {"api", "next"}
+    assert all(
+        type(value) is bool
+        for environment in environments.values()
+        for value in environment.values()
+    )
+    assert all(environments["api"].values()), environments["api"]
+    assert all(environments["next"].values()), environments["next"]
 
 
 def test_ci_provisions_uuid_databases_and_distinct_roles_without_cache_regression() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import socket
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -13,8 +14,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
-from app.auth.dependencies import current_actor
-from app.auth.models import CurrentActor
+from app.auth.authority import AmbiguousAuthorityError
+from app.auth.demo_actors import DemoActorSelection
+from app.auth.dependencies import current_actor, resolve_patient_actor
+from app.auth.models import CurrentActor, ResolvedAuthority
 from app.auth.service import DemoSessionService, SqlAlchemyActorRepository
 from app.config import settings
 from app.db.models import (
@@ -30,6 +33,18 @@ from app.db.models import (
     User,
 )
 from app.domain.enums import CheckInStatus, SubmissionSource, UserRole
+
+ASYNC_CHECKED_AT = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
+
+
+class AsyncSessionBridge:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self.execute_count = 0
+
+    async def execute(self, statement: object) -> object:
+        self.execute_count += 1
+        return self._session.execute(statement)  # type: ignore[arg-type]
 
 
 def _database_is_reachable(database_url: str) -> bool:
@@ -77,6 +92,88 @@ def _identity_fixture(session: Session) -> tuple[Organization, User, SyntheticPa
     return organization, user, patient
 
 
+def _async_patient_authority_fixture(
+    session: Session,
+    *,
+    overlapping_roles: bool,
+) -> tuple[Organization, User, SyntheticPatient]:
+    organization, user, patient = _identity_fixture(session)
+    roles = [
+        RoleAssignment(
+            organization_id=organization.id,
+            user_id=user.id,
+            role=UserRole.SUPPORTING_ACTOR,
+            granted_at=ASYNC_CHECKED_AT - timedelta(hours=1),
+        )
+    ]
+    if overlapping_roles:
+        roles.append(
+            RoleAssignment(
+                organization_id=organization.id,
+                user_id=user.id,
+                role=UserRole.SUPPORTING_ACTOR,
+                granted_at=ASYNC_CHECKED_AT - timedelta(hours=2),
+                revoked_at=ASYNC_CHECKED_AT + timedelta(hours=1),
+            )
+        )
+    session.add_all(roles)
+    session.add(
+        PatientIdentityLink(
+            organization_id=organization.id,
+            user_id=user.id,
+            patient_id=patient.id,
+            linked_at=ASYNC_CHECKED_AT - timedelta(hours=1),
+        )
+    )
+    session.flush()
+    return organization, user, patient
+
+
+def test_async_wrapper_matches_valid_patient_authority(db_session: Session) -> None:
+    organization, user, patient = _async_patient_authority_fixture(
+        db_session,
+        overlapping_roles=False,
+    )
+    bridge = AsyncSessionBridge(db_session)
+
+    actor = asyncio.run(
+        resolve_patient_actor(
+            bridge,  # type: ignore[arg-type]
+            organization_id=organization.id,
+            user_id=user.id,
+            at=ASYNC_CHECKED_AT,
+        )
+    )
+
+    assert actor == CurrentActor(
+        user_id=user.id,
+        organization_id=organization.id,
+        role=UserRole.SUPPORTING_ACTOR,
+        patient_id=patient.id,
+    )
+    assert bridge.execute_count == 1
+
+
+def test_async_wrapper_matches_ambiguous_patient_authority(db_session: Session) -> None:
+    organization, user, _ = _async_patient_authority_fixture(
+        db_session,
+        overlapping_roles=True,
+    )
+    bridge = AsyncSessionBridge(db_session)
+
+    with pytest.raises(AmbiguousAuthorityError):
+        asyncio.run(
+            resolve_patient_actor(
+                bridge,  # type: ignore[arg-type]
+                organization_id=organization.id,
+                user_id=user.id,
+                at=ASYNC_CHECKED_AT,
+            )
+        )
+
+    assert bridge.execute_count == 1
+
+
 def test_patient_identity_link_resolves_separate_patient_actor_in_its_organization(
     db_session: Session,
 ) -> None:
@@ -98,13 +195,15 @@ def test_patient_identity_link_resolves_separate_patient_actor_in_its_organizati
     db_session.add_all([link, role])
     db_session.flush()
 
-    actor = SqlAlchemyActorRepository(db_session).find_active_actor(
+    authority = SqlAlchemyActorRepository(db_session).resolve_authority(
         organization_id=organization.id,
+        user_id=user.id,
         role=UserRole.SUPPORTING_ACTOR,
         at=now,
     )
 
-    assert actor is not None
+    assert authority is not None
+    actor = authority.actor
     assert actor.user_id != actor.patient_id
     assert actor.patient_id == patient.id
     assert actor.organization_id == link.organization_id
@@ -122,8 +221,9 @@ def test_patient_identity_link_resolves_separate_patient_actor_in_its_organizati
     )
     db_session.flush()
     assert (
-        SqlAlchemyActorRepository(db_session).find_active_actor(
+        SqlAlchemyActorRepository(db_session).resolve_authority(
             organization_id=other_organization.id,
+            user_id=user.id,
             role=UserRole.SUPPORTING_ACTOR,
             at=now,
         )
@@ -155,13 +255,14 @@ def test_revoked_role_or_patient_link_cannot_create_patient_actor(db_session: Se
     )
     db_session.flush()
 
-    actor = SqlAlchemyActorRepository(db_session).find_active_actor(
+    authority = SqlAlchemyActorRepository(db_session).resolve_authority(
         organization_id=organization.id,
+        user_id=user.id,
         role=UserRole.SUPPORTING_ACTOR,
         at=now,
     )
 
-    assert actor is None
+    assert authority is None
 
 
 @pytest.mark.parametrize("revoked_record", ["role", "link"])
@@ -195,9 +296,21 @@ def test_request_revalidates_revoked_patient_authority_after_token_issuance(
         actor_repository=None,
         secret="test-only-signing-secret",
         ttl_minutes=30,
-        organization_id=None,
+        organization_id=organization.id,
+        demo_actors={
+            UserRole.SUPPORTING_ACTOR: DemoActorSelection(
+                user_id=user.id,
+                patient_id=patient.id,
+            )
+        },
     )
-    token = service.create_token(actor)
+    token = service.create_token(
+        ResolvedAuthority(
+            actor=actor,
+            role_assignment_id=role.id,
+            patient_identity_link_id=link.id,
+        )
+    )
     request = Request(
         {"type": "http", "headers": [(b"cookie", f"ojcc_session={token}".encode())]}
     )
