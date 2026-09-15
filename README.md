@@ -196,3 +196,20 @@ records. A failure requires an explicit, audited reconciliation before applicati
 ## Product design
 
 The approved design is available at [docs/product-design.md](docs/product-design.md).
+
+## License and permitted use
+
+Copyright © 2026 Vision Venture AI. All rights reserved.
+
+This repository is **source-available, not open source**. Individuals may download, run locally,
+and privately modify the project solely for personal evaluation, self-directed education, or
+noncommercial personal research. Organizational, commercial, production, clinical, hosted-service,
+and redistribution uses are not permitted without a separate written license from Vision Venture
+AI. Third-party components remain subject to their own licenses.
+
+See the [Vision Venture AI Individual Evaluation License 1.0](LICENSE.md) for the complete terms.
+
+## Contributions
+
+Issues and feedback are welcome. Pull requests and other code contributions are not accepted unless
+Vision Venture AI first agrees to separate written contribution terms.
