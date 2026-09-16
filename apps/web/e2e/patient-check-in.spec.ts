@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("submits a first synthetic check-in and then corrects it", async ({ page }) => {
+test("submits a first synthetic check-in, corrects it, and starts an independent check-in", async ({ page }) => {
   const firstSubmissionId = "45c18270-f6c2-4e6a-81d6-a54535af9fd7";
+  const correctionSubmissionId = "f5658c1c-3a98-43d1-9925-4c9d278713e6";
+  const nextSubmissionId = "b2d692d8-fbdb-4c81-96b7-bc6956e3eb43";
   let activeSubmissionId: string | null = null;
   let submissionAttempt = 0;
   await page.route("**/api/v1/demo/session/supporting_actor", (route) =>
@@ -62,6 +64,26 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
       });
       return;
     }
+    if (submissionAttempt === 4) {
+      expect(payload.supersedes_submission_id).toBeUndefined();
+      expect(payload.answers).toEqual([
+        { link_id: "nausea_change", value: "better" },
+        { link_id: "transportation", value: "yes" },
+      ]);
+      activeSubmissionId = nextSubmissionId;
+      await route.fulfill({
+        contentType: "application/json",
+        status: 201,
+        body: JSON.stringify({
+          id: nextSubmissionId,
+          status: "submitted",
+          questionnaire_version: "breast-active-v1",
+          submitted_at: "2026-08-18T12:00:00+00:00",
+          supersedes_submission_id: null,
+        }),
+      });
+      return;
+    }
     expect(payload.supersedes_submission_id).toBe(firstSubmissionId);
     if (submissionAttempt === 2) {
       await route.fulfill({
@@ -77,11 +99,12 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
       return;
     }
     expect(payload.answers[0].value).toBe("same");
+    activeSubmissionId = correctionSubmissionId;
     await route.fulfill({
       contentType: "application/json",
       status: 201,
       body: JSON.stringify({
-        id: "f5658c1c-3a98-43d1-9925-4c9d278713e6",
+        id: correctionSubmissionId,
         status: "submitted",
         questionnaire_version: "breast-active-v1",
         submitted_at: "2026-08-17T12:00:00+00:00",
@@ -103,8 +126,10 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
   await page.getByRole("button", { name: "Submit check-in" }).click();
   await expect(page.getByRole("heading", { name: /synthetic check-in was saved/i })).toBeVisible();
 
-  await page.reload();
-
+  await page.getByRole("button", { name: "Start another check-in" }).click();
+  await expect(page.getByRole("button", { name: "New check-in", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "It is worse" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Correct latest submission" }).click();
   await page.getByRole("button", { name: "It is worse" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "No" }).click();
@@ -120,4 +145,13 @@ test("submits a first synthetic check-in and then corrects it", async ({ page })
   await page.getByRole("button", { name: "Submit correction" }).click();
 
   await expect(page.getByRole("heading", { name: /synthetic correction was saved/i })).toBeVisible();
+  await page.getByRole("button", { name: "Start another check-in" }).click();
+  await page.getByRole("button", { name: "New check-in", exact: true }).click();
+  await page.getByRole("button", { name: "It is better" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Yes", exact: true }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Submit check-in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /synthetic check-in was saved/i })).toBeVisible();
+  expect(submissionAttempt).toBe(4);
 });

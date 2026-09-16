@@ -20,6 +20,18 @@ The API health endpoint is available at `GET /health` and returns `{"status":"ok
 
 `/demo/patient` uses a same-origin `/api` rewrite, creates a short-lived synthetic demo session, then loads the current check-in definition before allowing submission. It requires the deterministic synthetic supporting actor and active check-in definition created by the reset workflow; without that seed, the page shows the safe demo-unavailable state rather than accepting an unauthenticated submission. Configure `OJCC_API_ORIGIN` only for the server-side rewrite target; browser requests remain same-origin and credentialed.
 
+The seeded history contains two independent check-ins and one correction. Choose **New check-in**
+to record another point in the synthetic journey, or **Correct latest submission** to correct the
+current submission while preserving its predecessor. Drafts stay separate for each questionnaire
+version, intent, and correction target. An older browser draft requires explicit recovery and
+review. After saving, journey history refreshes without leaving the success screen; **Start another
+check-in** reloads the current definition and correction target.
+
+The navigator workspace separates the selected need's source evidence and correction history
+from the episode's latest two independent check-ins. A later check-in does not replace a need's
+evidence, automatically create a need or task, or authorize closure. The existing proposal,
+approval, task, patient follow-up, and navigator outcome rules still govern the transportation demo.
+
 `DEMO_ACTORS_JSON` is a server-only roster of the intended synthetic users. Generate it with the
 connection-free seed CLI mode shown below; do not expose the roster, session secret, or database
 URLs to the Next.js child process.

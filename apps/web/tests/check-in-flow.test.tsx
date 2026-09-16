@@ -157,6 +157,7 @@ test("restores an answer draft from this browser", () => {
 
   render(<CheckInFlow definition={definition} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
 
+  fireEvent.click(screen.getByRole("button", { name: "Recover saved draft" }));
   expect(screen.getByRole("button", { name: "It is worse" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("textbox", { name: /add context/i })).toHaveValue("Saved context");
 });
@@ -174,6 +175,7 @@ test("submits a correction against the canonical active submission", async () =>
     />,
   );
 
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
   fireEvent.click(screen.getByRole("button", { name: "It is better" }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(screen.getByRole("button", { name: "Submit correction" }));
@@ -185,4 +187,94 @@ test("submits a correction against the canonical active submission", async () =>
       }),
     );
   });
+});
+
+test("starts an independent check-in despite existing history", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  render(<CheckInFlow definition={{ ...definition, activeSubmissionId: "old-root" }} onSubmit={onSubmit} />);
+  expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "New check-in" }));
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+  await screen.findByRole("heading", { name: "Your synthetic check-in was saved" });
+  expect(onSubmit.mock.calls[0][0].supersedes_submission_id).toBeUndefined();
+});
+
+test("keeps new and correction drafts separate when switching intent", () => {
+  render(<CheckInFlow definition={{ ...definition, activeSubmissionId: "old-root" }} onSubmit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "New check-in" }));
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
+  expect(screen.getByRole("button", { name: "It is worse" })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(screen.getByRole("button", { name: "It is better" }));
+  fireEvent.click(screen.getByRole("button", { name: "New check-in" }));
+  expect(screen.getByRole("button", { name: "It is worse" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
+  expect(screen.getByRole("button", { name: "It is better" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("does not move a draft to a different correction target or questionnaire version", () => {
+  const { unmount } = render(<CheckInFlow definition={{ ...definition, activeSubmissionId: "old-root" }} onSubmit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  unmount();
+  const next = render(<CheckInFlow definition={{ ...definition, activeSubmissionId: "next-root" }} onSubmit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  next.unmount();
+  render(<CheckInFlow definition={{ ...definition, questionnaireVersion: "v2", activeSubmissionId: "old-root" }} onSubmit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Correct latest submission" }));
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+});
+
+test("does not offer resubmission when clearing a saved browser draft fails", async () => {
+  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const onRestart = vi.fn().mockResolvedValue(undefined);
+  render(<CheckInFlow definition={definition} onSubmit={onSubmit} onRestart={onRestart} />);
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const remove = vi.spyOn(window.localStorage, "removeItem").mockImplementation(() => { throw new Error("storage blocked"); });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+    expect(await screen.findByRole("heading", { name: "Your synthetic check-in was saved" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Submit check-in" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/draft/i);
+    expect(screen.getByRole("button", { name: "Start another check-in" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Start another check-in" }));
+    expect(onRestart).not.toHaveBeenCalled();
+    remove.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Retry clearing saved draft" }));
+    expect(screen.getByRole("button", { name: "Start another check-in" })).toBeEnabled();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  } finally { remove.mockRestore(); }
+});
+
+test("preserves an incompatible legacy draft without silently loading it", () => {
+  const key = `ojcc-check-in:${definition.id}`;
+  const saved = JSON.stringify({ answers: { retired_question: "yes" }, freeText: "Old draft" });
+  window.localStorage.setItem(key, saved);
+  render(<CheckInFlow definition={definition} onSubmit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Recover saved draft" }));
+  expect(screen.getByRole("alert")).toHaveTextContent(/does not match/i);
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  expect(window.localStorage.getItem(key)).toBe(saved);
+});
+
+test("blocks repeated submission and intent changes while saving", async () => {
+  let finish!: () => void;
+  const onSubmit = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  render(<CheckInFlow definition={{ ...definition, activeSubmissionId: "old-root" }} onSubmit={onSubmit} />);
+  fireEvent.click(screen.getByRole("button", { name: "New check-in" }));
+  fireEvent.click(screen.getByRole("button", { name: "It is worse" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit check-in" }));
+  const saving = screen.getByRole("button", { name: "Saving..." });
+  expect(saving).toBeDisabled();
+  fireEvent.click(saving);
+  expect(screen.getByRole("button", { name: "Edit answers" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Correct latest submission" })).toBeDisabled();
+  finish();
+  await screen.findByRole("heading", { name: "Your synthetic check-in was saved" });
+  expect(onSubmit).toHaveBeenCalledTimes(1);
 });

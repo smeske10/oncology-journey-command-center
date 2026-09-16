@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { ApiError } from "../../lib/api-client";
@@ -25,28 +25,36 @@ export type CheckInSubmissionInput = components["schemas"]["CheckInSubmissionCre
 
 type FlowStage = "question" | "review" | "submitting" | "success";
 type Draft = { answers: Record<string, string>; freeText: string };
+type Intent = "new" | "correction";
 
 type CheckInFlowProps = {
   definition: PatientCheckInDefinition;
   onConfigurationError?: () => Promise<void>;
+  onRestart?: () => Promise<void>;
   onSubmit: (submission: CheckInSubmissionInput) => Promise<unknown>;
 };
 
-export function CheckInFlow({ definition, onConfigurationError, onSubmit }: CheckInFlowProps) {
+export function CheckInFlow({ definition, onConfigurationError, onRestart, onSubmit }: CheckInFlowProps) {
   const [stage, setStage] = useState<FlowStage>("question");
-  const draftKey = `ojcc-check-in:${definition.id}`;
-  const [draft, setDraft] = useState<Draft>(() => readDraft(draftKey));
+  const [intent, setIntent] = useState<Intent | null>(definition.activeSubmissionId ? null : "new");
+  const draftKey = scopedDraftKey(definition, intent ?? "new");
+  const legacyDraftKey = `ojcc-check-in:${definition.id}`;
+  const [legacyDraft, setLegacyDraft] = useState(() => readDraft(legacyDraftKey));
+  const [draft, setDraft] = useState<Draft>(() => definition.activeSubmissionId ? emptyDraft() : readDraft(draftKey));
   const [questionIndex, setQuestionIndex] = useState(() =>
-    firstUnansweredIndex(definition.questions, readDraft(draftKey).answers),
+    definition.activeSubmissionId ? 0 : firstUnansweredIndex(definition.questions, readDraft(draftKey).answers),
   );
   const [error, setError] = useState("");
+  const [restarting, setRestarting] = useState(false);
+  const [savedDraftPending, setSavedDraftPending] = useState(false);
+  const saving = useRef(false);
   const { answers, freeText } = draft;
   const question = definition.questions[questionIndex];
   const selectedAnswer = answers[question?.linkId];
 
   useEffect(() => {
-    window.localStorage.setItem(draftKey, JSON.stringify(draft));
-  }, [draft, draftKey]);
+    if (intent && stage !== "success") window.localStorage.setItem(draftKey, JSON.stringify(draft));
+  }, [draft, draftKey, intent, stage]);
 
   const submission = useMemo<CheckInSubmissionInput>(
     () => ({
@@ -56,20 +64,22 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
         return value ? [{ link_id: item.linkId, value }] : [];
       }),
       free_text: freeText.trim() || undefined,
-      supersedes_submission_id: definition.activeSubmissionId ?? undefined,
+      ...(intent === "correction" ? { supersedes_submission_id: definition.activeSubmissionId ?? undefined } : {}),
     }),
-    [answers, definition, freeText],
+    [answers, definition, freeText, intent],
   );
 
   if (!question) return <p role="alert">This synthetic check-in is not available right now.</p>;
 
   async function submit() {
+    if (saving.current || !intent) return;
+    saving.current = true;
     setError("");
     setStage("submitting");
     try {
       await onSubmit(submission);
-      window.localStorage.removeItem(draftKey);
       setStage("success");
+      clearSavedDraft();
     } catch (submissionError: unknown) {
       if (submissionError instanceof ApiError && submissionError.kind === "correction") {
         setError(submissionError.message);
@@ -83,6 +93,57 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
         setError("We couldn't save your check-in. Your review is still here—please try again.");
         setStage("review");
       }
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  function clearSavedDraft() {
+    try {
+      window.localStorage.removeItem(draftKey);
+      setSavedDraftPending(false);
+      setError("");
+    } catch {
+      setSavedDraftPending(true);
+      setError("Your check-in was saved, but its browser draft could not be cleared. Clear the draft before starting another check-in.");
+    }
+  }
+
+  function chooseIntent(nextIntent: Intent) {
+    if (saving.current) return;
+    const nextDraft = readDraft(scopedDraftKey(definition, nextIntent));
+    setIntent(nextIntent);
+    setDraft(nextDraft);
+    setQuestionIndex(firstUnansweredIndex(definition.questions, nextDraft.answers));
+    setStage("question");
+    setError("");
+  }
+
+  function recoverLegacyDraft() {
+    const compatible = Object.entries(legacyDraft.answers).every(([linkId, value]) =>
+      definition.questions.some((item) => item.linkId === linkId && item.options.some((option) => option.value === value)),
+    );
+    if (!compatible) {
+      setError("This saved draft does not match the current questions. It remains saved in this browser.");
+      return;
+    }
+    window.localStorage.setItem(draftKey, JSON.stringify(legacyDraft));
+    setDraft(legacyDraft);
+    setQuestionIndex(firstUnansweredIndex(definition.questions, legacyDraft.answers));
+    window.localStorage.removeItem(legacyDraftKey);
+    setLegacyDraft(emptyDraft());
+  }
+
+  async function restart() {
+    if (restarting || savedDraftPending) return;
+    setRestarting(true);
+    setError("");
+    try {
+      await onRestart?.();
+    } catch {
+      setError("Your check-in was saved. We couldn't load the next check-in. Please try again.");
+    } finally {
+      setRestarting(false);
     }
   }
 
@@ -101,7 +162,8 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
         <p style={eyebrowStyle}>ONCOLOGY JOURNEY</p>
         <h1 style={titleStyle}>{definition.title}</h1>
         <p aria-live="polite" style={{ marginTop: 0 }}>
-          {stage === "question"
+          {!intent ? "Choose a new check-in or a correction."
+            : stage === "question"
             ? `Question ${questionIndex + 1} of ${definition.questions.length}`
             : "Your progress is saved in this browser."}
         </p>
@@ -121,7 +183,22 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
         emergency service. This demo does not provide medical advice.
       </aside>
 
-      {stage === "question" && (
+      {definition.activeSubmissionId && stage !== "success" && (
+        <section aria-label="Check-in intent">
+          <p>A new check-in records another point in your journey. A correction updates an earlier submission and preserves its history.</p>
+          <button aria-pressed={intent === "new"} disabled={stage === "submitting"} onClick={() => chooseIntent("new")} style={secondaryButtonStyle} type="button">New check-in</button>
+          <button aria-pressed={intent === "correction"} disabled={stage === "submitting"} onClick={() => chooseIntent("correction")} style={secondaryButtonStyle} type="button">Correct latest submission</button>
+        </section>
+      )}
+
+      {intent && stage === "question" && (Object.keys(legacyDraft.answers).length > 0 || legacyDraft.freeText) && !Object.keys(answers).length && !freeText && (
+        <aside>
+          <p>An older saved draft is available. Recover it into this {intent === "new" ? "new check-in" : "correction"} and review its answers before submitting.</p>
+          <button onClick={recoverLegacyDraft} style={secondaryButtonStyle} type="button">Recover saved draft</button>
+        </aside>
+      )}
+
+      {intent && stage === "question" && (
         <section aria-labelledby="question-heading">
           {error && <p role="alert">{error}</p>}
           <h2 id="question-heading">{question.label}</h2>
@@ -178,13 +255,13 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
           ))}
           {freeText && <p><strong>Your context:</strong> {freeText}</p>}
           {error && <p role="alert">{error}</p>}
-          <button onClick={() => { setQuestionIndex(0); setStage("question"); }} style={secondaryButtonStyle} type="button">
+          <button disabled={stage === "submitting"} onClick={() => { setQuestionIndex(0); setStage("question"); }} style={secondaryButtonStyle} type="button">
             Edit answers
           </button>
           <button disabled={stage === "submitting"} onClick={submit} style={primaryButtonStyle} type="button">
             {stage === "submitting"
               ? "Saving..."
-              : definition.activeSubmissionId
+              : intent === "correction"
                 ? "Submit correction"
                 : "Submit check-in"}
           </button>
@@ -194,15 +271,24 @@ export function CheckInFlow({ definition, onConfigurationError, onSubmit }: Chec
       {stage === "success" && (
         <section aria-labelledby="success-heading">
           <h2 id="success-heading">
-            {definition.activeSubmissionId
+            {intent === "correction"
               ? "Your synthetic correction was saved"
               : "Your synthetic check-in was saved"}
           </h2>
           <p>Thank you. In this demo, any next step is reviewed by a human navigator.</p>
+          {error && <p role="alert">{error}</p>}
+          {savedDraftPending && <button onClick={clearSavedDraft} style={secondaryButtonStyle} type="button">Retry clearing saved draft</button>}
+          {onRestart && <button disabled={restarting || savedDraftPending} onClick={() => void restart()} style={primaryButtonStyle} type="button">{restarting ? "Loading..." : "Start another check-in"}</button>}
         </section>
       )}
     </section>
   );
+}
+
+function emptyDraft(): Draft { return { answers: {}, freeText: "" }; }
+
+function scopedDraftKey(definition: PatientCheckInDefinition, intent: Intent): string {
+  return `ojcc-check-in:${definition.id}:${encodeURIComponent(definition.questionnaireVersion)}:${intent}:${intent === "correction" ? definition.activeSubmissionId : "new"}`;
 }
 
 function readDraft(draftKey: string): Draft {
@@ -211,9 +297,9 @@ function readDraft(draftKey: string): Draft {
   if (!savedDraft) return { answers: {}, freeText: "" };
   try {
     const draft = JSON.parse(savedDraft) as Partial<Draft>;
-    return { answers: draft.answers ?? {}, freeText: draft.freeText ?? "" };
+    if (!draft || typeof draft !== "object" || typeof draft.freeText !== "string" || !draft.answers || typeof draft.answers !== "object" || Array.isArray(draft.answers) || Object.values(draft.answers).some((value) => typeof value !== "string")) return emptyDraft();
+    return { answers: draft.answers, freeText: draft.freeText };
   } catch {
-    window.localStorage.removeItem(draftKey);
     return { answers: {}, freeText: "" };
   }
 }

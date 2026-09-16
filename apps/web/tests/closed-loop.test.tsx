@@ -164,6 +164,101 @@ beforeEach(() => {
   api.getNavigatorNeedWorkspace.mockResolvedValue(workspace);
 });
 
+test("separates active selected source-chain evidence and its immediate correction from later encounters", () => {
+  const historical = structuredClone(workspace);
+  historical.evidence[0].source_submission_id = "active-source-chain-v3";
+  historical.comparisons.correction.previous_submission_id = "immutable-need-source-v2";
+  historical.comparisons.correction.current_submission_id = "active-source-chain-v3";
+  historical.comparisons.correction.deltas = [{ field_identifier: "transportation", previous_present: true, previous_value: "no", current_present: true, current_value: "yes" }];
+  historical.comparisons.between_check_ins.previous_submission_id = "later-check-in-1";
+  historical.comparisons.between_check_ins.current_submission_id = "later-check-in-2";
+  historical.comparisons.between_check_ins.deltas = [{ field_identifier: "pain_change", previous_present: true, previous_value: "better", current_present: true, current_value: "same" }];
+  render(<NeedWorkspace onRefresh={vi.fn().mockResolvedValue(undefined)} workspace={historical} />);
+
+  const exact = screen.getByRole("region", { name: "Exact evidence" });
+  expect(within(exact).getByText("Need synthetic transportation support?: yes")).toBeVisible();
+  expect(within(exact).getByText(/source submission: active-source-chain-v3/i)).toBeVisible();
+  expect(exact).toHaveTextContent(/active submission in the selected need's source chain/i);
+  expect(exact).not.toHaveTextContent("immutable-need-source-v2");
+  const independent = screen.getByRole("region", { name: "Latest independent check-ins" });
+  expect(independent).toHaveTextContent(/latest two independent check-ins in this care episode/i);
+  expect(independent).toHaveTextContent(/later correction does not create a new encounter/i);
+  expect(independent).toHaveTextContent("Previous submission: later-check-in-1");
+  expect(independent).toHaveTextContent("Current submission: later-check-in-2");
+  expect(independent).not.toHaveTextContent("active-source-chain-v3");
+  expect(within(independent).getByRole("row", { name: "pain_change better same" })).toBeVisible();
+  expect(within(independent).queryByRole("row", { name: /transportation/ })).not.toBeInTheDocument();
+  const correction = screen.getByRole("region", { name: "Selected need correction" });
+  expect(correction).toHaveTextContent(/active correction in the selected need's source chain.*immediate predecessor/i);
+  expect(correction).toHaveTextContent("Previous submission: immutable-need-source-v2");
+  expect(correction).toHaveTextContent("Current submission: active-source-chain-v3");
+  expect(within(correction).getByRole("row", { name: "transportation no yes" })).toBeVisible();
+  expect(within(correction).queryByRole("row", { name: /pain_change/ })).not.toBeInTheDocument();
+});
+
+test("distinguishes absent fields from explicit null, false, and zero in both comparison directions", () => {
+  const changed = structuredClone(workspace);
+  changed.comparisons.between_check_ins.deltas = [
+    { field_identifier: "null_added", previous_present: false, previous_value: null, current_present: true, current_value: null },
+    { field_identifier: "false_added", previous_present: false, previous_value: null, current_present: true, current_value: false },
+    { field_identifier: "zero_added", previous_present: false, previous_value: null, current_present: true, current_value: 0 },
+    { field_identifier: "null_removed", previous_present: true, previous_value: null, current_present: false, current_value: null },
+    { field_identifier: "false_removed", previous_present: true, previous_value: false, current_present: false, current_value: null },
+    { field_identifier: "zero_removed", previous_present: true, previous_value: 0, current_present: false, current_value: null },
+  ];
+  render(<NeedWorkspace onRefresh={vi.fn().mockResolvedValue(undefined)} workspace={changed} />);
+
+  const comparison = screen.getByRole("region", { name: "Latest independent check-ins" });
+  const expected = [
+    ["null_added", "Missing field", "Explicit null"],
+    ["false_added", "Missing field", "false"],
+    ["zero_added", "Missing field", "0"],
+    ["null_removed", "Explicit null", "Missing field"],
+    ["false_removed", "false", "Missing field"],
+    ["zero_removed", "0", "Missing field"],
+  ];
+  for (const [field, previous, current] of expected) {
+    const row = within(comparison).getByRole("row", { name: `${field} ${previous} ${current}` });
+    expect(within(row).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([previous, current]);
+  }
+});
+
+test("shows an available empty comparison as no field differences without implying a clinical outcome", () => {
+  const unchanged = structuredClone(workspace);
+  unchanged.comparisons.between_check_ins.deltas = [];
+  render(<NeedWorkspace onRefresh={vi.fn().mockResolvedValue(undefined)} workspace={unchanged} />);
+
+  const comparison = screen.getByRole("region", { name: "Latest independent check-ins" });
+  expect(within(comparison).getByText(/no field differences between these submissions/i)).toBeVisible();
+  expect(within(comparison).queryByRole("table")).not.toBeInTheDocument();
+  expect(comparison).not.toHaveTextContent(/improved|worsened|resolved/i);
+});
+
+test("explains insufficient independent history and the absence of a selected need correction", () => {
+  const insufficient = structuredClone(workspace);
+  insufficient.comparisons.between_check_ins = { label: "Between independent check-ins.", status: "insufficient_history" };
+  insufficient.comparisons.correction = { label: "Correction to the same check-in.", status: "insufficient_history" };
+  render(<NeedWorkspace onRefresh={vi.fn().mockResolvedValue(undefined)} workspace={insufficient} />);
+
+  expect(screen.getByRole("region", { name: "Latest independent check-ins" })).toHaveTextContent(/fewer than two independent check-ins are available/i);
+  expect(screen.getByRole("region", { name: "Selected need correction" })).toHaveTextContent(/no complete source-and-correction pair is available for this selected need/i);
+  expect(screen.queryByText(/no field differences/i)).not.toBeInTheDocument();
+});
+
+test("explains incompatible definitions without displaying deltas as comparable evidence", () => {
+  const incompatible = structuredClone(workspace);
+  incompatible.comparisons.between_check_ins.status = "not_comparable";
+  incompatible.comparisons.correction.status = "not_comparable";
+  render(<NeedWorkspace onRefresh={vi.fn().mockResolvedValue(undefined)} workspace={incompatible} />);
+
+  for (const name of ["Latest independent check-ins", "Selected need correction"]) {
+    const comparison = screen.getByRole("region", { name });
+    expect(comparison).toHaveTextContent(/matching check-in definitions and versions are required/i);
+    expect(within(comparison).queryByRole("table")).not.toBeInTheDocument();
+    expect(comparison).not.toHaveTextContent(/no field differences/i);
+  }
+});
+
 test("reviews exact evidence, one explicit proposal, resources, and policy before approval", async () => {
   render(<NavigatorDemoPage />);
 

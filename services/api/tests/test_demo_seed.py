@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -405,6 +406,45 @@ def test_reset_rejects_shared_credentials_before_engine_creation() -> None:
     assert "distinct usernames" in (result.stdout + result.stderr).lower()
 
 
+def test_seed_adds_independent_history_and_preserves_the_original_correction_chain() -> None:
+    """Production break: the demo has only corrections instead of separate check-ins."""
+    inserts: list[tuple[str, dict[str, Any]]] = []
+
+    class RecordingSession:
+        def execute(self, statement: Any, parameters: dict[str, Any]) -> None:
+            inserts.append((str(statement), parameters))
+
+    seed_demo_script._seed_check_ins(
+        cast(Session, RecordingSession()),
+        DEMO_IDS,
+        DEMO_IDS | seed_demo_script.TIMES,
+    )
+    submissions = [
+        values for sql, values in inserts if sql.startswith("INSERT INTO check_in_submission ")
+    ]
+    assert len(submissions) == 3
+    earlier, original, correction = submissions
+    assert earlier["id"] == DEMO_IDS["submission_earlier"]
+    assert earlier["predecessor"] is None
+    assert earlier["id"] not in {original["id"], correction["id"]}
+    assert earlier["submitted_at"] == datetime(2026, 2, 2, 15, 0, tzinfo=UTC)
+    assert original["id"] == DEMO_IDS["submission_v1"]
+    assert original["predecessor"] is None
+    assert original["submitted_at"] == datetime(2026, 2, 3, 9, 0, tzinfo=UTC)
+    assert correction["id"] == DEMO_IDS["submission_v2"]
+    assert correction["predecessor"] == original["id"]
+    assert correction["submitted_at"] == datetime(2026, 2, 4, 9, 0, tzinfo=UTC)
+    assert all(values["definition"] == DEMO_IDS["definition_v2"] for values in submissions)
+    assert [
+        [(item["link_id"], item["value"]) for item in json.loads(values["answers"])["items"]]
+        for values in submissions
+    ] == [
+        [("pain_change", "better"), ("transportation", "no")],
+        [("pain_change", "worse"), ("transportation", "yes")],
+        [("pain_change", "same"), ("transportation", "yes")],
+    ]
+
+
 def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
     """Production break: rerunning the public seed duplicates or changes reconciled history."""
     with _disposable_database() as database_url:
@@ -423,7 +463,7 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
                 "audit_event": 4,
                 "care_episode": 1,
                 "check_in_definition": 2,
-                "check_in_submission": 2,
+                "check_in_submission": 3,
                 "episode_pathway_assignment": 2,
                 "follow_up_request": 0,
                 "follow_up_response": 0,
@@ -477,7 +517,7 @@ def test_seed_is_synthetic_complete_deterministic_and_idempotent() -> None:
                     "WHERE organization_id = :organization_id"
                 ),
                 {"organization_id": DEMO_IDS["organization"]},
-            ) == 1
+            ) == 2
             assert session.execute(
                 text(
                     "SELECT effective_state::text FROM effective_need_state "
