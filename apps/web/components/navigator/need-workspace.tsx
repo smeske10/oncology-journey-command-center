@@ -186,22 +186,21 @@ export function NeedWorkspace({ error, onRefresh, state, workspace }: NeedWorksp
         </p>
       )}
 
-      <section>
+      <section aria-label="Exact evidence">
         <h3>Exact evidence</h3>
-        <ul>{workspace.evidence.map((item) => <li key={`${item.field_identifier}:${item.source_submission_id}`}>{item.display_text}</li>)}</ul>
+        <p>When a source submission is available, this shows evidence from the active submission in the selected need&apos;s source chain. Otherwise, stored or inherited need evidence is shown. This chain may belong to an earlier check-in.</p>
+        <ul>{workspace.evidence.map((item) => (
+          <li key={`${item.field_identifier}:${item.source_submission_id}`}>
+            <span>{item.display_text}</span>
+            <p>{evidenceProvenance(item)}</p>
+          </li>
+        ))}</ul>
       </section>
 
       <section>
         <h3>Submission comparisons</h3>
-        {[workspace.comparisons.between_check_ins, workspace.comparisons.correction].map((comparison) => (
-          <div key={comparison.label}>
-            <h4>{comparison.label}</h4>
-            <p>{comparison.status.replaceAll("_", " ")}</p>
-            {comparison.deltas?.map((delta) => (
-              <p key={delta.field_identifier}>{delta.field_identifier}: {String(delta.previous_value)} → {String(delta.current_value)}</p>
-            ))}
-          </div>
-        ))}
+        <SubmissionComparison comparison={workspace.comparisons.between_check_ins} kind="independent" />
+        <SubmissionComparison comparison={workspace.comparisons.correction} kind="correction" />
       </section>
 
       <section>
@@ -304,6 +303,56 @@ export function NeedWorkspace({ error, onRefresh, state, workspace }: NeedWorksp
       <JourneyTimeline events={workspace.timeline} />
     </section>
   );
+}
+
+function SubmissionComparison({ comparison, kind }: {
+  comparison: NavigatorNeedWorkspaceResponse["comparisons"]["between_check_ins"];
+  kind: "independent" | "correction";
+}) {
+  const independent = kind === "independent";
+  const deltas = comparison.deltas ?? [];
+  return (
+    <section aria-label={independent ? "Latest independent check-ins" : "Selected need correction"} style={cardStyle}>
+      <h4>{comparison.label}</h4>
+      <p>{independent
+        ? "The latest two independent check-ins in this care episode, using each check-in's active correction. A later correction does not create a new encounter."
+        : "This compares the active correction in the selected need's source chain with its immediate predecessor. The active correction may be later than the need's original source submission and may refer to an older encounter than the latest independent check-ins."}</p>
+      {comparison.previous_submission_id && <p>Previous submission: {comparison.previous_submission_id}</p>}
+      {comparison.current_submission_id && <p>Current submission: {comparison.current_submission_id}</p>}
+      {comparison.status === "insufficient_history" && <p>{independent
+        ? "Fewer than two independent check-ins are available; an encounter comparison cannot be shown yet."
+        : "No complete source-and-correction pair is available for this selected need."}</p>}
+      {comparison.status === "not_comparable" && <p>These submissions cannot be compared: matching check-in definitions and versions are required, and a definition may be unavailable.</p>}
+      {comparison.status === "available" && (deltas.length
+        ? <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", textAlign: "left" }}>
+              <caption>Field differences between these submissions</caption>
+              <thead><tr><th scope="col">Field</th><th scope="col">Previous value</th><th scope="col">Current value</th></tr></thead>
+              <tbody>{deltas.map((delta) => (
+                <tr key={delta.field_identifier}>
+                  <th scope="row">{delta.field_identifier}</th>
+                  <td>{comparisonValue(delta.previous_present, delta.previous_value)}</td>
+                  <td>{comparisonValue(delta.current_present, delta.current_value)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        : <p>No field differences between these submissions.</p>)}
+    </section>
+  );
+}
+
+function comparisonValue(present: boolean, value: unknown): string {
+  if (!present) return "Missing field";
+  if (value === null) return "Explicit null";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function evidenceProvenance(item: NavigatorNeedWorkspaceResponse["evidence"][number]): string {
+  const source = item.source_submission_id ? `Source submission: ${item.source_submission_id}` : "Source submission unavailable";
+  if (item.provenance_kind === "inherited_history") return `Inherited history. ${source}`;
+  if (item.provenance_kind === "stored_need_evidence") return `Stored need evidence. ${source}`;
+  return source;
 }
 
 function awareIsoFromLocal(value: string): string | null {

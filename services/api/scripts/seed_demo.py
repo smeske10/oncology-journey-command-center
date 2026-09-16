@@ -50,6 +50,7 @@ DEMO_IDS = {
         "pathway_assignment_v2",
         "definition_v1",
         "definition_v2",
+        "submission_earlier",
         "submission_v1",
         "submission_v2",
         "closed_need",
@@ -134,6 +135,7 @@ def _at(value: str) -> datetime:
 TIMES = {
     "seed": SEED_TIME,
     "pathway_change": _at("2026-02-02T12:00:00+00:00"),
+    "submission_earlier_at": _at("2026-02-02T15:00:00+00:00"),
     "submission_v1_at": _at("2026-02-03T09:00:00+00:00"),
     "submission_v2_at": _at("2026-02-04T09:00:00+00:00"),
     "need_closed": _at("2026-02-05T10:00:00+00:00"),
@@ -475,6 +477,14 @@ def _seed_check_ins(
 
     current_questionnaire = questionnaires[2]
     submissions = (
+        (
+            "submission_earlier",
+            None,
+            TIMES["submission_earlier_at"],
+            "better",
+            "no",
+            "Synthetic earlier independent check-in for comparison.",
+        ),
         (
             "submission_v1",
             None,

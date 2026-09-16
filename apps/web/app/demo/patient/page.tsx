@@ -28,6 +28,7 @@ export default function PatientDemoPage() {
   const [timeline, setTimeline] = useState<PatientTimelineResponse["events"]>([]);
   const [error, setError] = useState("");
   const [supportError, setSupportError] = useState("");
+  const [checkInSession, setCheckInSession] = useState(0);
 
   const loadFollowUpsAndTimeline = useCallback(async () => {
     try {
@@ -68,16 +69,25 @@ export default function PatientDemoPage() {
     <main style={mainStyle}>
       <CheckInFlow
         definition={definition}
-        key={`${definition.id}:${definition.questionnaireVersion}:${definition.activeSubmissionId ?? "first"}`}
+        key={`${definition.id}:${definition.questionnaireVersion}:${definition.activeSubmissionId ?? "first"}:${checkInSession}`}
         onConfigurationError={loadCurrentDefinition}
-        onSubmit={(payload) => submitCheckIn(definition.id, payload)}
+        onRestart={async () => {
+          const response = await bootstrapPatientCheckIn();
+          setDefinition(toPresentationDefinition(response));
+          setCheckInSession((current) => current + 1);
+        }}
+        onSubmit={async (payload) => {
+          const response = await submitCheckIn(definition.id, payload);
+          void loadFollowUpsAndTimeline();
+          return response;
+        }}
       />
       <FollowUpPanel
         items={followUps}
         onRefresh={loadFollowUpsAndTimeline}
         onRespond={respondToFollowUp}
       />
-      {supportError && <p role="alert">{supportError}</p>}
+      {supportError && <div><p role="alert">{supportError}</p><button onClick={() => void loadFollowUpsAndTimeline()} type="button">Retry journey history</button></div>}
       <JourneyTimeline events={timeline} />
     </main>
   );

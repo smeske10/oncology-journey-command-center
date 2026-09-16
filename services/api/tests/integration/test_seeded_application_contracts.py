@@ -44,11 +44,25 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                 .order_by(CheckInSubmission.submitted_at)
             ).all()
             assert [submission.id for submission in seeded] == [
+                DEMO_IDS["submission_earlier"],
                 DEMO_IDS["submission_v1"],
                 DEMO_IDS["submission_v2"],
             ]
-            assert seeded[1].supersedes_submission_id == seeded[0].id
-            assert seeded[1].check_in_definition_id == seeded[0].check_in_definition_id
+            assert seeded[0].supersedes_submission_id is None
+            assert seeded[1].supersedes_submission_id is None
+            assert seeded[2].supersedes_submission_id == seeded[1].id
+            assert all(
+                submission.check_in_definition_id == DEMO_IDS["definition_v2"]
+                for submission in seeded
+            )
+            seeded_history = {
+                submission.id: (
+                    submission.answers,
+                    submission.submitted_at,
+                    submission.supersedes_submission_id,
+                )
+                for submission in seeded
+            }
             assert all(submission.answers["items"] for submission in seeded)
             assert all(submission.answers["questionnaire_version"] for submission in seeded)
             assert all(submission.answers["questionnaire_canonical"] for submission in seeded)
@@ -206,6 +220,22 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                 first_body = first_submission.json()
                 assert first_body["supersedes_submission_id"] is None
 
+                independent = await client.post(
+                    f"/v1/patient/check-ins/{definition['id']}/submissions",
+                    json={
+                        "questionnaire_version": definition["questionnaire_version"],
+                        "answers": [
+                            {"link_id": "pain_change", "value": "worse"},
+                            {"link_id": "transportation", "value": "yes"},
+                        ],
+                        "free_text": "Synthetic independent check-in through the patient API.",
+                    },
+                )
+                assert independent.status_code == 201, independent.text
+                independent_body = independent.json()
+                assert independent_body["supersedes_submission_id"] is None
+                assert independent_body["id"] != first_body["id"]
+
                 correction = await client.post(
                     f"/v1/patient/check-ins/{definition['id']}/submissions",
                     json={
@@ -215,12 +245,25 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                             {"link_id": "transportation", "value": "yes"},
                         ],
                         "free_text": "Synthetic correction through the real patient API.",
-                        "supersedes_submission_id": first_body["id"],
+                        "supersedes_submission_id": independent_body["id"],
                     },
                 )
                 assert correction.status_code == 201, correction.text
                 correction_body = correction.json()
-                assert correction_body["supersedes_submission_id"] == first_body["id"]
+                assert correction_body["supersedes_submission_id"] == independent_body["id"]
+
+                timeline = await client.get("/v1/patient/journey-timeline")
+                assert timeline.status_code == 200, timeline.text
+                assert [event["kind"] for event in timeline.json()["events"]] == [
+                    "check_in_submitted", "check_in_submitted", "check_in_corrected"
+                ]
+                assert [event["source_id"] for event in timeline.json()["events"]] == [
+                    first_body["id"], independent_body["id"], correction_body["id"]
+                ]
+                assert timeline.json()["events"][2]["detail"]["correction_of_submission_id"] == (
+                    independent_body["id"]
+                )
+                assert str(DEMO_IDS["submission_v1"]) not in timeline.text
 
                 actors["current"] = CurrentActor(
                     user_id=DEMO_IDS["navigator_user"],
@@ -233,11 +276,45 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                 assert patient_case.status_code == 200, patient_case.text
                 case_body = patient_case.json()
                 assert case_body["patient"]["id"] == str(journey_ids["patient"])
-                assert case_body["longitudinal_submissions"]
+                assert {
+                    submission["id"] for submission in case_body["longitudinal_submissions"]
+                } == {
+                    first_body["id"], correction_body["id"]
+                }
                 assert case_body["longitudinal_submissions"][0]["items"]
                 assert case_body["longitudinal_submissions"][0]["provenance"]["source"] == (
                     "patient-supplied"
                 )
+
+                workspace = await client.get(
+                    f"/v1/navigator/needs/{DEMO_IDS['transportation_need']}/workspace"
+                )
+                assert workspace.status_code == 200, workspace.text
+                workspace_body = workspace.json()
+                between = workspace_body["comparisons"]["between_check_ins"]
+                assert between["status"] == "available"
+                assert between["previous_submission_id"] == str(DEMO_IDS["submission_earlier"])
+                assert between["current_submission_id"] == str(DEMO_IDS["submission_v2"])
+                assert between["deltas"] == [
+                    {
+                        "field_identifier": "pain_change",
+                        "previous_present": True,
+                        "current_present": True,
+                        "previous_value": "better",
+                        "current_value": "same",
+                    },
+                    {
+                        "field_identifier": "transportation",
+                        "previous_present": True,
+                        "current_present": True,
+                        "previous_value": "no",
+                        "current_value": "yes",
+                    },
+                ]
+                assert workspace_body["evidence"][0]["source_submission_id"] == (
+                    str(DEMO_IDS["submission_v2"])
+                )
+                assert first_body["id"] not in workspace.text
 
                 actors["current"] = CurrentActor(
                     user_id=journey_ids["user"],
@@ -264,12 +341,57 @@ def test_seeded_demo_works_through_patient_navigator_and_fhir_application_paths(
                 assert questionnaire_response["item"]
                 assert observations
                 assert revision["entity"][0]["what"]["reference"] == (
-                    f"QuestionnaireResponse/{first_body['id']}"
+                    f"QuestionnaireResponse/{independent_body['id']}"
                 )
+
+                foreign_export = await client.get(
+                    f"/v1/patient/check-ins/{DEMO_IDS['submission_v2']}/fhir"
+                )
+                assert foreign_export.status_code == 404, foreign_export.text
+
+                with Session(engine) as session:
+                    own_history = session.scalars(
+                        select(CheckInSubmission).where(
+                            CheckInSubmission.patient_id == journey_ids["patient"]
+                        )
+                    ).all()
+                    by_id = {str(submission.id): submission for submission in own_history}
+                    assert len(by_id) == 3
+                    assert by_id[first_body["id"]].supersedes_submission_id is None
+                    assert by_id[independent_body["id"]].supersedes_submission_id is None
+                    assert by_id[first_body["id"]].answers["items"][0]["value"] == "better"
+                    assert by_id[independent_body["id"]].answers["items"][0]["value"] == "worse"
+                    assert session.scalar(
+                        text("SELECT count(*) FROM reported_need WHERE patient_id = :patient"),
+                        {"patient": journey_ids["patient"]},
+                    ) == 0
+                    active_ids = session.execute(
+                        text(
+                            "SELECT id FROM active_check_in_submission WHERE patient_id = :patient"
+                        ),
+                        {"patient": journey_ids["patient"]},
+                    ).scalars().all()
+                    assert set(active_ids) == {
+                        by_id[first_body["id"]].id, by_id[correction_body["id"]].id
+                    }
 
         try:
             asyncio.run(exercise_application())
             with Session(engine) as session:
+                persisted_seed = session.scalars(
+                    select(CheckInSubmission).where(
+                        CheckInSubmission.organization_id == DEMO_IDS["organization"],
+                        CheckInSubmission.patient_id == DEMO_IDS["patient"],
+                    )
+                ).all()
+                assert {
+                    submission.id: (
+                        submission.answers,
+                        submission.submitted_at,
+                        submission.supersedes_submission_id,
+                    )
+                    for submission in persisted_seed
+                } == seeded_history
                 assert inspect_integrity(session) == []
         finally:
             app.dependency_overrides.clear()
