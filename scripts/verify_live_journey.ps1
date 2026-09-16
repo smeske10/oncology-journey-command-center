@@ -202,6 +202,13 @@ finally {
         [System.Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, "Process")
     }
     foreach ($name in $taskEnvironmentNames) {
-        [System.Environment]::SetEnvironmentVariable($name, $priorTaskEnvironment[$name], "Process")
+        if ($null -eq $priorTaskEnvironment[$name]) {
+            Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        }
+        else {
+            [System.Environment]::SetEnvironmentVariable(
+                $name, $priorTaskEnvironment[$name], "Process"
+            )
+        }
     }
 }

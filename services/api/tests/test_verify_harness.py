@@ -23,6 +23,45 @@ LIVE_DATABASE_URL = (
 CHILD_SENTINEL = "VERIFY_CHILD_WAS_INVOKED"
 
 
+def _environment_round_trip(names: list[str], state: str) -> tuple[str, str]:
+    """Set parent state independently, then check presence and exact values after the script."""
+    setup = (
+        f"$probeRestoreNames = '{json.dumps(names)}' | ConvertFrom-Json\n"
+        f"$probeRestoreState = '{state}'\n"
+        "$probeExpected = @{}\n"
+        "foreach ($probeKey in $probeRestoreNames) {\n"
+        "  Remove-Item -LiteralPath (\"Env:$probeKey\") -ErrorAction SilentlyContinue\n"
+        "  $probeExpected[$probeKey] = $null\n"
+        "  if ($probeRestoreState -ne 'absent') {\n"
+        "    $probeExpected[$probeKey] = if ($probeRestoreState -eq 'empty') { '' } "
+        "else { \"prior-$probeKey\" }\n"
+        "    [Environment]::SetEnvironmentVariable("
+        "$probeKey, $probeExpected[$probeKey], 'Process')\n"
+        "  }\n"
+        "  if ($probeRestoreState -eq 'empty' -and "
+        "-not (Test-Path -LiteralPath (\"Env:$probeKey\"))) {\n"
+        "    Write-Output 'EMPTY_ENVIRONMENT_UNSUPPORTED'; exit 77\n"
+        "  }\n"
+        "}\n"
+    )
+    assertion = (
+        "foreach ($probeKey in $probeRestoreNames) {\n"
+        "  $probePresent = Test-Path -LiteralPath (\"Env:$probeKey\")\n"
+        "  if ($probePresent -ne ($probeRestoreState -ne 'absent') -or "
+        "[Environment]::GetEnvironmentVariable($probeKey, 'Process') "
+        "-cne $probeExpected[$probeKey]) {\n"
+        "    throw \"Environment was not restored: $probeKey ($probeRestoreState)\"\n"
+        "  }\n"
+        "}\n"
+    )
+    return setup, assertion
+
+
+def _skip_unsupported_empty_environment(result: subprocess.CompletedProcess[str]) -> None:
+    if result.returncode == 77 and "EMPTY_ENVIRONMENT_UNSUPPORTED" in result.stdout:
+        pytest.skip("This PowerShell runtime cannot represent present-empty environment values")
+
+
 def _powershell() -> str:
     for candidate in ("pwsh", "powershell"):
         if executable := shutil.which(candidate):
@@ -641,8 +680,12 @@ def test_verify_removes_and_restores_inherited_pg_environment_on_failure(
     assert "PG_RESTORED" in output
 
 
+@pytest.mark.parametrize("parent_state", ("absent", "empty", "populated"))
+@pytest.mark.parametrize("npm_exit_code", (0, 41), ids=("success", "frontend-failure"))
 def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
     tmp_path: Path,
+    parent_state: str,
+    npm_exit_code: int,
 ) -> None:
     """Production break: locked tools emit avoidable notices or leak environment changes."""
     fake_bin = tmp_path / "bin"
@@ -668,7 +711,7 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
             "@echo off\n"
             "if defined NO_COLOR (echo NO_COLOR_DIRTY & exit /b 44)\n"
             "echo TOOL_ENV_CLEAN\n"
-            "exit /b 41\n",
+            f"exit /b {npm_exit_code}\n",
             encoding="utf-8",
         )
     else:
@@ -695,7 +738,7 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
             "#!/bin/sh\n"
             "if [ -n \"$NO_COLOR\" ]; then echo NO_COLOR_DIRTY; exit 44; fi\n"
             "echo TOOL_ENV_CLEAN\n"
-            "exit 41\n",
+            f"exit {npm_exit_code}\n",
             encoding="utf-8",
         )
         npm_command.chmod(0o755)
@@ -705,12 +748,14 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
     live_bootstrap_url, live_migration_url, live_application_url = _database_triple(
         LIVE_DATABASE_URL
     )
+    setup, assertion = _environment_round_trip(
+        ["NO_COLOR", "PYRIGHT_PYTHON_FORCE_VERSION", "PYRIGHT_PYTHON_IGNORE_WARNINGS"],
+        parent_state,
+    )
     wrapper.write_text(
         "$ErrorActionPreference = 'Stop'\n"
-        "$env:NO_COLOR = 'preserve-no-color'\n"
-        "$env:PYRIGHT_PYTHON_FORCE_VERSION = 'preserve-version-setting'\n"
-        "$env:PYRIGHT_PYTHON_IGNORE_WARNINGS = 'preserve-ignore-setting'\n"
-        "$caught = $null\n"
+        + setup
+        + "$caught = $null\n"
         "try {\n"
         f"  . '{escaped_verify_path}' "
         f"-LiveBootstrapDatabaseUrl '{live_bootstrap_url}' "
@@ -719,13 +764,13 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
         f"-LiveConfirmDatabaseName '{LIVE_DATABASE_NAME}'\n"
         "}\n"
         "catch { $caught = $_.Exception.Message }\n"
-        "if ($caught -notmatch '41') { throw \"Unexpected child failure: $caught\" }\n"
-        "if ($env:NO_COLOR -ne 'preserve-no-color' -or "
-        "$env:PYRIGHT_PYTHON_FORCE_VERSION -ne 'preserve-version-setting' -or "
-        "$env:PYRIGHT_PYTHON_IGNORE_WARNINGS -ne 'preserve-ignore-setting') {\n"
-        "  throw 'Tool environment was not restored'\n"
-        "}\n"
-        "Write-Output 'TOOL_ENV_RESTORED'\n",
+        + (
+            "if ($caught -notmatch '41') { throw 'Expected frontend failure' }\n"
+            if npm_exit_code else
+            "if ($null -ne $caught) { throw \"Unexpected failure: $caught\" }\n"
+        )
+        + assertion
+        + "Write-Output 'TOOL_ENV_RESTORED'\n",
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -747,6 +792,7 @@ def test_verify_scopes_tool_noise_environment_and_restores_prior_values(
     )
     output = result.stdout + result.stderr
 
+    _skip_unsupported_empty_environment(result)
     assert result.returncode == 0, output
     assert "TOOL_ENV_CLEAN" in output
     assert "PYRIGHT_VERSION_NOTICE" not in output
@@ -815,16 +861,28 @@ def test_live_wrapper_audits_integrity_after_each_browser_journey(tmp_path: Path
     assert live_runs[0] < audits[2] < live_runs[1] < audits[5]
 
 
-@pytest.mark.parametrize("npm_exit_code", (0, 41), ids=("success", "forced-failure"))
-def test_live_wrapper_restores_prior_demo_actor_configuration(
+@pytest.mark.parametrize(
+    ("parent_state", "failure_stage"),
+    [(state, stage) for state in ("absent", "empty", "populated")
+     for stage in ("success", "browser-failure")]
+    + [("absent", "actor-failure")],
+)
+def test_live_wrapper_restores_prior_task_environment(
     tmp_path: Path,
-    npm_exit_code: int,
+    parent_state: str,
+    failure_stage: str,
 ) -> None:
-    """Production break: live verification leaks its synthetic actor roster."""
+    """Production break: live cleanup invents empty settings or leaks its synthetic values."""
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    _write_fake_command(fake_bin, "python", exit_code=0, output="FAKE_PYTHON_OK")
-    _write_fake_command(fake_bin, "npm", exit_code=npm_exit_code, output="FAKE_NPM")
+    _write_fake_command(
+        fake_bin, "python", exit_code=41 if failure_stage == "actor-failure" else 0,
+        output="FAKE_PYTHON_OK",
+    )
+    _write_fake_command(
+        fake_bin, "npm", exit_code=41 if failure_stage == "browser-failure" else 0,
+        output="FAKE_NPM",
+    )
     wrapper = tmp_path / "live-roster-environment-probe.ps1"
     escaped_live_path = str(
         PROJECT_ROOT / "scripts" / "verify_live_journey.ps1"
@@ -834,13 +892,22 @@ def test_live_wrapper_restores_prior_demo_actor_configuration(
     )
     expected_failure = (
         "if ($caught -notmatch '41') { throw \"Unexpected failure: $caught\" }\n"
-        if npm_exit_code
+        if failure_stage != "success"
         else "if ($null -ne $caught) { throw \"Unexpected failure: $caught\" }\n"
+    )
+    setup, assertion = _environment_round_trip(
+        [
+            "BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL", "APP_ENV",
+            "DEMO_SESSION_SECRET", "DEMO_ORGANIZATION_ID", "DEMO_ACTORS_JSON",
+            "OJCC_API_ORIGIN", "PLAYWRIGHT_BASE_URL", "OJCC_LIVE_DEVICE",
+            "OJCC_MIGRATION_USERNAME",
+        ],
+        parent_state,
     )
     wrapper.write_text(
         "$ErrorActionPreference = 'Stop'\n"
-        "$env:DEMO_ACTORS_JSON = 'prior-demo-actors-json'\n"
-        "$caught = $null\n"
+        + setup
+        + "$caught = $null\n"
         "try {\n"
         f"  . '{escaped_live_path}' "
         f"-BootstrapDatabaseUrl '{live_bootstrap_url}' "
@@ -850,10 +917,8 @@ def test_live_wrapper_restores_prior_demo_actor_configuration(
         "}\n"
         "catch { $caught = $_.Exception.Message }\n"
         + expected_failure
-        + "if ($env:DEMO_ACTORS_JSON -ne 'prior-demo-actors-json') {\n"
-        "  throw 'Demo actor configuration was not restored'\n"
-        "}\n"
-        "Write-Output 'DEMO_ACTORS_JSON_RESTORED'\n",
+        + assertion
+        + "Write-Output 'LIVE_ENVIRONMENT_RESTORED'\n",
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -874,16 +939,20 @@ def test_live_wrapper_restores_prior_demo_actor_configuration(
         check=False,
     )
 
+    _skip_unsupported_empty_environment(result)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "DEMO_ACTORS_JSON_RESTORED" in result.stdout
+    assert "LIVE_ENVIRONMENT_RESTORED" in result.stdout
 
 
 @pytest.mark.parametrize(
-    ("exit_code", "with_demo_values"), ((0, True), (41, True), (41, False)),
-    ids=("success", "frontend-failure", "absent-frontend-failure"),
+    ("exit_code", "with_demo_values", "failure_stage"),
+    ((0, True, "none"), (41, True, "frontend"), (41, False, "frontend"),
+     (0, False, "none"), (41, False, "live")),
+    ids=("success", "frontend-failure", "absent-frontend-failure",
+         "absent-success", "absent-live-failure"),
 )
 def test_root_frontend_effective_environments_and_restoration(
-    tmp_path: Path, exit_code: int, with_demo_values: bool,
+    tmp_path: Path, exit_code: int, with_demo_values: bool, failure_stage: str,
 ) -> None:
     """Production break: root web commands or mocked Next inherit API-only settings."""
     fake_bin = tmp_path / "bin"
@@ -911,7 +980,10 @@ if (process.argv[2] === 'mock-next') {
 } else {
   (async () => {
     const args = process.argv.slice(2);
-    if (args.includes('test:e2e:live')) return;
+    if (args.includes('test:e2e:live')) {
+      process.exitCode = process.env.VERIFY_PROBE_FAILURE_STAGE === 'live' ? 41 : 0;
+      return;
+    }
     const stage = args.includes('test:e2e') ? 'mocked' :
       args.includes('build') ? 'build' : args.includes('lint') ? 'lint' : 'vitest';
     record(stage);
@@ -941,7 +1013,7 @@ if (process.argv[2] === 'mock-next') {
     } finally {
       await plugin.teardown();
     }
-    process.exitCode = Number(process.env.VERIFY_PROBE_EXIT);
+    process.exitCode = process.env.VERIFY_PROBE_FAILURE_STAGE === 'frontend' ? 41 : 0;
   })().catch(() => { process.stderr.write('Root child probe failed'); process.exitCode = 98; });
 }
 """,
@@ -963,6 +1035,9 @@ if (process.argv[2] === 'mock-next') {
         "$ErrorActionPreference = 'Stop'\n"
         "$probeNames = $env:VERIFY_PROBE_NAMES | ConvertFrom-Json\n"
         "$probePrior = @{}\n"
+        "$probePriorPresence = @{}\n"
+        "foreach ($key in $probeNames) { $probePriorPresence[$key] = "
+        "Test-Path -LiteralPath (\"Env:$key\") }\n"
         "foreach ($key in $probeNames) { $probePrior[$key] = "
         "[Environment]::GetEnvironmentVariable($key, 'Process') }\n"
         "$probeFailed = $false\n"
@@ -975,7 +1050,8 @@ if (process.argv[2] === 'mock-next') {
         "{ throw 'Unexpected verifier failure' }; "
         "$probeFailed = $true }\n"
         "foreach ($key in $probeNames) {\n"
-        "  if ([Environment]::GetEnvironmentVariable($key, 'Process') -cne $probePrior[$key]) "
+        "  if ((Test-Path -LiteralPath (\"Env:$key\")) -ne $probePriorPresence[$key] -or "
+        "[Environment]::GetEnvironmentVariable($key, 'Process') -cne $probePrior[$key]) "
         "{ throw 'API environment not restored' }\n}\n"
         f"if ($probeFailed -ne ${str(bool(exit_code)).lower()}) "
         "{ throw 'Unexpected verifier outcome' }\n"
@@ -990,7 +1066,7 @@ if (process.argv[2] === 'mock-next') {
     live_bootstrap, live_migration, live_application = _database_triple(LIVE_DATABASE_URL)
     environment.update({
         "VERIFY_PROBE_NAMES": json.dumps(names), "VERIFY_PROBE_LOG": str(log),
-        "VERIFY_PROBE_EXIT": str(exit_code), "VERIFY_PROJECT_ROOT": str(PROJECT_ROOT),
+        "VERIFY_PROBE_FAILURE_STAGE": failure_stage, "VERIFY_PROJECT_ROOT": str(PROJECT_ROOT),
         "VERIFY_LIVE_BOOTSTRAP": live_bootstrap, "VERIFY_LIVE_MIGRATION": live_migration,
         "VERIFY_LIVE_APPLICATION": live_application,
     })

@@ -138,9 +138,14 @@ finally {
         [System.Environment]::SetEnvironmentVariable($entry.Name, $entry.Value, "Process")
     }
     foreach ($name in $databaseEnvironmentNames) {
-        [System.Environment]::SetEnvironmentVariable(
-            $name, $priorDatabaseEnvironment[$name], "Process"
-        )
+        if ($null -eq $priorDatabaseEnvironment[$name]) {
+            Remove-Item -LiteralPath ("Env:{0}" -f $name) -ErrorAction SilentlyContinue
+        }
+        else {
+            [System.Environment]::SetEnvironmentVariable(
+                $name, $priorDatabaseEnvironment[$name], "Process"
+            )
+        }
     }
     if ($locationPushed) {
         Pop-Location
