@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/need-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Navigator Need Candidates */
+        get: operations["get_navigator_need_candidates_v1_navigator_need_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/navigator/needs/{need_id}/outcome-preview": {
         parameters: {
             query?: never;
@@ -431,6 +448,63 @@ export interface components {
          * @enum {string}
          */
         ApprovalDecisionValue: "approved" | "declined";
+        /** CandidateEvidenceRead */
+        CandidateEvidenceRead: {
+            /**
+             * Field
+             * @default transportation
+             * @constant
+             */
+            field: "transportation";
+            /** Question */
+            question: string;
+            /** Text */
+            text: string;
+            /**
+             * Value
+             * @default yes
+             * @constant
+             */
+            value: "yes";
+        };
+        /** CandidateRelatedNeedRead */
+        CandidateRelatedNeedRead: {
+            /** Effective State */
+            effective_state: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Reopened From Need Id */
+            reopened_from_need_id: string | null;
+            /** Source Submission Id */
+            source_submission_id: string | null;
+        };
+        /** CandidateUnavailableRead */
+        CandidateUnavailableRead: {
+            /**
+             * Care Episode Id
+             * Format: uuid
+             */
+            care_episode_id: string;
+            /** Chain Root Id */
+            chain_root_id?: string | null;
+            /** Patient Display Name */
+            patient_display_name: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "ambiguous_lineage" | "unsupported_questionnaire" | "ambiguous_answer";
+        };
         /** CheckInCorrectedEvent */
         CheckInCorrectedEvent: {
             detail: components["schemas"]["CheckInDetail"];
@@ -752,6 +826,13 @@ export interface components {
          * @enum {string}
          */
         NavigationTaskStatus: "open" | "assigned" | "in_progress" | "completed" | "cancelled";
+        /** NavigatorNeedCandidatesRead */
+        NavigatorNeedCandidatesRead: {
+            /** Candidates */
+            candidates: components["schemas"]["NeedCandidateRead"][];
+            /** Unavailable */
+            unavailable: components["schemas"]["CandidateUnavailableRead"][];
+        };
         /** NavigatorNeedWorkspaceRead */
         NavigatorNeedWorkspaceRead: {
             comparisons: components["schemas"]["WorkspaceComparisonsRead"];
@@ -809,6 +890,48 @@ export interface components {
         NavigatorQueueRead: {
             /** Items */
             items: components["schemas"]["QueueItemRead"][];
+        };
+        /** NeedCandidateRead */
+        NeedCandidateRead: {
+            /**
+             * Care Episode Id
+             * Format: uuid
+             */
+            care_episode_id: string;
+            /**
+             * Chain Root Id
+             * Format: uuid
+             */
+            chain_root_id: string;
+            /**
+             * Check In At
+             * Format: date-time
+             */
+            check_in_at: string;
+            evidence: components["schemas"]["CandidateEvidenceRead"];
+            /** Is Correction */
+            is_correction: boolean;
+            /** Linked Needs */
+            linked_needs: components["schemas"]["CandidateRelatedNeedRead"][];
+            /** Other Transportation Needs */
+            other_transportation_needs: components["schemas"]["CandidateRelatedNeedRead"][];
+            /** Patient Display Name */
+            patient_display_name: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /**
+             * Source Submission Id
+             * Format: uuid
+             */
+            source_submission_id: string;
+            /**
+             * Source Submitted At
+             * Format: date-time
+             */
+            source_submitted_at: string;
         };
         /** NeedDetail */
         NeedDetail: {
@@ -1851,6 +1974,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_navigator_need_candidates_v1_navigator_need_candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavigatorNeedCandidatesRead"];
                 };
             };
         };

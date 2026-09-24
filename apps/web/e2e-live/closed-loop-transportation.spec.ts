@@ -67,6 +67,10 @@ test("persists the synthetic transportation journey from review through closure"
   expect(original.data.comparisons.between_check_ins.current_submission_id).toBe(originalSourceId);
   expect(original.data.comparisons.between_check_ins.previous_submission_id).not.toBe(originalPredecessorId);
   expect(original.item.due_at).toBeNull();
+  const reports = navigator.getByRole("region", { name: "Transportation reports to review" });
+  await expect(reports.getByRole("article")).toHaveCount(1);
+  await expect(reports.getByText("yes", { exact: true })).toBeVisible();
+  await expect(reports.getByText("Correction of this check-in", { exact: true })).toBeVisible();
   const transportationQueueItem = navigator.getByLabel("Queue items").getByRole("button")
     .filter({ hasText: original.item.patient_display_name })
     .filter({ hasText: `${original.item.priority.level} operational priority` })
@@ -106,6 +110,10 @@ test("persists the synthetic transportation journey from review through closure"
   const newSubmission = await (await newSubmissionResponse).json() as { id: string; supersedes_submission_id: string | null };
   expect(newSubmission.supersedes_submission_id).toBeNull();
   expect(newSubmission.id).not.toBe(originalSourceId);
+  await reports.getByRole("button", { name: "Refresh transportation reports" }).click();
+  await expect(reports.getByRole("article")).toHaveCount(2);
+  const newReport = reports.getByRole("article", { name: `Transportation report ${newSubmission.id}`, exact: true });
+  await expect(newReport.getByText("Independent check-in", { exact: true })).toBeVisible();
   await expect(patientFlow.getByRole("heading", { name: "Your synthetic check-in was saved", exact: true })).toBeVisible();
   await expect(history.getByText("Check-in submitted", { exact: true })).toHaveCount(submittedBefore + 1);
   await expect(history.getByText("Check-in corrected", { exact: true })).toHaveCount(correctedBefore);
@@ -137,6 +145,11 @@ test("persists the synthetic transportation journey from review through closure"
   await patientFlow.getByRole("button", { name: "Submit correction", exact: true }).click();
   const correctedSubmission = await (await correctedSubmissionResponse).json() as { id: string; supersedes_submission_id: string | null };
   expect(correctedSubmission.supersedes_submission_id).toBe(newSubmission.id);
+  await reports.getByRole("button", { name: "Refresh transportation reports" }).click();
+  await expect(reports.getByRole("article")).toHaveCount(2);
+  await expect(newReport.getByText("Correction of this check-in", { exact: true })).toBeVisible();
+  await newReport.getByText("Source details", { exact: true }).click();
+  await expect(newReport.getByText(`Source submission: ${correctedSubmission.id}`, { exact: true })).toBeVisible();
   await expect(patientFlow.getByRole("heading", { name: "Your synthetic correction was saved", exact: true })).toBeVisible();
   await expect(history.getByText("Check-in submitted", { exact: true })).toHaveCount(submittedBefore + 1);
   await expect(history.getByText("Check-in corrected", { exact: true })).toHaveCount(correctedBefore + 1);
@@ -193,6 +206,26 @@ test("persists the synthetic transportation journey from review through closure"
   );
 
   assertDatabaseJourney(newSubmission.id, correctedSubmission.id, original.item.need_id);
+
+  // A negative correction removes only its preview. Existing governed needs stay intact.
+  const currentDefinition = await patient.request.get("/api/v1/patient/check-ins/current");
+  expect(currentDefinition.ok()).toBe(true);
+  const definition = await currentDefinition.json() as { id: string; questionnaire_version: string };
+  const negative = await patient.request.post(`/api/v1/patient/check-ins/${definition.id}/submissions`, {
+    data: {
+      questionnaire_version: definition.questionnaire_version,
+      supersedes_submission_id: correctedSubmission.id,
+      answers: [{ link_id: "pain_change", value: "same" }, { link_id: "transportation", value: "no" }],
+    },
+  });
+  expect(negative.status()).toBe(201);
+  await reports.getByRole("button", { name: "Refresh transportation reports" }).click();
+  await expect(reports.getByRole("article")).toHaveCount(1);
+  await expect(reports.getByRole("article", { name: `Transportation report ${newSubmission.id}`, exact: true })).toHaveCount(0);
+  const existingNeed = await navigator.request.get(`/api/v1/navigator/needs/${original.item.need_id}/workspace`);
+  expect(existingNeed.ok()).toBe(true);
+  expect((await existingNeed.json() as NavigatorNeedWorkspaceResponse).need.effective_state).toBe("closed");
+  await expectPageFitsViewport(navigator);
   await patientContext.close();
   await navigatorContext.close();
 });

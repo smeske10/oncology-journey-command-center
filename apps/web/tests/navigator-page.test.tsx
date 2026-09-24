@@ -5,8 +5,11 @@ import type { NavigatorNeedWorkspaceResponse, NavigatorPatientCaseResponse, Navi
 
 const api = vi.hoisted(() => ({
   bootstrapNavigatorQueue: vi.fn(),
+  bootstrapNavigatorSession: vi.fn(),
+  getNavigatorQueue: vi.fn(),
   getNavigatorNeedWorkspace: vi.fn(),
   getNavigatorPatientCase: vi.fn(),
+  getNavigatorNeedCandidates: vi.fn(),
 }));
 
 vi.mock("../lib/api-client", async (importOriginal) => {
@@ -61,10 +64,32 @@ function patientCase(name: string): NavigatorPatientCaseResponse {
 }
 
 beforeEach(() => {
+  api.bootstrapNavigatorSession.mockReset();
+  api.bootstrapNavigatorSession.mockResolvedValue(undefined);
+  api.getNavigatorQueue.mockReset();
+  api.getNavigatorQueue.mockImplementation(() => api.bootstrapNavigatorQueue());
+  api.getNavigatorNeedCandidates.mockReset();
+  api.getNavigatorNeedCandidates.mockResolvedValue({ candidates: [], unavailable: [] });
   api.bootstrapNavigatorQueue.mockReset();
   api.getNavigatorPatientCase.mockReset();
   api.getNavigatorNeedWorkspace.mockReset();
   api.getNavigatorNeedWorkspace.mockResolvedValue(emptyWorkspace());
+});
+
+test("transportation reports remain discoverable when the work queue is empty", async () => {
+  api.bootstrapNavigatorQueue.mockResolvedValue({ items: [] });
+  render(<NavigatorDemoPage />);
+  const preview = await screen.findByRole("region", { name: "Transportation reports to review" });
+  expect(await within(preview).findByText(/no positive transportation reports/i)).toBeVisible();
+  expect(within(preview).getByRole("button", { name: "Refresh transportation reports" })).toBeVisible();
+});
+
+test("a stalled work queue does not block transportation evidence", async () => {
+  api.bootstrapNavigatorQueue.mockReturnValue(new Promise(() => {}));
+  render(<NavigatorDemoPage />);
+  const preview = screen.getByRole("region", { name: "Transportation reports to review" });
+  expect(await within(preview).findByText(/no positive transportation reports/i)).toBeVisible();
+  expect(within(preview).getByRole("button", { name: "Refresh transportation reports" })).toBeEnabled();
 });
 
 function emptyWorkspace(): NavigatorNeedWorkspaceResponse {

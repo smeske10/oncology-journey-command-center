@@ -1,5 +1,37 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/navigator/need-candidates", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ candidates: [], unavailable: [] }),
+  }));
+});
+
+test("transportation evidence is discoverable with an empty work queue", async ({ page }) => {
+  await page.route("**/api/v1/demo/session/navigator", (route) => route.fulfill({ status: 204 }));
+  await page.route("**/api/v1/navigator/queue", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ items: [] }),
+  }));
+  await page.route("**/api/v1/navigator/need-candidates", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ candidates: [{
+      patient_id: "synthetic-a", patient_display_name: "Synthetic patient with new report",
+      care_episode_id: "episode-a", chain_root_id: "root-a", source_submission_id: "root-a",
+      check_in_at: "2026-09-24T10:00:00Z", source_submitted_at: "2026-09-24T10:00:00Z",
+      is_correction: false,
+      evidence: { field: "transportation", question: "Need synthetic transportation support?", value: "yes", text: "yes" },
+      linked_needs: [], other_transportation_needs: [],
+    }], unavailable: [] }),
+  }));
+  await page.goto("/demo/navigator");
+  await expect(page.getByText("No open navigation needs right now.")).toBeVisible();
+  const preview = page.getByRole("region", { name: "Transportation reports to review" });
+  await expect(preview.getByRole("heading", { name: "Synthetic patient with new report" })).toBeVisible();
+  await expect(preview.getByText("yes", { exact: true })).toBeVisible();
+  await expect(preview.getByRole("button")).toHaveCount(1);
+  await preview.getByRole("button", { name: "Refresh transportation reports" }).click();
+  await expect(preview.getByRole("article")).toHaveCount(1);
+  expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+});
+
 test("shows explainable canonical open work without routine closure leakage", async ({ page }) => {
   const patientId = "a2a0c52e-982e-4cb1-9921-518d6536305d";
   const openNeedId = "19cc6cba-069b-474a-b81a-56a536f6b7b1";

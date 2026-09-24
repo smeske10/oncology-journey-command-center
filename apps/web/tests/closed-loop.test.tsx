@@ -9,8 +9,11 @@ import type { NavigatorPatientCaseResponse, NavigatorQueueResponse } from "../li
 
 const api = vi.hoisted(() => ({
   bootstrapNavigatorQueue: vi.fn(),
+  bootstrapNavigatorSession: vi.fn(),
+  getNavigatorQueue: vi.fn(),
   getNavigatorNeedWorkspace: vi.fn(),
   getNavigatorPatientCase: vi.fn(),
+  getNavigatorNeedCandidates: vi.fn(),
   decideProposal: vi.fn(),
   claimTask: vi.fn(),
   startTask: vi.fn(),
@@ -160,6 +163,9 @@ beforeEach(() => {
   window.localStorage.clear();
   for (const mock of Object.values(api)) mock.mockReset();
   api.bootstrapNavigatorQueue.mockResolvedValue(queue);
+  api.bootstrapNavigatorSession.mockResolvedValue(undefined);
+  api.getNavigatorQueue.mockImplementation(() => api.bootstrapNavigatorQueue());
+  api.getNavigatorNeedCandidates.mockResolvedValue({ candidates: [], unavailable: [] });
   api.getNavigatorPatientCase.mockResolvedValue(patientCase);
   api.getNavigatorNeedWorkspace.mockResolvedValue(workspace);
 });
