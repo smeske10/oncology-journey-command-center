@@ -248,6 +248,40 @@ class SqlAlchemyNavigatorRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    def list_candidate_submissions(
+        self, *, organization_id: UUID
+    ) -> list[models.CheckInSubmission]:
+        # Include ancestors: filtering to active leaves would hide broken lineage.
+        return list(self._session.scalars(
+            select(models.CheckInSubmission).where(
+                models.CheckInSubmission.organization_id == organization_id,
+            )
+        ).all())
+
+    def list_candidate_patients(
+        self, *, organization_id: UUID
+    ) -> list[models.SyntheticPatient]:
+        return list(self._session.scalars(
+            select(models.SyntheticPatient).where(
+                models.SyntheticPatient.organization_id == organization_id,
+            )
+        ).all())
+
+    def list_candidate_related_needs(
+        self, *, organization_id: UUID
+    ) -> list[tuple[models.ReportedNeed, str]]:
+        from app.domain.needs import effective_need_state
+
+        rows = self._session.execute(
+            select(models.ReportedNeed, effective_need_state.c.effective_state)
+            .join(effective_need_state, and_(
+                effective_need_state.c.organization_id == models.ReportedNeed.organization_id,
+                effective_need_state.c.id == models.ReportedNeed.id,
+            ))
+            .where(models.ReportedNeed.organization_id == organization_id)
+        ).all()
+        return [(row[0], str(row[1])) for row in rows]
+
     def get_patient(
         self, *, patient_id: UUID, organization_id: UUID
     ) -> models.SyntheticPatient | None:

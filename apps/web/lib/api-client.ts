@@ -6,6 +6,7 @@ export type CheckInDefinitionResponse = components["schemas"]["CheckInDefinition
 export type NavigatorQueueResponse = paths["/v1/navigator/queue"]["get"]["responses"][200]["content"]["application/json"];
 export type NavigatorPatientCaseResponse = paths["/v1/navigator/patients/{patient_id}/case"]["get"]["responses"][200]["content"]["application/json"];
 export type NavigatorNeedWorkspaceResponse = components["schemas"]["NavigatorNeedWorkspaceRead"];
+export type NavigatorNeedCandidatesResponse = components["schemas"]["NavigatorNeedCandidatesRead"];
 export type ApprovalDecisionInput = components["schemas"]["ApprovalDecisionCreate"];
 export type TaskCommandResponse = components["schemas"]["TaskCommandRead"];
 export type OutcomePreviewResponse = components["schemas"]["OutcomePreviewRead"];
@@ -55,12 +56,22 @@ export async function submitCheckIn(
 }
 
 export async function bootstrapNavigatorQueue(): Promise<NavigatorQueueResponse> {
-  await request("/api/v1/demo/session/navigator", { method: "POST" });
+  await bootstrapNavigatorSession();
   return getNavigatorQueue();
+}
+
+export async function bootstrapNavigatorSession(): Promise<void> {
+  await request("/api/v1/demo/session/navigator", { method: "POST" });
 }
 
 export async function getNavigatorQueue(signal?: AbortSignal): Promise<NavigatorQueueResponse> {
   return request<NavigatorQueueResponse>("/api/v1/navigator/queue", { signal });
+}
+
+export async function getNavigatorNeedCandidates(signal?: AbortSignal): Promise<NavigatorNeedCandidatesResponse> {
+  return request<NavigatorNeedCandidatesResponse>("/api/v1/navigator/need-candidates", {
+    signal, cache: "no-store",
+  });
 }
 
 export async function getNavigatorPatientCase(

@@ -36,6 +36,28 @@ approval, task, patient follow-up, and navigator outcome rules still govern the 
 connection-free seed CLI mode shown below; do not expose the roster, session secret, or database
 URLs to the Next.js child process.
 
+### Navigator transportation preview
+
+The navigator page includes **Transportation reports to review**, independently of the work queue
+and its selected patient. The navigator-only `GET /v1/navigator/need-candidates` endpoint reads
+records in the authenticated organization. It supports only the transportation question in
+`weekly-synthetic-check-in` version 2 (`weekly-synthetic-check-in-v2`), with the exact stored
+answer `yes`. Free text, symptoms, other versions, and clinical prioritization are outside this preview.
+
+Each independent check-in chain has at most one preview, based on its current correction leaf.
+The panel shows the original check-in date, correction date when applicable, exact supporting
+answer and source, every need linked to the chain, and other transportation needs in that episode.
+Related needs retain their separate identities, recurrence links, and canonical lifecycle states.
+A corrected `no` removes the positive preview on refresh; it does not change existing needs.
+Unsupported questionnaires and ambiguous answers or correction lineage produce explicit unavailable
+results. A broken chain never falls back to an earlier positive answer.
+
+Viewing and refreshing create no durable review status, need, task, approval, or outcome. There
+are no approval/decline controls or browser-stored reviewed flags. Refresh clears the previous
+snapshot; failures show an error, and late responses cannot overwrite newer results. The existing
+governed task and outcome workflow remains separate. This is a synthetic portfolio preview, not
+clinical assessment or authorization to create a need.
+
 ### Deterministic synthetic reset
 
 The application, migration process, and bootstrap process use different credentials:

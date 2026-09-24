@@ -198,6 +198,133 @@
         "title": "ApprovalDecisionValue",
         "type": "string"
       },
+      "CandidateEvidenceRead": {
+        "properties": {
+          "field": {
+            "const": "transportation",
+            "default": "transportation",
+            "title": "Field",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "value": {
+            "const": "yes",
+            "default": "yes",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "text"
+        ],
+        "title": "CandidateEvidenceRead",
+        "type": "object"
+      },
+      "CandidateRelatedNeedRead": {
+        "properties": {
+          "effective_state": {
+            "title": "Effective State",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "reopened_from_need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopened From Need Id"
+          },
+          "source_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Submission Id"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "effective_state",
+          "source_submission_id",
+          "reopened_from_need_id"
+        ],
+        "title": "CandidateRelatedNeedRead",
+        "type": "object"
+      },
+      "CandidateUnavailableRead": {
+        "properties": {
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "chain_root_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Root Id"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "ambiguous_lineage",
+              "unsupported_questionnaire",
+              "ambiguous_answer"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "patient_id",
+          "patient_display_name",
+          "care_episode_id",
+          "reason"
+        ],
+        "title": "CandidateUnavailableRead",
+        "type": "object"
+      },
       "CheckInCorrectedEvent": {
         "properties": {
           "detail": {
@@ -997,6 +1124,30 @@
         "title": "NavigationTaskStatus",
         "type": "string"
       },
+      "NavigatorNeedCandidatesRead": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/NeedCandidateRead"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "unavailable": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateUnavailableRead"
+            },
+            "title": "Unavailable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "candidates",
+          "unavailable"
+        ],
+        "title": "NavigatorNeedCandidatesRead",
+        "type": "object"
+      },
       "NavigatorNeedWorkspaceRead": {
         "properties": {
           "comparisons": {
@@ -1220,6 +1371,80 @@
           "items"
         ],
         "title": "NavigatorQueueRead",
+        "type": "object"
+      },
+      "NeedCandidateRead": {
+        "properties": {
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "chain_root_id": {
+            "format": "uuid",
+            "title": "Chain Root Id",
+            "type": "string"
+          },
+          "check_in_at": {
+            "format": "date-time",
+            "title": "Check In At",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/CandidateEvidenceRead"
+          },
+          "is_correction": {
+            "title": "Is Correction",
+            "type": "boolean"
+          },
+          "linked_needs": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateRelatedNeedRead"
+            },
+            "title": "Linked Needs",
+            "type": "array"
+          },
+          "other_transportation_needs": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateRelatedNeedRead"
+            },
+            "title": "Other Transportation Needs",
+            "type": "array"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "source_submission_id": {
+            "format": "uuid",
+            "title": "Source Submission Id",
+            "type": "string"
+          },
+          "source_submitted_at": {
+            "format": "date-time",
+            "title": "Source Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "patient_id",
+          "patient_display_name",
+          "care_episode_id",
+          "chain_root_id",
+          "source_submission_id",
+          "check_in_at",
+          "source_submitted_at",
+          "is_correction",
+          "evidence",
+          "linked_needs",
+          "other_transportation_needs"
+        ],
+        "title": "NeedCandidateRead",
         "type": "object"
       },
       "NeedDetail": {
@@ -3758,6 +3983,27 @@
         "summary": "Create Demo Session",
         "tags": [
           "demo-sessions"
+        ]
+      }
+    },
+    "/v1/navigator/need-candidates": {
+      "get": {
+        "operationId": "get_navigator_need_candidates_v1_navigator_need_candidates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigatorNeedCandidatesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Navigator Need Candidates",
+        "tags": [
+          "navigator"
         ]
       }
     },

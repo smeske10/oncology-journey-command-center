@@ -5,10 +5,13 @@ import type { CSSProperties } from "react";
 
 import { PatientCase } from "../../../components/navigator/patient-case";
 import { NeedWorkspace } from "../../../components/navigator/need-workspace";
+import { NeedCandidates } from "../../../components/navigator/need-candidates";
 import { WorkQueue, type NavigatorQueueItem } from "../../../components/navigator/work-queue";
 import {
   ApiError,
   bootstrapNavigatorQueue,
+  bootstrapNavigatorSession,
+  getNavigatorQueue,
   getNavigatorNeedWorkspace,
   getNavigatorPatientCase,
   type NavigatorNeedWorkspaceResponse,
@@ -19,6 +22,7 @@ export default function NavigatorDemoPage() {
   const [items, setItems] = useState<NavigatorQueueItem[]>([]);
   const [queueError, setQueueError] = useState("");
   const [loadingQueue, setLoadingQueue] = useState(true);
+  const [bootstrapSettled, setBootstrapSettled] = useState(false);
   const [selected, setSelected] = useState<{ needId: string; patientId: string }>();
   const [caseData, setCaseData] = useState<NavigatorPatientCaseResponse>();
   const [caseError, setCaseError] = useState("");
@@ -62,7 +66,9 @@ export default function NavigatorDemoPage() {
   }, []);
 
   useEffect(() => {
-    void bootstrapNavigatorQueue()
+    void bootstrapNavigatorSession()
+      .finally(() => setBootstrapSettled(true))
+      .then(() => getNavigatorQueue())
       .then((response) => {
         const queueItems = response.items;
         setItems(queueItems);
@@ -98,6 +104,7 @@ export default function NavigatorDemoPage() {
         <h1>Navigator command center</h1>
         <p>Review exact patient-reported evidence and transparent operational queue reasons before taking any action.</p>
       </header>
+      <NeedCandidates enabled={bootstrapSettled} />
       <WorkQueue
         error={queueError || undefined}
         items={items}
