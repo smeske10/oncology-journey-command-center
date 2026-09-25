@@ -1,4 +1,4 @@
-"""Fail-closed runtime attestation for the frozen revision 0007 privilege boundary."""
+"""Fail-closed runtime attestation for the frozen revision 0008 privilege boundary."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import NoReturn
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db.privilege_contracts import v0007
+from app.db.privilege_contracts import v0008 as contract
 from app.db.privilege_validation import application_relation_catalog_statement
 from app.db.targets import DatabaseTarget
 
@@ -26,11 +26,11 @@ def _reject(boundary: str, detail: str) -> NoReturn:
 
 def _expected_relation_privilege(relation: str, privilege: str) -> bool:
     if privilege == "SELECT":
-        return relation in v0007.RUNTIME_SELECT_RELATIONS
+        return relation in contract.RUNTIME_SELECT_RELATIONS
     if privilege == "INSERT":
-        return relation in v0007.INSERT_RELATIONS
+        return relation in contract.INSERT_RELATIONS
     if privilege == "UPDATE":
-        return relation in v0007.UPDATE_RELATIONS
+        return relation in contract.UPDATE_RELATIONS
     return False
 
 
@@ -43,7 +43,7 @@ def _attest_identity_and_revision(
     if tuple(identity) != (target.username, target.username, target.database):
         _reject("identity", "connected identity or database does not match DATABASE_URL")
     revision = connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
-    if revision != v0007.REVISION:
+    if revision != contract.REVISION:
         _reject("schema_revision", "database is not at the attested privilege revision")
 
 
@@ -58,13 +58,13 @@ def _attest_roles(connection: sa.Connection, *, application_role: str) -> None:
             ),
             {
                 "application_role": application_role,
-                "application_group": v0007.APPLICATION_GROUP,
+                "application_group": contract.APPLICATION_GROUP,
             },
         )
     }
     if roles != {
         application_role: (False, True, False, False, True, False, False),
-        v0007.APPLICATION_GROUP: (False, True, False, False, False, False, False),
+        contract.APPLICATION_GROUP: (False, True, False, False, False, False, False),
     }:
         _reject("role_profile", "runtime login or application group profile is not approved")
 
@@ -81,12 +81,12 @@ def _attest_roles(connection: sa.Connection, *, application_role: str) -> None:
             ),
             {
                 "application_role": application_role,
-                "application_group": v0007.APPLICATION_GROUP,
+                "application_group": contract.APPLICATION_GROUP,
             },
         )
     }
     if memberships != {
-        (application_role, v0007.APPLICATION_GROUP, True, False, False)
+        (application_role, contract.APPLICATION_GROUP, True, False, False)
     }:
         _reject("membership", "runtime outgoing role membership graph is not approved")
 
@@ -127,7 +127,7 @@ def _attest_catalog(connection: sa.Connection) -> None:
         (row.relname, row.relkind): row
         for row in connection.execute(application_relation_catalog_statement())
     }
-    if set(relations) != set(v0007.EXPECTED_RELATION_KINDS):
+    if set(relations) != set(contract.EXPECTED_RELATION_KINDS):
         _reject("catalog", "public application relation set or kind is not approved")
 
 
@@ -141,7 +141,7 @@ def _relation_oids(connection: sa.Connection) -> dict[str, int]:
                 "WHERE namespace.nspname = 'public' "
                 "AND class.relname = ANY(:relations)"
             ),
-            {"relations": list(v0007.CATALOG_RELATIONS)},
+            {"relations": list(contract.CATALOG_RELATIONS)},
         )
     }
 
@@ -178,10 +178,10 @@ def _attest_scoped_privileges(
         _reject("schema_privileges", "effective public schema privileges are not approved")
 
     relation_oids = _relation_oids(connection)
-    if set(relation_oids) != set(v0007.CATALOG_RELATIONS):
+    if set(relation_oids) != set(contract.CATALOG_RELATIONS):
         _reject("catalog", "public application relation set is not approved")
     for relation, oid in relation_oids.items():
-        for privilege in v0007.TABLE_PRIVILEGES:
+        for privilege in contract.TABLE_PRIVILEGES:
             actual, grantable = connection.execute(
                 sa.text(
                     "SELECT has_table_privilege(:role, :oid, :privilege), "
@@ -209,10 +209,10 @@ def _attest_scoped_privileges(
             "WHERE namespace.nspname = 'public' AND attribute.attnum > 0 "
             "AND NOT attribute.attisdropped AND class.relname = ANY(:relations)"
         ),
-        {"relations": list(v0007.CATALOG_RELATIONS)},
+        {"relations": list(contract.CATALOG_RELATIONS)},
     )
     for row in columns:
-        for privilege in v0007.COLUMN_PRIVILEGES:
+        for privilege in contract.COLUMN_PRIVILEGES:
             actual, grantable = connection.execute(
                 sa.text(
                     "SELECT has_column_privilege(:role, :oid, :attnum, :privilege), "
@@ -249,7 +249,7 @@ def _attest_functions(connection: sa.Connection, *, application_role: str) -> No
             )
         )
     }
-    if set(functions) != set(v0007.FUNCTION_IDENTITIES):
+    if set(functions) != set(contract.FUNCTION_IDENTITIES):
         _reject("catalog", "public application function set is not approved")
     for identity, row in functions.items():
         execute, grantable = connection.execute(
@@ -303,7 +303,7 @@ def _attest_extension_privileges(
                     )
             continue
 
-        for privilege in v0007.TABLE_PRIVILEGES:
+        for privilege in contract.TABLE_PRIVILEGES:
             actual, grantable = connection.execute(
                 sa.text(
                     "SELECT has_table_privilege(:role, :oid, :privilege), "
@@ -329,7 +329,7 @@ def _attest_extension_privileges(
             {"oid": row.oid},
         )
         for column in columns:
-            for privilege in v0007.COLUMN_PRIVILEGES:
+            for privilege in contract.COLUMN_PRIVILEGES:
                 actual, grantable = connection.execute(
                     sa.text(
                         "SELECT has_column_privilege(:role, :oid, :attnum, :privilege), "
@@ -375,14 +375,14 @@ def _attest_extension_privileges(
             ),
             {
                 "role": application_role,
-                "group": v0007.APPLICATION_GROUP,
+                "group": contract.APPLICATION_GROUP,
                 "oid": row.oid,
             },
         ).one()
         approved_public = (
             row.extname,
             row.extversion,
-        ) in v0007.APPROVED_PUBLIC_EXECUTE_EXTENSIONS and bool(public_execute)
+        ) in contract.APPROVED_PUBLIC_EXECUTE_EXTENSIONS and bool(public_execute)
         if grantable or direct_execute or (execute and not approved_public):
             _reject(
                 "extension_privileges",
@@ -393,7 +393,7 @@ def _attest_extension_privileges(
 def attest_runtime_database(
     connection: sa.Connection, *, target: DatabaseTarget
 ) -> None:
-    """Attest the runtime session and effective revision 0007 privilege surface once."""
+    """Attest the runtime session and effective revision 0008 privilege surface once."""
     try:
         _attest_identity_and_revision(connection, target=target)
         _attest_roles(connection, application_role=target.username)

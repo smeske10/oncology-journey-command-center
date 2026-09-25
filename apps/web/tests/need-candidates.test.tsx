@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ getNavigatorNeedCandidates: vi.fn() }));
+const api = vi.hoisted(() => ({ getNavigatorNeedCandidates: vi.fn(), getNeedCreationHistory: vi.fn() }));
 vi.mock("../lib/api-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/api-client")>(), ...api,
 }));
@@ -26,7 +26,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-beforeEach(() => { api.getNavigatorNeedCandidates.mockReset(); });
+beforeEach(() => { api.getNavigatorNeedCandidates.mockReset(); api.getNeedCreationHistory.mockResolvedValue({ proposals: [] }); });
 
 test("shows exact correction evidence and every related need without review decisions", async () => {
   api.getNavigatorNeedCandidates.mockResolvedValue(reports("Patient A"));

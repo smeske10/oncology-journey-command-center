@@ -38,6 +38,7 @@ REVISION_ORDER = (
     "0005_workflow_knowledge_audit",
     "0006_navigator_closed_loop",
     "0007_database_least_privilege",
+    "0008_need_creation_approval",
 )
 
 MIGRATION_0005_TABLES = (

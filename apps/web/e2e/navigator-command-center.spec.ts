@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/navigator/need-creation-proposals", (route) => route.fulfill({
+    contentType: "application/json", body: JSON.stringify({ proposals: [] }),
+  }));
   await page.route("**/api/v1/navigator/need-candidates", (route) => route.fulfill({
     contentType: "application/json", body: JSON.stringify({ candidates: [], unavailable: [] }),
   }));
@@ -26,7 +29,7 @@ test("transportation evidence is discoverable with an empty work queue", async (
   const preview = page.getByRole("region", { name: "Transportation reports to review" });
   await expect(preview.getByRole("heading", { name: "Synthetic patient with new report" })).toBeVisible();
   await expect(preview.getByText("yes", { exact: true })).toBeVisible();
-  await expect(preview.getByRole("button")).toHaveCount(1);
+  await expect(preview.getByRole("button", { name: "Prepare approval review" })).toBeDisabled();
   await preview.getByRole("button", { name: "Refresh transportation reports" }).click();
   await expect(preview.getByRole("article")).toHaveCount(1);
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);

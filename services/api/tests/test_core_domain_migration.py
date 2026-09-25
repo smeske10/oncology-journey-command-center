@@ -162,6 +162,8 @@ def test_initial_migration_is_an_explicit_schema_snapshot() -> None:
         path.read_text(encoding="utf-8") for path in sorted(MIGRATION_PATH.parent.glob("*.py"))
     )
     for table in Base.metadata.tables.values():
+        if table.name.startswith("need_creation_"):
+            continue  # This test deliberately renders the immutable schema through 0006.
         assert f'"{table.name}"' in migration_sources
         assert f"CREATE TABLE {table.name}" in sql
         for constraint in table.constraints:

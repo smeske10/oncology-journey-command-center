@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { getNavigatorNeedCandidates, type NavigatorNeedCandidatesResponse } from "../../lib/api-client";
+import { getNavigatorNeedCandidates, getNeedCreationHistory, type NeedCreationHistory, type NavigatorNeedCandidatesResponse } from "../../lib/api-client";
+import { NeedCreationReview, PrepareNeedCreation } from "./need-creation";
 
 type RelatedNeed = NavigatorNeedCandidatesResponse["candidates"][number]["linked_needs"][number];
 
@@ -17,6 +18,9 @@ export function NeedCandidates({ enabled }: { enabled: boolean }) {
   const [data, setData] = useState<NavigatorNeedCandidatesResponse>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<NeedCreationHistory>();
+  const [historyError, setHistoryError] = useState("");
+  const [notice, setNotice] = useState("");
   const generation = useRef(0);
   const controller = useRef<AbortController | undefined>(undefined);
 
@@ -26,11 +30,20 @@ export function NeedCandidates({ enabled }: { enabled: boolean }) {
     controller.current = active;
     const request = ++generation.current;
     setData(undefined);
+    setHistory(undefined);
+    setHistoryError("");
     setError("");
     setLoading(true);
     try {
-      const response = await getNavigatorNeedCandidates(active.signal);
+      const [response, historyResult] = await Promise.all([
+        getNavigatorNeedCandidates(active.signal),
+        getNeedCreationHistory(active.signal).then((value) => ({ value }), () => ({ value: undefined })),
+      ]);
       if (!active.signal.aborted && generation.current === request) setData(response);
+      if (!active.signal.aborted && generation.current === request) {
+        setHistory(historyResult.value);
+        if (!historyResult.value) setHistoryError("Approval history could not be loaded. Refresh to recover saved decisions.");
+      }
     } catch {
       if (!active.signal.aborted && generation.current === request) {
         setError("Transportation reports could not be loaded. Refresh to try again.");
@@ -50,10 +63,13 @@ export function NeedCandidates({ enabled }: { enabled: boolean }) {
     };
   }, [enabled, refresh]);
 
+  function changed(message: string) { setNotice(message); void refresh(); }
+
   return (
     <section aria-label="Transportation reports to review" style={panelStyle}>
       <h2>Transportation reports to review</h2>
-      <p>Synthetic evidence preview only. Viewing or refreshing creates no need, task, approval, outcome, or saved review decision.</p>
+      <p>Synthetic reports only. Viewing or refreshing creates no records. An explicit navigator approval creates one reported need from the reviewed evidence.</p>
+      {notice && <p role="status">{notice}</p>}
       <button type="button" disabled={!enabled} onClick={() => void refresh()} style={buttonStyle}>
         Refresh transportation reports
       </button>
@@ -76,8 +92,17 @@ export function NeedCandidates({ enabled }: { enabled: boolean }) {
           </details>
           <RelatedNeeds title="Needs linked to this check-in chain" needs={candidate.linked_needs} />
           <RelatedNeeds title="Other transportation needs in this episode" needs={candidate.other_transportation_needs} />
+          {candidate.linked_needs.length > 0 ? <p>This check-in chain already has a reported need.</p> :
+            history && !history.proposals.some((p) => p.chain_root_id === candidate.chain_root_id && p.state === "pending") &&
+              <PrepareNeedCreation rootId={candidate.chain_root_id} submissionId={candidate.source_submission_id} onChanged={changed} />}
         </article>
       ))}
+      <h3>Reported need approval history</h3>
+      {historyError && <p role="alert">{historyError}</p>}
+      {history?.proposals.length === 0 && <p>No reported need proposals yet.</p>}
+      {history?.proposals.map((proposal) => <article key={proposal.id} style={cardStyle}>
+        <NeedCreationReview proposal={proposal} onChanged={changed} />
+      </article>)}
       {data?.unavailable.map((item, index) => (
         <p key={`${item.patient_id}:${item.care_episode_id}:${item.chain_root_id}:${index}`}>
           <strong>{item.patient_display_name}</strong>: {unavailableReasons[item.reason]}

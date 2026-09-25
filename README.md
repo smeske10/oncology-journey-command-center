@@ -52,11 +52,27 @@ A corrected `no` removes the positive preview on refresh; it does not change exi
 Unsupported questionnaires and ambiguous answers or correction lineage produce explicit unavailable
 results. A broken chain never falls back to an earlier positive answer.
 
-Viewing and refreshing create no durable review status, need, task, approval, or outcome. There
-are no approval/decline controls or browser-stored reviewed flags. Refresh clears the previous
-snapshot; failures show an error, and late responses cannot overwrite newer results. The existing
-governed task and outcome workflow remains separate. This is a synthetic portfolio preview, not
-clinical assessment or authorization to create a need.
+Viewing and refreshing create no records. An eligible report offers **Prepare approval review**:
+enter a synthetic rationale, then review the immutable server-derived evidence and choose
+**Approve and create reported need** or **Decline proposal**. One currently authorized navigator
+may both propose and approve. Final approval atomically records the decision, creates one open
+transportation reported need, and writes its audit event. Tasks, messages, priorities, recurrence,
+and outcomes remain separate governed actions.
+
+Creation is limited to one need per correction chain; independent check-ins remain eligible even
+when other transportation needs exist in the episode. A correction committed before approval
+invalidates the proposal, including another `yes`. A correction after creation preserves the
+original need and evidence; approval history shows the latest answer and flags the correction.
+Lost responses can be retried with the same request identity. Authorized stale or duplicate
+approval attempts are saved as refused decisions before returning a conflict.
+
+Migration 0008 adds separate immutable policy, proposal, and decision records. It preserves the
+application's SELECT-only access to `reported_need`; database triggers control creation. The
+command boundary requires READ COMMITTED and serializes correction and authority changes.
+Evidence uses versioned PostgreSQL JSONB text canonicalization and a SHA-256 fingerprint.
+The navigator-only `/v1/navigator/need-creation-proposals` endpoints expose scoped proposal,
+decision, and history operations. This remains a synthetic portfolio demonstration, not clinical
+assessment or production clinical authorization.
 
 ### Deterministic synthetic reset
 
