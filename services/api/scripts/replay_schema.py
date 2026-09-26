@@ -25,6 +25,7 @@ REVISION_ORDER = (
     "0005_workflow_knowledge_audit",
     "0006_navigator_closed_loop",
     "0007_database_least_privilege",
+    "0008_need_creation_approval",
 )
 MIGRATION_0005_TABLES = (
     "agent_run_citation",
@@ -65,7 +66,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _revision_index(revision: str) -> int:
-    normalized = "0007_database_least_privilege" if revision == "head" else revision
+    normalized = "0008_need_creation_approval" if revision == "head" else revision
     try:
         return REVISION_ORDER.index(normalized)
     except ValueError as error:
@@ -76,8 +77,7 @@ def _child_environment(*, application_url: str, migration_url: str) -> dict[str,
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key.upper()
-        not in {"BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL"}
+        if key.upper() not in {"BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL"}
         and not key.upper().startswith("PG")
     }
     environment["DATABASE_URL"] = application_url
@@ -105,9 +105,7 @@ def _upgrade(*, application_url: str, migration_url: str, revision: str) -> None
     )
 
 
-def _render_upgrade(
-    *, application_url: str, migration_url: str, revision_range: str
-) -> str:
+def _render_upgrade(*, application_url: str, migration_url: str, revision_range: str) -> str:
     result = subprocess.run(
         [
             sys.executable,
@@ -132,9 +130,7 @@ def _render_upgrade(
 
 
 def _psycopg_url(url_text: str) -> str:
-    return make_url(url_text).set(drivername="postgresql").render_as_string(
-        hide_password=False
-    )
+    return make_url(url_text).set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 def _sql_literal(value: str) -> str:
@@ -273,7 +269,7 @@ def render_offline_bundle(
             "03-owner.sql",
             "migration",
             "0005_workflow_knowledge_audit",
-            "0007_database_least_privilege",
+            "0008_need_creation_approval",
             migration_text,
             migration_target.username,
         ),
@@ -379,9 +375,7 @@ def replay_schema(
     target_index = _revision_index(revision)
     if target_index == 0:
         return
-    owner_prefix_index = min(
-        target_index, _revision_index("0004_safety_approval_lifecycle")
-    )
+    owner_prefix_index = min(target_index, _revision_index("0004_safety_approval_lifecycle"))
     _upgrade(
         application_url=application_text,
         migration_url=migration_text,

@@ -12,6 +12,7 @@ from app.api.navigator_need_candidates import router as navigator_need_candidate
 from app.api.navigator_outcomes import router as navigator_outcomes_router
 from app.api.navigator_queue import router as navigator_queue_router
 from app.api.navigator_workspace import router as navigator_workspace_router
+from app.api.need_creation import router as need_creation_router
 from app.api.patient_check_ins import router as patient_check_ins_router
 from app.api.patient_follow_ups import router as patient_follow_ups_router
 from app.api.patient_journey import router as patient_journey_router
@@ -48,6 +49,7 @@ app.include_router(patient_follow_ups_router)
 app.include_router(patient_journey_router)
 app.include_router(navigator_queue_router)
 app.include_router(navigator_need_candidates_router)
+app.include_router(need_creation_router)
 app.include_router(navigator_workspace_router)
 app.include_router(navigation_tasks_router)
 app.include_router(navigator_outcomes_router)

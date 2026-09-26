@@ -259,7 +259,7 @@ def _alembic(
 
 @contextmanager
 def _provision_privilege_database(
-    *, revision: str = "head"
+    *, revision: str = "0007_database_least_privilege"
 ) -> Iterator[PrivilegeDatabase]:
     with disposable_database(prefix=DATABASE_PREFIX, migrate_to=revision) as shared:
         yield PrivilegeDatabase(
@@ -1052,7 +1052,7 @@ def test_populated_0006_upgrade_is_privilege_only() -> None:
         finally:
             engine.dispose()
         assert after == before
-        assert version == "0007_database_least_privilege"
+        assert version == "0008_need_creation_approval"
 
 
 def test_invalid_ownership_preflight_preserves_0006_version_and_acl() -> None:
@@ -1375,22 +1375,21 @@ def test_offline_0007_artifact_rolls_back_catalog_drift(object_kind: str) -> Non
             engine.dispose()
 
 
-def test_head_version_and_metadata_check_are_clean(
-    privilege_database: PrivilegeDatabase,
-) -> None:
-    current = _alembic(
-        application_url=privilege_database.application_url,
-        migration_url=privilege_database.migration_url,
-        arguments=["current"],
-    )
-    assert "0007_database_least_privilege (head)" in current.stdout
+def test_head_version_and_metadata_check_are_clean() -> None:
+    with _provision_privilege_database(revision="head") as privilege_database:
+        current = _alembic(
+            application_url=privilege_database.application_url,
+            migration_url=privilege_database.migration_url,
+            arguments=["current"],
+        )
+        assert "0008_need_creation_approval (head)" in current.stdout
 
-    check_result = _alembic(
-        application_url=privilege_database.application_url,
-        migration_url=privilege_database.migration_url,
-        arguments=["check"],
-    )
-    assert "No new upgrade operations detected" in check_result.stdout
+        check_result = _alembic(
+            application_url=privilege_database.application_url,
+            migration_url=privilege_database.migration_url,
+            arguments=["check"],
+        )
+        assert "No new upgrade operations detected" in check_result.stdout
 
 
 def test_0007_online_and_offline_downgrades_refuse_without_acl_output(

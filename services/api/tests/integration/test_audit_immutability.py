@@ -981,7 +981,7 @@ def test_empty_upgrade_reaches_current_head_with_task5_metadata_parity() -> None
             with engine.connect() as connection:
                 assert TASK5_TABLES <= set(inspect(connection).get_table_names())
                 assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-                    "0007_database_least_privilege"
+                    "0008_need_creation_approval"
                 )
             result = _alembic_check(database_url)
         finally:

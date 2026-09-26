@@ -919,6 +919,83 @@ def inspect_integrity(session: Session) -> list[IntegrityViolation]:
         evidence_columns=("audit_event_ids", "issue", "event_count"),
     )
 
+    if session.scalar(text("SELECT to_regclass('public.need_creation_proposal')")):
+        _add_rows(
+            session,
+            violations,
+            category="need_creation_evidence_mismatch",
+            query="""
+                SELECT p.id AS proposal_id, p.evidence_sha256
+                FROM need_creation_proposal p
+                JOIN need_creation_policy policy
+                    ON policy.policy_id=p.policy_id AND policy.version=p.policy_version
+                JOIN check_in_submission source ON source.organization_id=p.organization_id
+                    AND source.id=p.source_submission_id
+                WHERE p.canonical_evidence IS DISTINCT FROM p.evidence::text
+                    OR p.evidence_sha256 IS DISTINCT FROM
+                        encode(sha256(convert_to(p.canonical_evidence,'UTF8')),'hex')
+                    OR p.policy_snapshot IS DISTINCT FROM to_jsonb(policy)
+                    OR p.evidence->>'organization_id' IS DISTINCT FROM p.organization_id::text
+                    OR p.evidence->>'patient_id' IS DISTINCT FROM p.patient_id::text
+                    OR p.evidence->>'care_episode_id' IS DISTINCT FROM p.care_episode_id::text
+                    OR p.evidence->>'chain_root_id' IS DISTINCT FROM p.chain_root_id::text
+                    OR p.evidence->>'source_submission_id'
+                        IS DISTINCT FROM p.source_submission_id::text
+                    OR p.evidence->>'kind' IS DISTINCT FROM 'transportation'
+                    OR p.evidence->>'initial_state' IS DISTINCT FROM 'open'
+                    OR p.evidence->'answer'->>'value' IS DISTINCT FROM 'yes'
+                    OR NOT coalesce(source.answers->'items' @>
+                        jsonb_build_array(p.evidence->'answer'), false)
+            """,
+            identifier_columns=("proposal_id",),
+            evidence_columns=("evidence_sha256",),
+        )
+        _add_rows(
+            session,
+            violations,
+            category="need_creation_result_mismatch",
+            query="""
+                SELECT d.id AS decision_id, d.outcome FROM need_creation_decision d
+                JOIN need_creation_proposal p ON p.organization_id=d.organization_id
+                    AND p.id=d.proposal_id
+                LEFT JOIN reported_need n ON n.organization_id=d.organization_id
+                    AND n.id=d.reported_need_id
+                WHERE d.chain_root_id IS DISTINCT FROM p.chain_root_id OR
+                    (d.outcome='created' AND (d.decision<>'approved' OR n.id IS NULL
+                        OR n.source_submission_id IS DISTINCT FROM p.source_submission_id
+                        OR n.patient_id IS DISTINCT FROM p.patient_id
+                        OR n.care_episode_id IS DISTINCT FROM p.care_episode_id
+                        OR n.kind IS DISTINCT FROM 'transportation'))
+                    OR (d.outcome<>'created' AND d.reported_need_id IS NOT NULL)
+            """,
+            identifier_columns=("decision_id",),
+            evidence_columns=("outcome",),
+        )
+        _add_rows(
+            session,
+            violations,
+            category="need_creation_audit_mismatch",
+            query="""
+                SELECT d.id AS decision_id, count(a.id) AS event_count
+                FROM need_creation_decision d
+                JOIN need_creation_proposal p ON p.organization_id=d.organization_id
+                    AND p.id=d.proposal_id
+                LEFT JOIN audit_event a ON a.organization_id=d.organization_id
+                    AND a.entity_type='need_creation_decision' AND a.entity_id=d.id
+                GROUP BY d.id,p.evidence_sha256
+                HAVING count(a.id)<>1 OR bool_and(
+                    a.actor_user_id=d.authorized_by_user_id AND a.actor_type='user'
+                    AND a.event_type='need_creation_' || d.outcome
+                    AND a.payload->>'proposal_id'=d.proposal_id::text
+                    AND (a.payload->>'reported_need_id')
+                        IS NOT DISTINCT FROM d.reported_need_id::text
+                    AND a.payload->>'evidence_sha256'=p.evidence_sha256
+                ) IS DISTINCT FROM true
+            """,
+            identifier_columns=("decision_id",),
+            evidence_columns=("event_count",),
+        )
+
     return sorted(
         violations,
         key=lambda violation: (

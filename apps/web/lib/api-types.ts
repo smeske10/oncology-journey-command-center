@@ -55,6 +55,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/navigator/need-creation-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Need Creation History */
+        get: operations["get_need_creation_history_v1_navigator_need_creation_proposals_get"];
+        put?: never;
+        /** Create Need Proposal */
+        post: operations["create_need_proposal_v1_navigator_need_creation_proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/navigator/need-creation-proposals/{proposal_id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Need Decision */
+        post: operations["create_need_decision_v1_navigator_need_creation_proposals__proposal_id__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/navigator/needs/{need_id}/outcome-preview": {
         parameters: {
             query?: never;
@@ -932,6 +967,213 @@ export interface components {
              * Format: date-time
              */
             source_submitted_at: string;
+        };
+        /** NeedCreationDecisionCreate */
+        NeedCreationDecisionCreate: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "declined";
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+        };
+        /** NeedCreationDecisionRead */
+        NeedCreationDecisionRead: {
+            /**
+             * Authorized At
+             * Format: date-time
+             */
+            authorized_at: string;
+            /**
+             * Authorized By User Id
+             * Format: uuid
+             */
+            authorized_by_user_id: string;
+            /** Decision */
+            decision: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Qualifying Role Assignment Id
+             * Format: uuid
+             */
+            qualifying_role_assignment_id: string;
+            /** Qualifying Role Snapshot */
+            qualifying_role_snapshot: string;
+            /** Reason */
+            reason: string | null;
+            /** Reported Need Id */
+            reported_need_id: string | null;
+        };
+        /** NeedCreationEvidenceRead */
+        NeedCreationEvidenceRead: {
+            /** Answer */
+            answer: {
+                [key: string]: unknown;
+            };
+            /** Canonicalization */
+            canonicalization: string;
+            /**
+             * Care Episode Id
+             * Format: uuid
+             */
+            care_episode_id: string;
+            /**
+             * Chain Root Id
+             * Format: uuid
+             */
+            chain_root_id: string;
+            /**
+             * Check In Definition Id
+             * Format: uuid
+             */
+            check_in_definition_id: string;
+            /** Definition Version */
+            definition_version: number;
+            /** Display Text */
+            display_text: string;
+            /** Initial State */
+            initial_state: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Question */
+            question: {
+                [key: string]: unknown;
+            };
+            /** Questionnaire Version */
+            questionnaire_version: string;
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Source Submission Id
+             * Format: uuid
+             */
+            source_submission_id: string;
+        };
+        /** NeedCreationHistoryRead */
+        NeedCreationHistoryRead: {
+            /** Proposals */
+            proposals: components["schemas"]["NeedCreationProposalRead"][];
+        };
+        /** NeedCreationProposalCreate */
+        NeedCreationProposalCreate: {
+            /**
+             * Chain Root Id
+             * Format: uuid
+             */
+            chain_root_id: string;
+            /** Rationale */
+            rationale: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Source Submission Id
+             * Format: uuid
+             */
+            source_submission_id: string;
+        };
+        /** NeedCreationProposalRead */
+        NeedCreationProposalRead: {
+            /** Canonical Evidence */
+            canonical_evidence: string;
+            /**
+             * Care Episode Id
+             * Format: uuid
+             */
+            care_episode_id: string;
+            /**
+             * Chain Root Id
+             * Format: uuid
+             */
+            chain_root_id: string;
+            /** Current Answer Text */
+            current_answer_text: string;
+            /** Current Source Submission Id */
+            current_source_submission_id: string | null;
+            /** Decisions */
+            decisions: components["schemas"]["NeedCreationDecisionRead"][];
+            evidence: components["schemas"]["NeedCreationEvidenceRead"];
+            /** Evidence Sha256 */
+            evidence_sha256: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Patient Display Name */
+            patient_display_name: string;
+            /**
+             * Patient Id
+             * Format: uuid
+             */
+            patient_id: string;
+            /** Policy Snapshot */
+            policy_snapshot: {
+                [key: string]: unknown;
+            };
+            /**
+             * Proposed At
+             * Format: date-time
+             */
+            proposed_at: string;
+            /**
+             * Proposed By User Id
+             * Format: uuid
+             */
+            proposed_by_user_id: string;
+            /**
+             * Proposer Role Assignment Id
+             * Format: uuid
+             */
+            proposer_role_assignment_id: string;
+            /** Rationale */
+            rationale: string;
+            /** Source Changed */
+            source_changed: boolean;
+            /**
+             * Source Submission Id
+             * Format: uuid
+             */
+            source_submission_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "created" | "declined" | "stale" | "already_created";
         };
         /** NeedDetail */
         NeedDetail: {
@@ -1994,6 +2236,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NavigatorNeedCandidatesRead"];
+                };
+            };
+        };
+    };
+    get_need_creation_history_v1_navigator_need_creation_proposals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedCreationHistoryRead"];
+                };
+            };
+        };
+    };
+    create_need_proposal_v1_navigator_need_creation_proposals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NeedCreationProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedCreationProposalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_need_decision_v1_navigator_need_creation_proposals__proposal_id__decisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NeedCreationDecisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NeedCreationDecisionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

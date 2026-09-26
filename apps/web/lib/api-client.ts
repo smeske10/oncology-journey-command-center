@@ -7,6 +7,26 @@ export type NavigatorQueueResponse = paths["/v1/navigator/queue"]["get"]["respon
 export type NavigatorPatientCaseResponse = paths["/v1/navigator/patients/{patient_id}/case"]["get"]["responses"][200]["content"]["application/json"];
 export type NavigatorNeedWorkspaceResponse = components["schemas"]["NavigatorNeedWorkspaceRead"];
 export type NavigatorNeedCandidatesResponse = components["schemas"]["NavigatorNeedCandidatesRead"];
+export type NeedCreationProposal = components["schemas"]["NeedCreationProposalRead"];
+export type NeedCreationProposalInput = components["schemas"]["NeedCreationProposalCreate"];
+export type NeedCreationDecisionInput = components["schemas"]["NeedCreationDecisionCreate"];
+export type NeedCreationHistory = components["schemas"]["NeedCreationHistoryRead"];
+
+export async function getNeedCreationHistory(signal?: AbortSignal): Promise<NeedCreationHistory> {
+  return request("/api/v1/navigator/need-creation-proposals", { signal, cache: "no-store" });
+}
+
+export async function createNeedCreationProposal(payload: NeedCreationProposalInput): Promise<NeedCreationProposal> {
+  return request("/api/v1/navigator/need-creation-proposals", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+  });
+}
+
+export async function recordNeedCreationDecision(proposalId: string, payload: NeedCreationDecisionInput): Promise<components["schemas"]["NeedCreationDecisionRead"]> {
+  return request(`/api/v1/navigator/need-creation-proposals/${encodeURIComponent(proposalId)}/decisions`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+  });
+}
 export type ApprovalDecisionInput = components["schemas"]["ApprovalDecisionCreate"];
 export type TaskCommandResponse = components["schemas"]["TaskCommandRead"];
 export type OutcomePreviewResponse = components["schemas"]["OutcomePreviewRead"];

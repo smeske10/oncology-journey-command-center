@@ -1144,7 +1144,7 @@ def test_reset_requires_explicit_safe_target_then_seeds_twice_and_audits() -> No
         with Session(engine) as session:
             assert session.scalar(text("SELECT to_regclass('public.reset_marker')")) is None
             assert session.scalar(text("SELECT version_num FROM alembic_version")) == (
-                "0007_database_least_privilege"
+                "0008_need_creation_approval"
             )
             assert inspect_integrity(session) == []
             assert session.scalar(

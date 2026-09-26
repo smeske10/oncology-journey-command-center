@@ -149,7 +149,7 @@ def test_disposable_database_replays_head_and_drops_normally(
 ) -> None:
     with disposable_database(prefix="ojcc_migration_test_", migrate_to="head") as database:
         current = run_alembic(database, ["current"])
-        assert "0007_database_least_privilege (head)" in current.stdout
+        assert "0008_need_creation_approval (head)" in current.stdout
         name = database.name
 
     output = capsys.readouterr().out

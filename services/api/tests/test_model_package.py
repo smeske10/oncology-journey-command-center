@@ -47,6 +47,9 @@ EXPECTED_RECONCILED_TABLES_THROUGH_TASK_FIVE = {
     "agent_run_citation",
     "follow_up_request",
     "follow_up_response",
+    "need_creation_policy",
+    "need_creation_proposal",
+    "need_creation_decision",
 }
 
 

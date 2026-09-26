@@ -501,7 +501,7 @@ def test_0007_preserves_unbound_execution_history_for_every_task_state() -> None
             "cancelled",
         }
         assert all(row[5] is None for row in after)
-        assert version == "0007_database_least_privilege"
+        assert version == "0008_need_creation_approval"
 
 
 def test_0006_downgrade_refuses_to_discard_approved_execution_history() -> None:

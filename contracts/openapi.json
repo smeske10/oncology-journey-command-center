@@ -1447,6 +1447,396 @@
         "title": "NeedCandidateRead",
         "type": "object"
       },
+      "NeedCreationDecisionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "approved",
+              "declined"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "decision"
+        ],
+        "title": "NeedCreationDecisionCreate",
+        "type": "object"
+      },
+      "NeedCreationDecisionRead": {
+        "properties": {
+          "authorized_at": {
+            "format": "date-time",
+            "title": "Authorized At",
+            "type": "string"
+          },
+          "authorized_by_user_id": {
+            "format": "uuid",
+            "title": "Authorized By User Id",
+            "type": "string"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "proposal_id": {
+            "format": "uuid",
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "qualifying_role_assignment_id": {
+            "format": "uuid",
+            "title": "Qualifying Role Assignment Id",
+            "type": "string"
+          },
+          "qualifying_role_snapshot": {
+            "title": "Qualifying Role Snapshot",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reported_need_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Need Id"
+          }
+        },
+        "required": [
+          "id",
+          "proposal_id",
+          "authorized_by_user_id",
+          "qualifying_role_assignment_id",
+          "qualifying_role_snapshot",
+          "decision",
+          "reason",
+          "outcome",
+          "reported_need_id",
+          "authorized_at"
+        ],
+        "title": "NeedCreationDecisionRead",
+        "type": "object"
+      },
+      "NeedCreationEvidenceRead": {
+        "properties": {
+          "answer": {
+            "additionalProperties": true,
+            "title": "Answer",
+            "type": "object"
+          },
+          "canonicalization": {
+            "title": "Canonicalization",
+            "type": "string"
+          },
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "chain_root_id": {
+            "format": "uuid",
+            "title": "Chain Root Id",
+            "type": "string"
+          },
+          "check_in_definition_id": {
+            "format": "uuid",
+            "title": "Check In Definition Id",
+            "type": "string"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "integer"
+          },
+          "display_text": {
+            "title": "Display Text",
+            "type": "string"
+          },
+          "initial_state": {
+            "title": "Initial State",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "question": {
+            "additionalProperties": true,
+            "title": "Question",
+            "type": "object"
+          },
+          "questionnaire_version": {
+            "title": "Questionnaire Version",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_submission_id": {
+            "format": "uuid",
+            "title": "Source Submission Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "canonicalization",
+          "organization_id",
+          "patient_id",
+          "care_episode_id",
+          "chain_root_id",
+          "source_submission_id",
+          "check_in_definition_id",
+          "definition_version",
+          "questionnaire_version",
+          "question",
+          "answer",
+          "display_text",
+          "kind",
+          "initial_state"
+        ],
+        "title": "NeedCreationEvidenceRead",
+        "type": "object"
+      },
+      "NeedCreationHistoryRead": {
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/NeedCreationProposalRead"
+            },
+            "title": "Proposals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proposals"
+        ],
+        "title": "NeedCreationHistoryRead",
+        "type": "object"
+      },
+      "NeedCreationProposalCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "chain_root_id": {
+            "format": "uuid",
+            "title": "Chain Root Id",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "source_submission_id": {
+            "format": "uuid",
+            "title": "Source Submission Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "chain_root_id",
+          "source_submission_id",
+          "rationale"
+        ],
+        "title": "NeedCreationProposalCreate",
+        "type": "object"
+      },
+      "NeedCreationProposalRead": {
+        "properties": {
+          "canonical_evidence": {
+            "title": "Canonical Evidence",
+            "type": "string"
+          },
+          "care_episode_id": {
+            "format": "uuid",
+            "title": "Care Episode Id",
+            "type": "string"
+          },
+          "chain_root_id": {
+            "format": "uuid",
+            "title": "Chain Root Id",
+            "type": "string"
+          },
+          "current_answer_text": {
+            "title": "Current Answer Text",
+            "type": "string"
+          },
+          "current_source_submission_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Source Submission Id"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/NeedCreationDecisionRead"
+            },
+            "title": "Decisions",
+            "type": "array"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/NeedCreationEvidenceRead"
+          },
+          "evidence_sha256": {
+            "title": "Evidence Sha256",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "patient_display_name": {
+            "title": "Patient Display Name",
+            "type": "string"
+          },
+          "patient_id": {
+            "format": "uuid",
+            "title": "Patient Id",
+            "type": "string"
+          },
+          "policy_snapshot": {
+            "additionalProperties": true,
+            "title": "Policy Snapshot",
+            "type": "object"
+          },
+          "proposed_at": {
+            "format": "date-time",
+            "title": "Proposed At",
+            "type": "string"
+          },
+          "proposed_by_user_id": {
+            "format": "uuid",
+            "title": "Proposed By User Id",
+            "type": "string"
+          },
+          "proposer_role_assignment_id": {
+            "format": "uuid",
+            "title": "Proposer Role Assignment Id",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "source_changed": {
+            "title": "Source Changed",
+            "type": "boolean"
+          },
+          "source_submission_id": {
+            "format": "uuid",
+            "title": "Source Submission Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "created",
+              "declined",
+              "stale",
+              "already_created"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "patient_id",
+          "patient_display_name",
+          "care_episode_id",
+          "chain_root_id",
+          "source_submission_id",
+          "proposed_by_user_id",
+          "proposer_role_assignment_id",
+          "proposed_at",
+          "rationale",
+          "evidence",
+          "canonical_evidence",
+          "evidence_sha256",
+          "policy_snapshot",
+          "state",
+          "source_changed",
+          "current_source_submission_id",
+          "current_answer_text",
+          "decisions"
+        ],
+        "title": "NeedCreationProposalRead",
+        "type": "object"
+      },
       "NeedDetail": {
         "properties": {
           "inherited": {
@@ -4002,6 +4392,119 @@
           }
         },
         "summary": "Get Navigator Need Candidates",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/need-creation-proposals": {
+      "get": {
+        "operationId": "get_need_creation_history_v1_navigator_need_creation_proposals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedCreationHistoryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Need Creation History",
+        "tags": [
+          "navigator"
+        ]
+      },
+      "post": {
+        "operationId": "create_need_proposal_v1_navigator_need_creation_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NeedCreationProposalCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedCreationProposalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Need Proposal",
+        "tags": [
+          "navigator"
+        ]
+      }
+    },
+    "/v1/navigator/need-creation-proposals/{proposal_id}/decisions": {
+      "post": {
+        "operationId": "create_need_decision_v1_navigator_need_creation_proposals__proposal_id__decisions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NeedCreationDecisionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NeedCreationDecisionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Need Decision",
         "tags": [
           "navigator"
         ]

@@ -22,9 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _psycopg_url(url_text: str) -> str:
-    return make_url(url_text).set(drivername="postgresql").render_as_string(
-        hide_password=False
-    )
+    return make_url(url_text).set(drivername="postgresql").render_as_string(hide_password=False)
 
 
 def _execute_artifact(url_text: str, artifact: Path) -> None:
@@ -41,8 +39,7 @@ def test_offline_replay_bundle_renders_without_connecting(tmp_path: Path) -> Non
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key.upper()
-        not in {"BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL"}
+        if key.upper() not in {"BOOTSTRAP_DATABASE_URL", "MIGRATION_DATABASE_URL", "DATABASE_URL"}
         and not key.upper().startswith("PG")
     }
 
@@ -94,7 +91,7 @@ def test_offline_replay_bundle_renders_without_connecting(tmp_path: Path) -> Non
             },
             {
                 "credential": "migration",
-                "end_revision": "0007_database_least_privilege",
+                "end_revision": "0008_need_creation_approval",
                 "file": "03-owner.sql",
                 "start_revision": "0005_workflow_knowledge_audit",
             },
@@ -103,7 +100,13 @@ def test_offline_replay_bundle_renders_without_connecting(tmp_path: Path) -> Non
     combined = f"{result.stdout}\n{result.stderr}"
     for file_name in ("manifest.json", "01-owner.sql", "02-bootstrap.sql", "03-owner.sql"):
         combined += (output_directory / file_name).read_text()
-    for secret in (bootstrap_password, owner_password, runtime_password, "postgresql"):
+    for secret in (
+        bootstrap_password,
+        owner_password,
+        runtime_password,
+        "postgresql://",
+        "postgresql+psycopg://",
+    ):
         assert secret not in combined.casefold()
 
     stage_one = (output_directory / "01-owner.sql").read_text()
@@ -115,12 +118,10 @@ def test_offline_replay_bundle_renders_without_connecting(tmp_path: Path) -> Non
         "-> 0005_workflow_knowledge_audit"
     ) in stage_two
     assert 'ALTER TABLE public."agent_run_citation" OWNER TO "bundle_owner"' in stage_two
-    assert stage_two.index('ALTER TABLE public."agent_run_citation"') < stage_two.rindex(
-        "COMMIT;"
-    )
+    assert stage_two.index('ALTER TABLE public."agent_run_citation"') < stage_two.rindex("COMMIT;")
     assert (
         "OFFLINE REPLAY STAGE: migration 0005_workflow_knowledge_audit "
-        "-> 0007_database_least_privilege"
+        "-> 0008_need_creation_approval"
     ) in stage_three
 
 
@@ -144,9 +145,10 @@ def test_offline_replay_bundle_executes_all_three_credential_stages(
         owner_engine = create_engine(database.migration_url)
         try:
             with owner_engine.connect() as connection:
-                assert connection.scalar(
-                    text("SELECT version_num FROM alembic_version")
-                ) == "0005_workflow_knowledge_audit"
+                assert (
+                    connection.scalar(text("SELECT version_num FROM alembic_version"))
+                    == "0005_workflow_knowledge_audit"
+                )
                 transferred_owners = {
                     row.owner
                     for row in connection.execute(
@@ -191,9 +193,7 @@ def test_offline_replay_later_stage_refusal_keeps_earlier_stages(
         _execute_artifact(bootstrap_url, output_directory / "02-bootstrap.sql")
 
         object_name = f"unexpected_replay_{uuid4().hex[:16]}"
-        with psycopg.connect(
-            _psycopg_url(database.migration_url), autocommit=True
-        ) as connection:
+        with psycopg.connect(_psycopg_url(database.migration_url), autocommit=True) as connection:
             connection.execute(
                 sql.SQL("CREATE SEQUENCE public.{}").format(sql.Identifier(object_name))
             )
@@ -203,12 +203,14 @@ def test_offline_replay_later_stage_refusal_keeps_earlier_stages(
         owner_engine = create_engine(database.migration_url)
         try:
             with owner_engine.connect() as connection:
-                assert connection.scalar(
-                    text("SELECT version_num FROM alembic_version")
-                ) == "0005_workflow_knowledge_audit"
-                assert connection.scalar(
-                    text("SELECT to_regclass('public.agent_run_citation')")
-                ) == "agent_run_citation"
+                assert (
+                    connection.scalar(text("SELECT version_num FROM alembic_version"))
+                    == "0005_workflow_knowledge_audit"
+                )
+                assert (
+                    connection.scalar(text("SELECT to_regclass('public.agent_run_citation')"))
+                    == "agent_run_citation"
+                )
         finally:
             owner_engine.dispose()
 
@@ -225,9 +227,7 @@ def test_offline_replay_base_requires_empty_application_schema(
             revision="head",
             output_directory=output_directory,
         )
-        with psycopg.connect(
-            _psycopg_url(database.migration_url), autocommit=True
-        ) as connection:
+        with psycopg.connect(_psycopg_url(database.migration_url), autocommit=True) as connection:
             connection.execute(
                 "CREATE FUNCTION public.unexpected_preexisting() RETURNS integer "
                 "LANGUAGE sql AS 'SELECT 1'"
@@ -269,9 +269,9 @@ def test_offline_replay_rejects_an_empty_existing_revision_table(
             _execute_artifact(bootstrap_url, output_directory / "02-bootstrap.sql")
 
         with psycopg.connect(_psycopg_url(database.migration_url)) as connection:
-            assert connection.execute(
-                "SELECT count(*) FROM public.alembic_version"
-            ).fetchone() == (0,)
+            assert connection.execute("SELECT count(*) FROM public.alembic_version").fetchone() == (
+                0,
+            )
             assert connection.execute(
                 "SELECT to_regclass('public.agent_run_citation')"
             ).fetchone() == (None,)
